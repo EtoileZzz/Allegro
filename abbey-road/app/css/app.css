@@ -2386,6 +2386,60 @@ body.dev-outline .segmented, body.dev-outline .btn, body.dev-outline .chip-btn {
 .qa-pane[hidden] { display: none; }
 .qa-mode { margin-bottom: 12px; }
 
+/* ── 调课弹窗（v0.4.1a）：紧凑周表选目标日 ───────────────────
+   一次只画 4 周，行高收紧到 30px；只画有课的格子，空档留白表示"可以放"。
+   独立命名 cm-shift-*，与周表的 .wt-* 完全隔离，互不影响。 */
+.cm-shift { --cm-row: 30px; }
+.cm-shift-src {
+  margin-bottom: 10px; padding: 8px 10px; border-radius: 10px;
+  background: var(--bg-subtle); font-size: 12.5px; color: var(--text-secondary);
+}
+.cm-shift-src b { color: var(--text-primary); }
+.cm-shift-nav {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.cm-shift-week { font-size: 12.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.cm-shift-grid {
+  max-height: 46vh; overflow: auto; border-radius: 12px;
+  background: var(--bg-subtle); padding: 8px;
+  overscroll-behavior: contain;
+}
+.cm-shift-wk {
+  font-size: 11.5px; font-weight: 620; color: var(--text-tertiary);
+  margin: 8px 0 4px; padding-left: 2px;
+}
+.cm-shift-wk:first-child { margin-top: 0; }
+.cm-shift-row { display: grid; grid-template-columns: 54px repeat(7, minmax(0, 1fr)); gap: 3px; margin-bottom: 3px; }
+.cm-shift-cell {
+  min-width: 0; height: var(--cm-row); border-radius: 6px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden; font-size: 9.5px; line-height: 1.1;
+}
+.cm-shift-head .cm-shift-cell { height: 30px; background: transparent; }
+.cm-shift-corner { background: transparent; }
+.cm-shift-day { color: var(--text-secondary); gap: 0; }
+.cm-shift-day .w { font-size: 10px; }
+.cm-shift-day .n { font-size: 12px; font-weight: 620; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.cm-shift-day.today .w, .cm-shift-day.today .n { color: var(--accent); }
+.cm-shift-time {
+  align-items: flex-start; justify-content: center; padding-left: 2px;
+  color: var(--text-secondary); background: transparent;
+}
+.cm-shift-time .p { font-size: 9.5px; }
+.cm-shift-time .t { font-size: 8.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.cm-shift-slot { cursor: pointer; }
+.cm-shift-slot.free { background: rgba(127, 127, 127, .10); color: var(--text-tertiary); }
+.cm-shift-slot.other {
+  background: transparent; border: 1px dashed var(--glass-stroke);
+  color: var(--text-secondary);
+}
+.cm-shift-slot.mine { border: 1px solid rgba(0, 0, 0, .12); font-weight: 620; }
+.cm-shift-slot .n { padding: 0 2px; text-align: center; word-break: break-all; max-height: 100%; overflow: hidden; }
+.cm-shift-slot.picked {
+  outline: 2px solid var(--accent); outline-offset: -1px;
+}
+.cm-shift-slot:active { transform: scale(.97); }
+
 /* 长按等待中的空档：给一点视觉预告 */
 .wt-empty.lp-wait {
   background: var(--accent-soft);
@@ -3068,11 +3122,13 @@ body[data-perf="min"] .blob { display: none; }
   overflow: hidden;            /* 卡片自己不再滚动 */
   padding: 0;                  /* 内边距下放到三段 */
   /**
-   * 只有两条绝对定位的覆盖层（标题带 / 按钮条）带模糊。
-   * 卡片本身与内容层都不加 backdrop-filter：
-   *   · 卡片一旦有，Chromium 会把它当"背景根"，覆盖层的模糊就采不到内容（变成看穿原文的"鬼影"）；
-   *   · 内容层更不该有（那会让顶/底部的行始终处于模糊区）。
-   * 卡片保持半透明即可，页面背后的模糊由遮罩层（.modal-scrim）负责。
+   * 模糊分层（v0.4.1a 起）：
+   *   · 卡片自己带 backdrop-filter（见下方）—— 它负责"把身后的页面糊开"，
+   *     但因此会成为自己的"背景根"，两条带子的模糊只能采卡片内部内容；
+   *   · 两条带子（.modal-head / .modal-actions）仍然各自带模糊，负责
+   *     内容从下面滚过时被糊掉。
+   *   （历史注记：早前试过"只有两条带子带模糊、卡片不带"，原因是卡片当背景根
+   *     会让带子采不到页面内容；代价是背景几乎看不出被糊过，故改回卡片带模糊。）
    */
   /* 定稿（可在「设置 → 开发者模式」调）：内容层 90% 不透明
      ⚠ 绝对不能用 light-dark()：旧版 Android WebView 不认识这个函数时**不是回退，
@@ -3080,8 +3136,15 @@ body[data-perf="min"] .blob { display: none; }
      表现为「弹窗变透明」（v0.4.1 的真实事故，已实测确认）。
      统一写法：浅色值写在这里，深色由 body[data-theme="dark"] 覆盖。 */
   background: rgba(255, 255, 255, var(--modal-card-a, .9));
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  /**
+   * v0.4.1a：卡片**自己**把身后的页面糊开 —— 这才是"奶油般化开"的来源。
+   * 原来这里是 backdrop-filter: none，只靠遮罩那 4px，背景几乎看不出被糊过。
+   * 注意：卡片一旦有 backdrop-filter 就会成为自己的"背景根"，
+   * 两条带子（.modal-head / .modal-actions）的模糊会改为采卡片内部内容，
+   * 观感变化已实测确认可接受。页面其它任何模糊都不动。
+   */
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
+  backdrop-filter: blur(22px) saturate(1.4);
 }
 /* 0.4.2：桌面卡片「功能显示预设」选择器 */
 .wg-preset { margin: -4px 0 var(--sp-3); }

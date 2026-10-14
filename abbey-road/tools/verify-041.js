@@ -586,12 +586,19 @@ async function main() {
       cardFlex: cb.display === 'flex', cardHidden: cb.overflow === 'hidden',
       bodyAuto: bb.overflow === 'auto',
       barsOverlay: ab.position === 'absolute' && hb.position === 'absolute',
-      // A 方案：两条带自己是磨砂玻璃（带 blur），内容区没有任何模糊层
+      // 两条带自己是磨砂玻璃（带 blur）
       barsBlur: /blur\\(/.test(ab.backdropFilter || ab.webkitBackdropFilter || '')
         && /blur\\(/.test(hb.backdropFilter || hb.webkitBackdropFilter || ''),
-      noBlurElsewhere:
-        (cb.backdropFilter || cb.webkitBackdropFilter || 'none') === 'none'
-        && (bb.backdropFilter || bb.webkitBackdropFilter || 'none') === 'none'
+      /**
+       * v0.4.1a 起卡片**自己**带模糊 —— 这是用户明确要求的
+       * "窗口背后的内容像奶油一样化开"（原来只有遮罩 4px，几乎看不出被糊过）。
+       * 所以这里不再要求卡片无模糊，改为要求：
+       *   cardBlur     卡片有模糊（新契约）
+       *   contentClear 内容层（.modal-body / .modal-scroll）不得有模糊（老契约不变）
+       */
+      cardBlur: /blur\\(/.test(cb.backdropFilter || cb.webkitBackdropFilter || ''),
+      contentClear:
+        (bb.backdropFilter || bb.webkitBackdropFilter || 'none') === 'none'
         && (sb.backdropFilter || sb.webkitBackdropFilter || 'none') === 'none',
       fades: document.querySelectorAll('.m-fade').length,
       // 限位 = 带高 + 余量(10px)
@@ -601,9 +608,9 @@ async function main() {
       barsAtEdges: Math.abs(a0.bottom - c0.bottom) <= 2 && Math.abs(h0.top - c0.top) <= 2
     };
   })()`);
-  ok('R12 弹窗（方案 A）：两条带自己是磨砂玻璃并糊住穿过它的内容；内容区无模糊；限位=带高+余量',
+  ok('R12 弹窗：卡片把身后背景糊开（奶油化开）+ 两条带磨砂 + 内容层无模糊；三段式与吸底限位正确',
     modal1.cardFlex && modal1.cardHidden && modal1.bodyAuto && modal1.barsOverlay && modal1.barsBlur
-    && modal1.noBlurElsewhere === true && modal1.fades === 0 && modal1.insetOk === true
+    && modal1.cardBlur === true && modal1.contentClear === true && modal1.fades === 0 && modal1.insetOk === true
     && modal1.firstClearTop === true && modal1.lastClearBottom === true && modal1.barsAtEdges === true,
     JSON.stringify(modal1));
 

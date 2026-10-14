@@ -277,6 +277,20 @@ var AR = window.AR || (window.AR = {});
 
     AR.Store.applyMerge(payload, {});
 
+    /**
+     * 个性化设置是"挂在 body 上的派生状态"（data-theme / data-perf / data-glass /
+     * 行内 CSS 变量 / 动效表），光把数据合并进来界面不会自己变 ——
+     * 必须显式按新设置重套一遍，否则用户导入后会觉得"设置没导过来"。
+     * 只调用存在的方法，老版本外壳缺哪个也不报错。
+     */
+    try {
+      if (AR.UI.applyTheme) { AR.UI.applyTheme(); }
+      if (AR.UI.applyModalTuning) { AR.UI.applyModalTuning(); }
+      if (AR.UI.applyPerf) { AR.UI.applyPerf(); }
+      if (AR.UI.applyGlass) { AR.UI.applyGlass(); }
+      if (AR.UI.applyMotion) { AR.UI.applyMotion(); }
+    } catch (e) { /* 外观重套失败不该让导入整体失败 */ }
+
     var semAfter = AR.Store.currentSemester();
     var periodsAfter = AR.Store.periodsOf(semAfter ? semAfter.id : null).length;
     var S = AR.Store.get();

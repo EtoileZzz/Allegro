@@ -3868,6 +3868,287 @@ var AR = window.AR || (window.AR = {});
   /* ── 周表长按空白格：快速新增 / 调休 ─────────────────────── */
 
   /**
+   * 单节课「调到另一天」（调课 / 借课）。
+   *
+   * 与上面按天整体的 openDayShift 同一套数据语义，只是作用到**一节课**：
+   *   mode='move' → 来源日写 cancel（原日不再上），目标日写 move（newDate = 目标日）
+   *   mode='copy' → 目标日写一条 makeup（两边都上）
+   * 全都是"单次改动"覆盖记录，**不动课程模板** —— 所以下周照旧，
+   * 周表 / 今日页 / 冲突检测 / 导出配置 / 跨设备合并全都自动跟上。
+   *
+   * 关键边界（都是踩过的坑）：
+   *   · 来源日期取 item.date（这一天**实际生效**的日期），不是用模板星期推算的
+   *     —— 否则给已经搬过的课再调一次，会凭空多出一条挂在旧日期的幽灵记录；
+   *   · 节次 / 时间沿用"当天生效值"（item.* 已是覆盖后的结果）；
+   *   · 目标日若已存在同一 block 的覆盖，就地改写它，不叠加第二条。
+   *
+   * @param item  dayItems/周表里的条目（含 block / course / override / date / start / end）
+   * @param targetDate 目标日期（Date）
+   * @param mode 'move' | 'copy'
+   * @returns {ok:boolean, message?:string, sourceKey?:string, targetKey?:string}
+   */
+  function applyCourseShift(item, targetDate, mode) {
+    if (!item || !item.block || !item.date || !targetDate) { return { ok: false, message: '参数不完整' }; }
+    var block = AR.Store.blockById ? (AR.Store.blockById(item.block.id) || item.block) : item.block;
+    if (!block) { return { ok: false, message: '这节课已经不存在了' }; }
+    var courseId = item.courseId || block.courseId;
+    var sourceKey = U.dateKey(item.date);
+    var targetKey = U.dateKey(targetDate);
+    if (sourceKey === targetKey) { return { ok: false, message: '目标日期就是当天' }; }
+
+    var newWeekday = U.weekdayOf(targetDate);
+    // 当天的实际节次 / 时间（item 上的值是覆盖后的结果，缺就用模板）
+    var ps = (item.override && item.override.newPeriodStart) || block.periodStart || 1;
+    var pe = (item.override && item.override.newPeriodEnd) || block.periodEnd || ps;
+    var st = item.start || block.startTime || '';
+    var en = item.end || block.endTime || '';
+
+    if (mode === 'copy') {
+      // 复制：目标日新增一条 makeup，来源日原样保留
+      AR.Store.upsertOverride(block.id, courseId, targetKey, {
+        type: 'makeup',
+        newWeekday: null, newDate: null,
+        newPeriodStart: ps, newPeriodEnd: pe,
+        newStartTime: st, newEndTime: en,
+        reason: '调课'
+      });
+    } else {
+      // 移动：来源日取消 + 目标日 move（带上目标星期，保证被认领）
+      AR.Store.upsertOverride(block.id, courseId, sourceKey, { type: 'cancel', newDate: null, reason: '调课' });
+      /**
+       * 已经是移到这天来的（kind='moved-in'）：直接改写它自己的记录，
+       * 不要再写一条新的 move（否则两条记录互相打架）。
+       */
+      if (item.kind === 'moved-in' && item.override && item.override.id) {
+        var self = AR.Store.overrideById(item.override.id);
+        if (self) {
+          self.newDate = targetKey;
+          self.newWeekday = newWeekday;
+          self.newPeriodStart = ps;
+          self.newPeriodEnd = pe;
+          self.newStartTime = st;
+          self.newEndTime = en;
+          self.updatedAt = new Date().toISOString();
+          // 原来那条"在来源日取消"的记录已无意义，交给上面的 upsert 覆盖即可
+        }
+      } else {
+        AR.Store.upsertOverride(block.id, courseId, targetKey, {
+          type: 'move',
+          newDate: targetKey, newWeekday: newWeekday,
+          newPeriodStart: ps, newPeriodEnd: pe,
+          newStartTime: st, newEndTime: en,
+          reason: '调课'
+        });
+      }
+    }
+    AR.Store.save(true);
+    if (currentView === 'week') { renderWeek(); }
+    return { ok: true, sourceKey: sourceKey, targetKey: targetKey };
+  }
+
+  /**
+   * 调课弹窗（v0.4.1a）：用一块**紧凑周表**挑"调到哪一天"。
+   *
+   * 为什么另外开一个弹窗、而不是嵌在编辑窗里：
+   *   周表要画满宽度才好点；嵌在小区域里 300 多个格子点不准。
+   *
+   * 渲染策略（性能）：
+   *   · 一次只渲染**当前周 + 前后共 4 周**，绝不铺整学期（20 周 ×7×12 ≈ 1700 格会卡）；
+   *   · 行高用 --wt-row 收紧（28px）而不是复用周表的大行高；
+   *   · 只画**有课的格子**，空档用背景表示"这儿可以放"。
+   *
+   * 交互：
+   *   · 点任意空档/格子 = 选中那一天的那一节作为目标（选中的格高亮）；
+   *   · 顶部显示选中结果与撞课提示；
+   *   · 底部「移动过去 / 复制过去」→ 立即生效 + 关窗 + toast。
+   */
+  function openCourseShiftModal(item) {
+    if (!item || !item.block) { toast('这节课的信息不完整'); return; }
+    var sem = AR.Store.currentSemester();
+    if (!sem) { toast('还没有学期'); return; }
+    var periods = AR.Store.periodsOf(sem.id);
+    var sourceKey = U.dateKey(item.date);
+    var sourceWeek = AR.Schedule.weekNumber ? AR.Schedule.weekNumber(item.date, sem) : 1;
+
+    var wrap = el('<div class="cm-shift"></div>');
+
+    // ── 顶部：来源信息 ──
+    wrap.appendChild(el('<div class="cm-shift-src">'
+      + '要搬的是：<b>' + U.escapeHtml(item.course.name) + '</b> · '
+      + U.WEEKDAY_NAMES[U.weekdayOf(item.date)] + ' '
+      + (item.date.getMonth() + 1) + '/' + item.date.getDate()
+      + ' · ' + U.escapeHtml(item.periodLabel || '') + '</div>'));
+
+    // ── 周切换 ──
+    var navRow = el('<div class="cm-shift-nav">'
+      + '<button class="chip-btn" type="button" id="csPrev">◀ 上一周</button>'
+      + '<span class="cm-shift-week" id="csWeekLabel">—</span>'
+      + '<button class="chip-btn" type="button" id="csNext">下一周 ▶</button>'
+      + '<button class="chip-btn" type="button" id="csBack">回到本周</button></div>');
+    wrap.appendChild(navRow);
+
+    var gridWrap = el('<div class="cm-shift-grid" id="csGrid"></div>');
+    wrap.appendChild(gridWrap);
+    var previewBox = el('<div class="ds-preview" id="csPreview"></div>');
+    wrap.appendChild(previewBox);
+
+    var baseWeek = sourceWeek;
+    var dayStride = 7;
+    var target = null;   // { date, periodIdx }
+
+    /** 取某周（第 wi 周）周一的日期 */
+    function mondayOfWeek(wi) {
+      var start = U.parseDateKey(sem.startDate);
+      var firstMonday = U.mondayOf(start);
+      return U.addDays(firstMonday, (wi - 1) * 7);
+    }
+
+    function paintPreview() {
+      var box = wrap.querySelector('#csPreview');
+      if (!target) {
+        box.innerHTML = '<div class="muted">在上面点一格，选「调到哪一天的第几节」</div>';
+        return;
+      }
+      var tk = U.dateKey(target.date);
+      var dstItems = AR.Schedule.dayItems(target.date, sem);
+      var html = '<div class="ds-line">'
+        + U.WEEKDAY_NAMES[U.weekdayOf(item.date)] + ' ' + (item.date.getMonth() + 1) + '/' + item.date.getDate()
+        + '（' + U.escapeHtml(item.periodLabel || '') + '）'
+        + ' → <b>' + U.WEEKDAY_NAMES[U.weekdayOf(target.date)] + ' '
+        + (target.date.getMonth() + 1) + '/' + target.date.getDate() + '</b>'
+        + ' · 第 ' + target.periodIdx + ' 节</div>';
+      var others = dstItems.filter(function (i) { return i.blockId !== item.block.id; });
+      if (others.length) {
+        html += '<div class="ds-warn">⚠ 那天已有 ' + others.length + ' 节课：'
+          + others.map(function (i) { return U.escapeHtml(i.course.name); }).join('、')
+          + '（可能撞课，仍可继续）</div>';
+      }
+      html += '<div class="muted" style="margin-top:6px">只影响这一次 · 课程本身（每周的排课）不会变</div>';
+      box.innerHTML = html;
+    }
+
+    function buildGrid() {
+      var host = wrap.querySelector('#csGrid');
+      var mon = mondayOfWeek(baseWeek);
+      var w1 = baseWeek, w4 = baseWeek + 3;
+      wrap.querySelector('#csWeekLabel').textContent =
+        '第 ' + w1 + ' – ' + w4 + ' 周 · ' + (mon.getMonth() + 1) + '/' + mon.getDate() + ' 起';
+      host.innerHTML = '';
+      for (var wk = 0; wk < 4; wk++) {
+        var wkMonday = U.addDays(mon, wk * dayStride);
+        /**
+         * 性能：先按"天"取一次课表（7 次），后面 12 行 × 7 列直接查这张表。
+         * 原来每个格子都调一次 dayItems（336 次），每次都要重算整周，会明显卡。
+         */
+        var dayItemsCache = [];
+        for (var dc = 0; dc < 7; dc++) { dayItemsCache.push(AR.Schedule.dayItems(U.addDays(wkMonday, dc), sem)); }
+
+        var band = el('<div class="cm-shift-wk">第 ' + (baseWeek + wk) + ' 周</div>');
+        host.appendChild(band);
+
+        // 表头：周一~周日 + 日期
+        var headRow = el('<div class="cm-shift-row cm-shift-head"></div>');
+        headRow.appendChild(el('<div class="cm-shift-cell cm-shift-corner"></div>'));
+        var dayDates = [];
+        for (var d = 0; d < 7; d++) {
+          var dd = U.addDays(wkMonday, d);
+          dayDates.push(dd);
+          headRow.appendChild(el('<div class="cm-shift-cell cm-shift-day' + (U.dateKey(dd) === U.dateKey(new Date()) ? ' today' : '') + '">'
+            + '<span class="w">' + U.WEEKDAY_NAMES[d + 1] + '</span>'
+            + '<span class="n">' + (dd.getMonth() + 1) + '/' + dd.getDate() + '</span></div>'));
+        }
+        host.appendChild(headRow);
+
+        // 每行 = 一个节次
+        for (var p = 0; p < periods.length; p++) {
+          var pd = periods[p];
+          var row = el('<div class="cm-shift-row"></div>');
+          row.appendChild(el('<div class="cm-shift-cell cm-shift-time">'
+            + '<span class="p">第' + pd.index + '节</span>'
+            + '<span class="t">' + (pd.start || '') + '</span></div>'));
+          for (var d2 = 0; d2 < 7; d2++) {
+            var day = dayDates[d2];
+            var items = dayItemsCache[d2] || [];
+            var mine = null, others = null;
+            for (var ii = 0; ii < items.length; ii++) {
+              var it = items[ii];
+              if (!it.block) { continue; }
+              if (it.block.periodStart <= pd.index && it.block.periodEnd >= pd.index) {
+                if (it.blockId === item.block.id) { mine = it; }
+                else { others = it; }
+              }
+            }
+            var cls = 'cm-shift-cell cm-shift-slot';
+            var inner = '';
+            if (mine) {
+              cls += ' mine';
+              inner = '<span class="n">' + U.escapeHtml(item.course.name) + '</span>';
+            } else if (others) {
+              cls += ' other';
+              inner = '<span class="n">' + U.escapeHtml(others.course.name) + '</span>';
+            } else {
+              cls += ' free';
+              inner = '<span class="n">+</span>';
+            }
+            if (target && U.dateKey(day) === U.dateKey(target.date) && pd.index === target.periodIdx) {
+              cls += ' picked';
+            }
+            var cell = el('<div class="' + cls + '" data-day="' + U.dateKey(day) + '" data-p="' + pd.index + '">'
+              + inner + '</div>');
+            if (mine) { cell.style.background = U.colorHex(item.course.colorKey || '#5B8DEF'); cell.classList.add(contrastClass(U.colorHex(item.course.colorKey || '#5B8DEF'))); }
+            else if (others) { cell.style.borderColor = U.colorHex(others.course.colorKey || '#5B8DEF'); }
+            row.appendChild(cell);
+          }
+          host.appendChild(row);
+        }
+      }
+    }
+
+    // 事件（委托）：点格子选目标
+    gridWrap.addEventListener('click', function (e2) {
+      var cell = e2.target && e2.target.closest ? e2.target.closest('.cm-shift-slot') : null;
+      if (!cell) { return; }
+      var dk = cell.getAttribute('data-day');
+      var pi = Number(cell.getAttribute('data-p')) || 1;
+      var dt = U.parseDateKey(dk);
+      if (!dt) { return; }
+      if (dk === sourceKey) { toast('这就是当天，换个日期'); return; }
+      target = { date: dt, periodIdx: pi };
+      buildGrid();
+      paintPreview();
+      AR.Bridge.haptic('light', cell);
+    });
+
+    wrap.querySelector('#csPrev').addEventListener('click', function () { if (baseWeek > 1) { baseWeek -= 1; buildGrid(); } });
+    wrap.querySelector('#csNext').addEventListener('click', function () { baseWeek += 1; buildGrid(); });
+    wrap.querySelector('#csBack').addEventListener('click', function () { baseWeek = sourceWeek; buildGrid(); });
+
+    buildGrid();
+    paintPreview();
+
+    function doShift(mode) {
+      if (!target) { toast('先在上面选一天'); return 'none'; }
+      var r = applyCourseShift(item, target.date, mode);
+      if (!r.ok) { toast(r.message || '调课失败'); return 'fail'; }
+      if (AR.Panels && AR.Panels.refreshAll) { AR.Panels.refreshAll(); }
+      toast(mode === 'copy' ? '已复制到 ' + (target.date.getMonth() + 1) + '/' + target.date.getDate()
+        : '已调到 ' + (target.date.getMonth() + 1) + '/' + target.date.getDate());
+      return 'ok';
+    }
+
+    openModal({
+      title: '调课 / 借课',
+      sub: U.escapeHtml(item.course.name) + ' · 只影响这一次',
+      body: wrap,
+      wide: true,
+      actions: [
+        { label: '移动过去', kind: 'primary', onClick: function (close) { if (doShift('move') === 'ok') { close(); } } },
+        { label: '复制过去', onClick: function (close) { if (doShift('copy') === 'ok') { close(); } } }
+      ]
+    });
+  }
+
+  /**
    * 调休 / 借课：把来源日期的课整体搬到（或复制到）目标日期。
    *
    * 实现复用既有的"单次改动"覆盖表：
@@ -4939,9 +5220,68 @@ var AR = window.AR || (window.AR = {});
      默认「仅这一次」，只改当天的这一节。
      ══════════════════════════════════════════════════════════════ */
 
+  /**
+   * 撤回快照 / 撤回执行（v0.4.1a）
+   *
+   * 范围：**单门课程** —— 课程记录 + 它的所有时段(blocks) + 它的所有单次记录(overrides)。
+   * 之所以按课程而不是按操作，是因为用户的心智是"我这门课改坏了，撤回去"，
+   * 而不是"撤销上一步数据库写操作"。删除类操作另有 5 秒 toast 撤销与回收站兜底。
+   */
+
+  /** 在改动这门课之前拍一份快照（已经有快照就不覆盖） */
+  function captureCourseUndo(courseId) {
+    if (!courseId) { return; }
+    var c = AR.Store.courseById ? AR.Store.courseById(courseId) : null;
+    if (!c || c.undo) { return; }          // 已有快照 → 保留"最早的那份"
+    var st = AR.Store.get();
+    c.undo = {
+      at: new Date().toISOString(),
+      course: U.deepCopy(c),
+      blocks: U.deepCopy((st.blocks || []).filter(function (b) { return b.courseId === courseId; })),
+      overrides: U.deepCopy((st.overrides || []).filter(function (o) { return o.courseId === courseId; }))
+    };
+    // 快照自身不要递归进去（course 副本里的 undo 是多余的，也省体积）
+    if (c.undo.course) { delete c.undo.course.undo; }
+  }
+
+  /**
+   * 撤回这门课的上一次修改：恢复快照里的 course / blocks / overrides。
+   * 一级撤回 —— 撤回后清掉快照，避免反复横跳。
+   * @returns 'ok' | 'none'
+   */
+  function undoCourseEdit(courseId) {
+    var c = AR.Store.courseById ? AR.Store.courseById(courseId) : null;
+    if (!c || !c.undo) { return 'none'; }
+    var snap = c.undo;
+    var st = AR.Store.get();
+    // 1) 时段：先删掉现有的，再放回快照里的
+    st.blocks = (st.blocks || []).filter(function (b) { return b.courseId !== courseId; })
+      .concat(U.deepCopy(snap.blocks || []));
+    // 2) 单次记录：同上
+    st.overrides = (st.overrides || []).filter(function (o) { return o.courseId !== courseId; })
+      .concat(U.deepCopy(snap.overrides || []));
+    // 3) 课程本身（改名 / 颜色 / 类型 / 备注都在这）
+    var restored = U.deepCopy(snap.course);
+    delete restored.undo;
+    var keep = {};
+    for (var k in c) {
+      if (Object.prototype.hasOwnProperty.call(c, k) && k !== 'undo') { keep[k] = c[k]; }
+    }
+    for (var k2 in keep) {
+      if (Object.prototype.hasOwnProperty.call(keep, k2)) { delete c[k2]; }
+    }
+    for (var k3 in restored) {
+      if (Object.prototype.hasOwnProperty.call(restored, k3)) { c[k3] = restored[k3]; }
+    }
+    delete c.undo;
+    AR.Store.save(true);
+    if (currentView === 'week' && renderWeek) { renderWeek(); }
+    if (currentView === 'today' && renderToday) { renderToday(); }
+    return 'ok';
+  }
+
   /** "张三、李四，王五" → ["张三","李四","王五"] */
-  function splitTeacherNames(s) {
-    var parts = String(s == null ? '' : s).replace(/[，,、;；/|]+/g, '|').split('|');
+  function splitTeacherNames(s) {    var parts = String(s == null ? '' : s).replace(/[，,、;；/|]+/g, '|').split('|');
     var out = [];
     for (var i = 0; i < parts.length; i++) {
       var v = parts[i].trim();
@@ -4961,7 +5301,15 @@ var AR = window.AR || (window.AR = {});
     var realBlock = AR.Store.blockById ? AR.Store.blockById(block.id) : null;
     // 补课 / 加课这种「单次课」没有模板 block，只能按"这一次"改
     var hasOneOff = (!!item.override && item.kind !== 'normal') || !realBlock;
-    var scope = hasOneOff ? 'once' : 'all';
+    /**
+     * 作用域默认值（v0.4.1a 改）：
+     *   · 单次课（补课 / 加课，没有模板）只能"仅这次"，这是硬约束；
+     *   · 其余情况**跟随用户上一次的选择**（settings.schedule.lastEditScope）。
+     *     旧逻辑是"这天只要有任何单次记录就默认仅这次"，结果用户每次点开
+     *     都只改到那一天，看起来像"改了没用/改不动"——已按用户要求改成记住选择。
+     */
+    var rememberedScope = (S.settings.schedule && S.settings.schedule.lastEditScope) === 'once' ? 'once' : 'all';
+    var scope = hasOneOff ? 'once' : rememberedScope;
     var pickedColor = course.colorKey;
     var dayShort = (day.getMonth() + 1) + '/' + day.getDate();
 
@@ -4984,8 +5332,18 @@ var AR = window.AR || (window.AR = {});
       return out;
     }
 
-    var startPeriod = block.periodStart || 1;
-    var endPeriod = block.periodEnd || startPeriod;
+    /**
+     * 节次回显（v0.4.1a 修）：**必须用"这一天实际生效的节次"**。
+     *
+     * 以前这里直接读 template 上的 block.periodStart/End。于是当这天存在一条
+     * 改了节次的单次记录时（例如这天实际是 1-3 节、模板是 1-2 节），编辑器
+     * 却回显 1-2 —— 用户把结束节次选成 3，picker 认为"没变"而**不触发变更**，
+     * 表现出来就是「1-2→1-3 之后再也改不回 1-3」（改成 2 或 4 相对模板算变了，所以行）。
+     */
+    var effPeriodStart = (item.override && item.override.newPeriodStart) || block.periodStart || 1;
+    var effPeriodEnd = (item.override && item.override.newPeriodEnd) || block.periodEnd || effPeriodStart;
+    var startPeriod = effPeriodStart;
+    var endPeriod = effPeriodEnd;
     var curStart = item.start || block.startTime || periodDefault(startPeriod, 'start');
     var curEnd = item.end || block.endTime || periodDefault(endPeriod, 'end');
     var weekMode = (block.weekMode === 'odd' || block.weekMode === 'even' || block.weekMode === 'custom')
@@ -5116,6 +5474,11 @@ var AR = window.AR || (window.AR = {});
 
     var scopeBtns = body.querySelectorAll ? body.querySelectorAll('.scope-btn') : [];
     function applyScope(next) {
+      // 记住用户这次的选择：下次打开编辑器默认就用它（用户明确要求的"根据用户的选择来"）
+      if (S.settings.schedule && S.settings.schedule.lastEditScope !== next) {
+        S.settings.schedule.lastEditScope = next;
+        AR.Store.save(true);
+      }
       scope = next;
       for (var i = 0; i < scopeBtns.length; i++) {
         scopeBtns[i].classList[scopeBtns[i].getAttribute('data-scope') === scope ? 'add' : 'remove']('active');
@@ -5236,6 +5599,14 @@ var AR = window.AR || (window.AR = {});
       var nameInput = body.querySelector('#ebName');
       var name = (nameInput.value || '').trim();
       if (!name) { toast('课程名不能为空'); nameInput.focus(); return; }
+      /**
+       * 撤回快照（v0.4.1a）：**第一次保存前**把整门课拍一份。
+       *
+       * 只在这门课还没有快照时记录 —— 所以「撤回上次修改」回到的是
+       * "本次编辑之前"的状态，而不是上一次保存前（否则连点两次撤回就来回横跳）。
+       * 快照跟着课程记录一起存盘，所以关掉 App 再进来也还能撤。
+       */
+      captureCourseUndo(course.id);
       var tNames = splitTeacherNames(body.querySelector('#ebTeachers').value);
       var placeRaw = (body.querySelector('#ebPlace').value || '').trim();
       var wdEl = pEl('ebWeekday'), psEl = pEl('ebPStart'), peEl = pEl('ebPEnd');
@@ -5366,6 +5737,8 @@ var AR = window.AR || (window.AR = {});
           AR.Store.upsertOverride(block.id, targetCourse.id, origKey, { type: 'cancel', newDate: null });
         }
       } else {
+        // 改星期前先记下原星期：updateBlock 之后 block.weekday 就变了，届时就比较不出来了
+        var prevWeekday = block.weekday;
         var up = AR.Store.updateBlock(block.id, {
           weekday: weekday, periodStart: pStart, periodEnd: pEnd,
           startTime: customStart, endTime: customEnd,
@@ -5373,6 +5746,48 @@ var AR = window.AR || (window.AR = {});
           locationIds: loc ? [loc.id] : [], teacherIds: tIds
         });
         if (up && up.ok === false) { toast(up.message || '保存失败'); return; }
+        /**
+         * v0.4.1a 修（Bug 3）：改了星期就把**原星期那几天的单次记录**跟着搬到新星期。
+         *
+         * 旧行为：把某课从周一改到周三（"所有时段"）后，它仍旧挂在周一那个日期上
+         * —— 周一凭空多出一条生效的改动（幽灵记录），用户看到"我明明挪到周三了，
+         * 周一怎么还挂着这门课"；而周三那边读不到这条记录，作用域又莫名变成"仅这次"。
+         *
+         * 做法：对每条"日期落在原星期"的记录，按同一周内平移 delta 天得到新日期，
+         * 把内容复制到新日期、再把旧记录软删（进回收站，可恢复）。
+         */
+        if (weekday !== prevWeekday) {
+          var ovs = AR.Store.overridesOfBlock(block.id) || [];
+          var delta = weekday - prevWeekday;
+          var movedAny = false;
+          for (var oi = 0; oi < ovs.length; oi++) {
+            var ovr = ovs[oi];
+            if (!ovr || ovr.deletedAt) { continue; }
+            var od = U.parseDateKey(ovr.date);
+            if (!od || U.weekdayOf(od) !== prevWeekday) { continue; }
+            // 同一周内平移：先取该记录所在周的周一，再落到新星期
+            var newKey = U.dateKey(U.addDays(U.mondayOf(od), weekday - 1));
+            if (newKey === ovr.date) { continue; }
+            AR.Store.upsertOverride(block.id, targetCourse.id, newKey, {
+              type: ovr.type,
+              newDate: ovr.newDate || null,
+              newWeekday: ovr.newWeekday || null,
+              newPeriodStart: ovr.newPeriodStart || null,
+              newPeriodEnd: ovr.newPeriodEnd || null,
+              newStartTime: ovr.newStartTime || '',
+              newEndTime: ovr.newEndTime || '',
+              newLocationIds: ovr.newLocationIds || null,
+              newLocationCleared: !!ovr.newLocationCleared,
+              newTeacherIds: ovr.newTeacherIds || null,
+              newNote: ovr.newNote == null ? null : ovr.newNote,
+              newNoteCleared: !!ovr.newNoteCleared,
+              reason: ovr.reason || ''
+            });
+            AR.Store.removeOverride(ovr.id);   // 软删除，回收站可恢复
+            movedAny = true;
+          }
+          if (movedAny) { AR.Store.save(true); }
+        }
       }
 
       /**
@@ -5470,6 +5885,33 @@ var AR = window.AR || (window.AR = {});
       bindTrackHint();
     })();
 
+    /**
+     * 撤回入口（v0.4.1a A 方案）：**只在"这门课有改动前快照"时才把这个按钮放进数组**
+     * —— openModal 的 actions 没有 hidden 之类的过滤能力，不能靠属性隐藏。
+     */
+    var undoAction = (course && course.undo) ? [{
+      label: '撤回上次修改',
+      onClick: function (close) {
+        close();
+        var r = undoCourseEdit(course.id);
+        if (AR.Panels && AR.Panels.refreshAll) { AR.Panels.refreshAll(); }
+        else {
+          renderToday();
+          if (currentView === 'week' && renderWeek) { renderWeek(); }
+        }
+        toast(r === 'ok' ? '已撤回上次修改' : '没有可撤回的修改');
+      }
+    }] : [];
+
+    /** 调到另一天（v0.4.1a）：另开专用调课弹窗，用紧凑周表挑目标日 */
+    var shiftAction = [{
+      label: '调到另一天',
+      onClick: function (close) {
+        close();
+        openCourseShiftModal(item);
+      }
+    }];
+
     openModal({
       title: '编辑课程',
       sub: course.name + ' · ' + U.WEEKDAY_NAMES[U.weekdayOf(day)] + ' ' + dayShort
@@ -5539,7 +5981,7 @@ var AR = window.AR || (window.AR = {});
           onClick: function (close) { doSave(close); }
         },
         { label: '取消', onClick: function (close) { close(); } }
-      ]
+      ].concat(shiftAction).concat(undoAction)
     });
     applyScope(scope);
     // 同上：节次下拉是自绘的，这里用时现取（以前写死 pStartSel，`pEl` 之外没这个变量了）
@@ -9075,6 +9517,8 @@ var AR = window.AR || (window.AR = {});
     syncCustomTabNav: syncCustomTabNav,
     renderCustom: renderCustom,
     openDayShift: openDayShift,
+    applyCourseShift: applyCourseShift,
+    openCourseShiftModal: openCourseShiftModal,
     openQuickAdd: openQuickAdd,
     openEventForm: openEventForm,
     openEventModal: openEventModal,

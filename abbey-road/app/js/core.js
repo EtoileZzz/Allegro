@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.1a';
+var APP_VERSION = '0.4.1b';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -2434,20 +2434,49 @@ var APP_VERSION = '0.4.1a';
         }
       }
     }
-    // 设置：只合并白名单字段，避免把对方的设备相关设置带过来
+    /**
+     * 设置：把"个性化设置"整份带过来（v0.4.1a）。
+     *
+     * 老逻辑是「只填空缺」（target[f] === undefined 才写）。但 defaultSettings()
+     * 一开始就把每个字段都填满了，所以 `undefined` 几乎不成立 —— 结果**导入方的
+     * 个性化设置永远进不来**，跨设备"换台手机接着用"时主题/布局/课表偏好全丢。
+     *
+     * 现在的规则（兼顾老版本配置）：
+     *   · 逐个命名空间独立处理：incoming 里**没有**这个命名空间 → 完全不动本机
+     *     （老版本配置里没有 widgets / nextAlert 这些，自然不会误清）；
+     *   · incoming 里**有**这个命名空间 → 按字段覆盖（数组、子对象整体替换），
+     *     它没写的字段保留本机值，不会被 undefined 冲掉；
+     *   · 设备相关的 device / onboardingCompletedAt / update 不在清单里，永不导入。
+     */
     if (incoming.settings && options.mergeSettings !== false) {
-      var keepKeys = ['integration', 'appearance', 'schedule', 'haptics'];
-      for (var s = 0; s < keepKeys.length; s++) {
-        var kk = keepKeys[s];
-        if (incoming.settings[kk]) {
-          var target = state.settings[kk] || {};
-          for (var f in incoming.settings[kk]) {
-            if (Object.prototype.hasOwnProperty.call(incoming.settings[kk], f) && target[f] === undefined) {
-              target[f] = incoming.settings[kk][f];
-            }
-          }
-          state.settings[kk] = target;
+      var PERSONALIZE_KEYS = [
+        'appearance', 'layout', 'schedule', 'nextAlert', 'haptics',
+        'notifications', 'widgets', 'trash', 'integration',
+        'experimental', 'course_list', 'homework'
+      ];
+      for (var s = 0; s < PERSONALIZE_KEYS.length; s++) {
+        var kk = PERSONALIZE_KEYS[s];
+        var inc = incoming.settings[kk];
+        if (inc === undefined || inc === null) { continue; }
+        if (typeof inc !== 'object' || Array.isArray(inc)) {
+          state.settings[kk] = inc;          // 标量直接套用
+          continue;
         }
+        var target = state.settings[kk];
+        if (!target || typeof target !== 'object' || Array.isArray(target)) {
+          state.settings[kk] = deepCopy(inc);
+          continue;
+        }
+        for (var f in inc) {
+          if (!Object.prototype.hasOwnProperty.call(inc, f)) { continue; }
+          if (inc[f] === undefined) { continue; }
+          target[f] = deepCopy(inc[f]);      // 数组 / 子对象整体替换，不逐项纠结
+        }
+      }
+      // 「当前学期」只做纠偏：对方没有可用的学期时不要动本机
+      if (!state.settings.schedule) { state.settings.schedule = {}; }
+      if (!state.settings.schedule.currentSemesterId) {
+        delete state.settings.schedule.currentSemesterId;
       }
     }
     if (Array.isArray(incoming.tombstones)) {
