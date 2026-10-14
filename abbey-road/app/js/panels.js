@@ -729,9 +729,9 @@ var AR = window.AR || (window.AR = {});
   var settingsSearchQ = '';
   var pendingHighlight = '';
 
-  /** 七个分类：icon / 名称 / 说明 / 首页高频项 / 二级页面板（提醒归到课表里了） */
+  /** 分类列表：固定的 7 个 + 开发者模式开启时追加 1 个独立分类（无高频项） */
   function settingsCats() {
-    return [
+    var list = [
       { key: 'prefs', icon: '🎨', label: '外观与布局', desc: '主题、主题色、流畅模式、布局',
         quick: quickPrefs, panels: [panelAppearance, panelLayout] },
       { key: 'widgets', icon: '📱', label: '桌面卡片', desc: '把课表放到手机桌面',
@@ -747,6 +747,13 @@ var AR = window.AR || (window.AR = {});
       { key: 'about', icon: 'ℹ️', label: '关于与帮助', desc: '版本、引导、反馈',
         quick: quickAbout, panels: [panelAbout] }
     ];
+    // 开发者模式：长按底部「设置」开关。开启后作为**独立分类**出现在最后，
+    // 故意不给 quick（首页不放任何高频项），只是多一个入口。
+    if (S.settings.appearance.devMode === true) {
+      list.push({ key: 'dev', icon: '🧪', label: '开发者模式', desc: '过渡动画、弹窗玻璃、调试工具',
+        panels: [panelDev] });
+    }
+    return list;
   }
 
   /* ── 首页高频项的小控件 ─────────────────────────────────── */
@@ -1114,9 +1121,6 @@ var AR = window.AR || (window.AR = {});
           AR.Bridge.haptic('light', head);
           openSettingsCat(cat.key);
         });
-        // 彩蛋锚点：长按首页「关于与帮助」这一行（左栏没了的替代），
-        // 二级页里长按「外观」小标题同样有效
-        if (cat.key === 'about') { bindDevModeLongPress(head); }
         card.appendChild(head);
         if (cat.quick) {
           var q = cat.quick();
@@ -1157,9 +1161,6 @@ var AR = window.AR || (window.AR = {});
       for (var p = 0; p < cat.panels.length; p++) { host.appendChild(cat.panels[p]()); }
       grid.appendChild(host);
     }
-    // 彩蛋双轨：长按「外观」小标题也能进 / 出开发者模式
-    var apTitle = grid.querySelector('#set-appearance .panel-title');
-    if (apTitle) { bindDevModeLongPress(apTitle); }
     // 搜索点进来的高亮
     if (pendingHighlight) {
       var lab = pendingHighlight.slice(0, 16);
@@ -1205,10 +1206,20 @@ var AR = window.AR || (window.AR = {});
   function renderSettingsNav() { /* 保留空实现，避免老调用点报错 */ }
 
   /**
-   * 长按 800ms 进入开发者模式（再长按一次退出）。
-   * 用 pointerdown/up + 位移取消，避免"想滚动结果被当成长按"。
+   * 开发者模式的总开关（**唯一入口**：长按底部导航的「设置」，800ms）。
+   *
+   * 规则（v0.4.1a 起）：
+   *   · 默认关闭；开启后在设置分类页**多出一个独立的「开发者模式」分类**（无高频项）；
+   *   · 开启 / 关闭都**不跳转**，停在当前页面 —— 分类列表自己会多一项 / 少一项；
+   *   · 再长按一次关闭；若此刻正停在该分类的二级页，退回分类首页（否则会停在已消失的页面上）。
+   *
+   * 绑在底部导航按钮上，而它**不在** renderSettings() 重建的 DOM 里，
+   * 所以这一处监听只需要绑一次（用标记位防重复）。
    */
-  function bindDevModeLongPress(btn) {
+  function bindSettingsLongPress(btn) {
+    if (!btn || btn.__devLongPressBound) { return; }
+    btn.__devLongPressBound = true;
+
     var timer = null;
     function cancel() {
       if (timer) { clearTimeout(timer); timer = null; }
@@ -1218,20 +1229,7 @@ var AR = window.AR || (window.AR = {});
       var x0 = ev.clientX, y0 = ev.clientY;
       timer = setTimeout(function () {
         timer = null;
-        var on = !(S.settings.appearance.devMode === true);
-        S.settings.appearance.devMode = on;
-        AR.Store.save(true);
-        AR.Bridge.haptic('heavy', btn);
-        // 开启后直接进「外观与布局」二级页 —— 动画面板在那里，
-        // 不然用户长按完什么都看不到（还以为没生效）。
-        if (on) { settingsCat = 'prefs'; }
-        renderSettings();
-        var body = $('settingsBody');
-        if (body && on) { body.scrollTop = 0; }
-        if (on) { playSettingsEnter(); }
-        if (AR.UI && AR.UI.toast) {
-          AR.UI.toast(on ? '开发者模式已开启：外观页底部可调过渡动画' : '开发者模式已关闭');
-        }
+        toggleDevMode(btn);
       }, 800);
       var move = function (e2) {
         if (Math.abs(e2.clientX - x0) > 10 || Math.abs(e2.clientY - y0) > 10) { cancel(); }
@@ -1247,7 +1245,37 @@ var AR = window.AR || (window.AR = {});
       btn.addEventListener('pointercancel', up);
     });
     btn.addEventListener('pointerleave', cancel);
+    // 长按在桌面端会弹右键菜单，屏蔽掉
     btn.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
+  }
+
+  /** 开 / 关开发者模式（不跳页；关闭时若停在该分类则退回首页） */
+  function toggleDevMode(btn) {
+    var ap = S.settings.appearance;
+    var on = !(ap.devMode === true);
+    ap.devMode = on;
+    AR.Store.save(true);
+    AR.Bridge.haptic('heavy', btn);
+
+    // 关掉时，如果正停在「开发者模式」二级页，这一页马上就不存在了 → 退回分类首页。
+    // 停在别的分类 / 首页时什么都不动，符合"默认不跳转"。
+    if (!on && settingsCat === 'dev') { settingsCat = null; }
+
+    // 只有当前就在设置页时才重渲染；不在设置页的话，下次进入设置自然会带上新分类。
+    if (AR.UI && AR.UI.currentView && AR.UI.currentView() === 'settings') {
+      renderSettings();
+      if (on) {
+        var body = $('settingsBody');
+        if (body) { body.scrollTop = body.scrollHeight; }   // 新分类在列表最后，滚过去看一眼
+        playSettingsEnter();
+      }
+    }
+
+    if (AR.UI && AR.UI.toast) {
+      AR.UI.toast(on
+        ? '开发者模式已开启：设置里多了「开发者模式」分类'
+        : '开发者模式已关闭');
+    }
   }
 
   function panel(title, inner, key) {
@@ -1387,8 +1415,15 @@ var AR = window.AR || (window.AR = {});
           if (AR.UI.renderToday) { AR.UI.renderToday(); }
         }));
     }
-    if (ap.devMode === true) { box.appendChild(devMotionBox()); }
+    // 开发者模式的内容已迁到独立的「开发者模式」分类（panelDev），
+    // 外观页不再挂任何调试项。
     return panel('外观', box, 'appearance');
+  }
+
+  /* ── 开发者模式 · 独立二级页 ─────────────────────────────── */
+
+  function panelDev() {
+    return panel('开发者模式', devMotionBox(), 'dev');
   }
 
   /* ── 开发者模式：逐场景挑选过渡动画 ───────────────────────── */
@@ -1402,8 +1437,9 @@ var AR = window.AR || (window.AR = {});
     var box = el('<div class="dev-motion"></div>');
     box.appendChild(el('<div class="dev-badge">开发者模式</div>'));
     box.appendChild(el('<p class="muted" style="margin:6px 0 10px">'
-      + '长按左侧「外观」可退出。这里改的是全局过渡动画，改完立刻生效，'
-      + '每个场景可以先「试放」看一眼。</p>'));
+      + '这里改的是全局过渡动画，改完立刻生效，每个场景可以先「试放」看一眼。'
+      + '要退出开发者模式：再长按一次底部的「设置」。'
+      + '（关闭后这个分类会消失，设过的样式保留。）</p>'));
 
     var order = AR.Motion.order;
     for (var i = 0; i < order.length; i++) {
@@ -3135,6 +3171,8 @@ var AR = window.AR || (window.AR = {});
     resetSettingsHome: resetSettingsHome,
     settingsBackStep: settingsBackStep,
     settingsGoHome: settingsGoHome,
+    /** 长按底部导航「设置」→ 开 / 关开发者模式（ui.js 启动时绑一次） */
+    bindSettingsLongPress: bindSettingsLongPress,
     checkUpdate: checkUpdate,
     autoCheckUpdate: autoCheckUpdate,
     versionNewer: versionNewer,

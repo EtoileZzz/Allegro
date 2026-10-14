@@ -142,7 +142,12 @@ const script = String.raw`(async () => {
     check('编辑器里有保存按钮', !!saveBtn, saveBtn ? saveBtn.textContent : '（没找到）');
     if (!saveBtn) { throw new Error('编辑课程窗口里没有保存按钮'); }
     saveBtn.click();
-    await sleep(320);
+    /**
+     * 关闭弹窗的定时器 = AR.Motion 里 modal.out 的时长 ÷ 动画速度 + 24ms 余量
+     * （tileFlip 默认 out=320ms → 344ms）。这里必须等得比它久，
+     * 否则断言"弹窗已彻底关闭"会在退场动画还没跑完时先执行，变成假失败。
+     */
+    await sleep(520);
     tempBlock = AR.Store.blockById(tempBlock.id) || tempBlock;
     check('保存后星期改了', tempBlock.weekday === slotB.wd, tempBlock.weekday + ' 期望 ' + slotB.wd);
     check('保存后节次改了', tempBlock.periodStart === slotB.p1 && tempBlock.periodEnd === slotB.p2,
@@ -187,7 +192,7 @@ const script = String.raw`(async () => {
     const closeBtn = $('#modalCard').querySelector('.modal-head .modal-close');
     check('弹窗有 ✕ 关闭按钮', !!closeBtn);
     if (closeBtn) { closeBtn.click(); }
-    await sleep(300);
+    await sleep(520);   // 同 ④ 前的说明：退场动画 344ms，必须等完
     check('取消后弹窗彻底关闭', $('#modalRoot').hidden === true);
 
     /* ── ⑤ 今日页「最近的课」：焦点卡 + 信息格 + 编辑入口 ────── */
@@ -721,17 +726,34 @@ const script = String.raw`(async () => {
     AR.UI.show('settings');
     await sleep(300);
 
-    /* ── ⑩ 开发者模式：长按首页「关于与帮助」分类行（v0.4.0 左栏已去掉） ── */
+    /* ── ⑩ 开发者模式：长按底部导航的「设置」（唯一入口） ──
+       规则：默认关闭；开启后设置分类页多出一个独立的「开发者模式」分类（无高频项）；
+       再长按一次关闭；开启/关闭都不跳页。 */
     const devBefore = AR.Store.get().settings.appearance.devMode === true;
-    const navAppearance = document.querySelector('#settingsGrid .set-cat[data-key="about"] .set-cat-head');
-    check('设置首页有「关于与帮助」分类行', !!navAppearance);
-    if (navAppearance) {
-      navAppearance.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 8, clientY: 8 }));
+    const settingsNavBtn = document.querySelector('.nav-btn[data-nav="settings"]');
+    check('底部导航有「设置」按钮（开发者模式入口）', !!settingsNavBtn);
+    if (settingsNavBtn) {
+      settingsNavBtn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 8, clientY: 8 }));
       await sleep(1000);
       const devAfter = AR.Store.get().settings.appearance.devMode === true;
-      check('长按「关于与帮助」切换开发者模式', devAfter !== devBefore, 'devMode=' + devAfter);
-      await sleep(260);
-      check('开发者模式打开后出现动画设置区', !devAfter || !!document.querySelector('.dev-motion'));
+      check('长按底部「设置」切换开发者模式', devAfter !== devBefore, 'devMode=' + devAfter);
+      await sleep(320);
+      // 开启后：分类页出现独立分类（且该分类没有高频项 quick）
+      if (devAfter) {
+        const devCat = document.querySelector('#settingsGrid .set-cat[data-key="dev"]');
+        check('开启后分类页出现独立的「开发者模式」分类', !!devCat);
+        check('该分类没有高频选择项（不塞首页高频）',
+          !!devCat && !devCat.querySelector('.q-row'));
+      }
+      // 进入该独立分类，确认面板就是动画面板（而不是挂在外观页底部）
+      if (devAfter) {
+        const devHead = document.querySelector('#settingsGrid .set-cat[data-key="dev"] .set-cat-head');
+        if (devHead) { devHead.click(); await sleep(320); }
+        check('开发者模式是独立二级页（#set-dev 存在，外观页不再挂调试区）',
+          !!document.getElementById('set-dev'));
+        // 动画面板只存在于该二级页里 —— 必须在点进来之后断言
+        check('开发者模式打开后出现动画设置区', !!document.querySelector('.dev-motion'));
+      }
       /* 只数「场景行」（带样式选择器的）—— .dev-motion 里还混着实验性功能的模块行，
          直接数 .dev-row 会把它们算进去。场景行数永远跟 AR.Motion 注册表一致。 */
       const rows = Array.prototype.filter.call(

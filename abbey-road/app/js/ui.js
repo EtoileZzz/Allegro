@@ -4547,10 +4547,22 @@ var AR = window.AR || (window.AR = {});
      进出场完全一致。CSS 里的 transition 全部让位（置 none）。
      ─────────────────────────────────────────────────────────── */
 
-  var POP_IN_EASE = 'cubic-bezier(.16, 1, .30, 1)';     // 强缓出
-  var POP_OUT_EASE = 'cubic-bezier(.40, 0, .80, .60)';  // 缓入
-  var POP_IN_MS = 300;
-  var POP_OUT_MS = 190;
+  /**
+   * 弹层时长 / 曲线的**兜底值**。
+   *
+   * 真实来源永远是 AR.Motion 的 modal 场景（460/320 / tile 曲线）；
+   * 这里只在 AR.Motion 缺失时兜底，但**必须与它同源**，否则"有没有 WAAPI"
+   * 会变成两套快慢（老内核上弹窗慢一拍就是这么来的）。
+   * 曲线取 EASE.tile（tileFlip 用的那条），时长取 tileFlip 的 in/out。
+   * tokens.css 的 --dur-dialog-in/out 也是同一组值，三处保持一致。
+   */
+  function popFallback() {
+    return {
+      inMs: 460, outMs: 320,
+      inEase: 'cubic-bezier(.20,.80,.20,1)',
+      outEase: 'cubic-bezier(.20,.80,.20,1)'
+    };
+  }
 
   function motionSpeed() {
     var speed = Number((S && S.settings && S.settings.appearance
@@ -4558,10 +4570,30 @@ var AR = window.AR || (window.AR = {});
     return speed;
   }
 
-  /** 弹层时长（跟随设置里的「动画速度」） */
+  /**
+   * 弹窗进 / 退场的时长与曲线：**唯一入口**。
+   * 优先 AR.Motion（开发者模式里换样式立刻生效）；缺失时回落到与它同源的兜底值。
+   * 返回值里的 dur 已经是"按动画速度换算过"的毫秒数。
+   */
+  function popTiming(dir) {
+    var fb = popFallback();
+    var key = dir === 'out' ? 'out' : 'in';
+    var m = AR.Motion ? AR.Motion.dir('modal', key) : null;
+    var base = m ? m.dur : (key === 'out' ? fb.outMs : fb.inMs);
+    var easeName = m ? m.ease : null;
+    var dur = Math.max(90, Math.round(base / motionSpeed()));
+    var ease;
+    if (AR.Motion) {
+      ease = easeName ? AR.Motion.ease(easeName) : AR.Motion.ease('quint');
+    } else {
+      ease = key === 'out' ? fb.outEase : fb.inEase;
+    }
+    return { dur: dur, ease: ease };
+  }
+
+  /** 兼容旧调用点：只要时长 */
   function modalDur(kind) {
-    var base = kind === 'out' ? POP_OUT_MS : POP_IN_MS;
-    return Math.max(90, Math.round(base / motionSpeed()));
+    return popTiming(kind).dur;
   }
 
   function stopModalAnim(node) {
@@ -4581,13 +4613,14 @@ var AR = window.AR || (window.AR = {});
   function popIn(node, kind) {
     if (!node || !node.animate) { return; }
     var dir = kind === 'out' ? 'out' : 'in';
-    var m = AR.Motion ? AR.Motion.dir('modal', dir === 'out' ? 'out' : 'in') : null;
-    var dur = m ? Math.round(m.dur / motionSpeed()) : modalDur(dir);
-    var ease = AR.Motion ? AR.Motion.ease(m && m.ease) : (dir === 'out' ? POP_OUT_EASE : POP_IN_EASE);
+    var t = popTiming(dir);
+    var dur = t.dur;
+    var ease = t.ease;
     try { if (node.__popAnim) { node.__popAnim.cancel(); } } catch (e) { }
     node.style.transition = 'none';
     var from, to;
     if (AR.Motion) {
+      var m = AR.Motion.dir('modal', dir);
       from = dir === 'out' ? AR.Motion.pose(null) : AR.Motion.pose(m && m.from);
       to = dir === 'out' ? AR.Motion.pose(m && m.to) : AR.Motion.pose(null);
     } else {
@@ -4614,8 +4647,9 @@ var AR = window.AR || (window.AR = {});
      * 开发者模式里换一个样式，今日页时间弹窗、周表课程弹窗、引导卡片一起变。
      */
     var m = AR.Motion ? AR.Motion.dir('modal', dir === 'out' ? 'out' : 'in') : null;
-    var dur = m ? Math.round(m.dur / motionSpeed()) : modalDur(dir);
-    var ease = AR.Motion ? AR.Motion.ease(m && m.ease) : (dir === 'out' ? POP_OUT_EASE : POP_IN_EASE);
+    var t = popTiming(dir === 'out' ? 'out' : 'in');
+    var dur = t.dur;
+    var ease = t.ease;
     var canAnimate = !!(card && card.animate && !window.__noWaapi) && dur > 0;
 
     if (!canAnimate) {
@@ -7888,6 +7922,15 @@ var AR = window.AR || (window.AR = {});
       btns[i].addEventListener('click', function (ev) {
         show(ev.currentTarget.getAttribute('data-nav'));
       });
+      /**
+       * 开发者模式的唯一入口：长按底部导航的「设置」800ms 开 / 关。
+       * 绑在这里而不是 renderSettings() 里 —— 这个按钮不在设置页重建的 DOM 内，
+       * 绑一次即可，也不会因为设置页重渲染而丢监听或重复叠加。
+       */
+      if (btns[i].getAttribute('data-nav') === 'settings'
+        && AR.Panels && AR.Panels.bindSettingsLongPress) {
+        AR.Panels.bindSettingsLongPress(btns[i]);
+      }
     }
     // 实验性「模块」页：标签形态切换 + 页里回导入页的入口
     syncCustomTabNav();

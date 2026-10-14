@@ -83,8 +83,11 @@
   --dur-pill: calc(420ms * var(--motion-scale));
   --dur-ripple: calc(380ms * var(--motion-scale));
   --dur-glow: calc(500ms * var(--motion-scale));
-  --dur-dialog-in: calc(300ms * var(--motion-scale));
-  --dur-dialog-out: calc(200ms * var(--motion-scale));
+  /* 弹窗进出场时长 = AR.Motion 里 modal 场景默认样式（tileFlip）的 dur，必须是同一个值：
+     WAAPI 可用时走 motion.js，不可用时（旧内核）走这两条令牌，
+     两边快慢观感才会一致（否则同一版 APK 在两台手机上快慢不同）。 */
+  --dur-dialog-in: calc(460ms * var(--motion-scale));
+  --dur-dialog-out: calc(320ms * var(--motion-scale));
   --dur-page-in: calc(260ms * var(--motion-scale));
   --dur-page-out: calc(220ms * var(--motion-scale));
   --dur-zone: calc(340ms * var(--motion-scale));   /* 展开栏位：唯一允许的布局动画 */
