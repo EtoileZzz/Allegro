@@ -114,22 +114,46 @@ async function push() {
   return newCommit.sha;
 }
 
-/** 把 zip 当 Release 资产上传（uploads.github.com，multipart 由 fetch 的 FormData 构造） */
+/**
+ * 上传 Release 资产。
+ *
+ * ⚠ 不能用 `new FormData()` + fetch：实测 undici 会把 multipart **信封**本身
+ * 当成文件内容上传（GitHub 收到的是 `------formdata-undici-...` 开头的东西，
+ * PK/MZ 头全丢，APK 直接变成"not a ZIP archive"）。所以这里手工拼 multipart 字节。
+ * 本机 curl.exe 也不可用（schannel SEC_E_NO_CREDENTIALS，与 git 失败同源），
+ * 只能靠 node 的 fetch。
+ */
 async function uploadAsset(uploadUrl, file, tag) {
   const name = path.basename(file);
   const buf = fs.readFileSync(file);
-  const form = new FormData();
-  form.append('file', new Blob([buf]), name);
+  const B = '----abbeyroad' + Date.now().toString(16) + Math.floor(Math.random() * 1e6).toString(16);
+
+  const CRLF = Buffer.from('\r\n');
+  const preamble = Buffer.from(
+    '--' + B + '\r\n'
+    + 'Content-Disposition: form-data; name="file"; filename="' + name + '"\r\n'
+    + 'Content-Type: application/octet-stream\r\n\r\n', 'utf8');
+  const epilogue = Buffer.from('\r\n--' + B + '--\r\n', 'utf8');
+  const body = Buffer.concat([preamble, buf, epilogue]);
+
   const url = uploadUrl.replace('{?name,label}', '') + '?name=' + encodeURIComponent(name);
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + TOKEN, 'User-Agent': 'abbeyroad-release' },
-    body: form
+    headers: {
+      'Authorization': 'Bearer ' + TOKEN,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'abbeyroad-release',
+      'Content-Type': 'multipart/form-data; boundary=' + B,
+      'Content-Length': String(body.length)
+    },
+    body: body
   });
   const txt = await res.text();
-  if (!res.ok) { throw new Error('上传资产失败 ' + name + ' -> ' + res.status + ' ' + txt.slice(0, 200)); }
+  if (!res.ok) { throw new Error('上传资产失败 ' + name + ' -> ' + res.status + ' ' + txt.slice(0, 300)); }
   const j = JSON.parse(txt);
-  console.log('  资产已上传：' + name + '  (' + Math.round(j.size / 1024) + ' KB)');
+  console.log('  资产已上传：' + j.name + '  ' + j.size + ' 字节'
+    + (j.size === buf.length ? '  (与本地同尺寸 OK)' : '  !! 尺寸不符，本地 ' + buf.length));
   return j;
 }
 
