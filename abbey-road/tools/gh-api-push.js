@@ -18,6 +18,7 @@
  */
 'use strict';
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 
 const REPO = 'EtoileZzz/AbbeyRoad----ScheduleApp';
@@ -114,6 +115,22 @@ async function push() {
   return newCommit.sha;
 }
 
+  /*
+   * ⚠ 上传资产请用 gh CLI，不要用本文件里的 uploadAsset：
+   *
+   *   gh release upload <tag> <文件...> --repo EtoileZzz/AbbeyRoad----ScheduleApp --clobber
+   *
+   * 实测（2026-10，Node 24）：node 的 fetch / undici 在本机传 multipart 时，
+   * GitHub 会把**整个 multipart body** 当成文件内容存下来：远端 APK 以
+   * "------formdata-undici…" 或 "------abbeyroad…" 开头，size 正好是
+   * 「信封 + 文件 + 收尾」，apksigner 直接认不出是 ZIP。
+   * 试过三条路都失败：手拼 + 只带 Content-Type、FormData + 自定义 header、
+   * node:https 原样发字节（本地严格解析器验证字节完全正确，GitHub 仍按整体存）。
+   * gh CLI 的编码 GitHub 认，且远端 size 与本地逐字节一致 —— 唯一可靠路径。
+   *
+   * 所以：push（推分支）继续用本脚本（那个走 Git Data API，是可靠的）；
+   * release 只用本脚本建 Release/打 tag，资产交给 gh release upload。
+   */
 /**
  * 上传 Release 资产。
  *
@@ -123,39 +140,56 @@ async function push() {
  * 本机 curl.exe 也不可用（schannel SEC_E_NO_CREDENTIALS，与 git 失败同源），
  * 只能靠 node 的 fetch。
  */
-async function uploadAsset(uploadUrl, file, tag) {
+function uploadAsset(uploadUrl, file) {
   const name = path.basename(file);
   const buf = fs.readFileSync(file);
+  const B = '----abbeyroad' + Date.now().toString(16) + Math.floor(Math.random() * 1e6).toString(16);
 
-  /*
-   * 教训：不要手拼 multipart 字节，也不要只给 fetch 传一个 Buffer/字符串 body。
-   * Node 会自己补 Content-Type（含它自己的 boundary），与手写 header 撞车后，
-   * 整个 body 会被原样当作内容存下去 —— 远端文件开头就变成 "------abbeyroad…"，
-   * 也就是信封字节进了文件，APK 直接不是 ZIP（实测差值正好是信封长度）。
-   * 用标准 FormData + Blob，并显式带上同一个 boundary，才是稳的。
-   */
-  const fd = new FormData();
-  fd.append('file', new Blob([buf], { type: 'application/octet-stream' }), name);
+  const preamble = Buffer.from(
+    '--' + B + '\r\n'
+    + 'Content-Disposition: form-data; name="file"; filename="' + name + '"\r\n'
+    + 'Content-Type: application/octet-stream\r\n\r\n', 'utf8');
+  const epilogue = Buffer.from('\r\n--' + B + '--\r\n', 'utf8');
+  const body = Buffer.concat([preamble, buf, epilogue]);
 
-  const url = uploadUrl.replace('{?name,label}', '') + '?name=' + encodeURIComponent(name);
-  const res = await fetch(url, {
+  const u = new URL(uploadUrl.replace('{?name,label}', '') + '?name=' + encodeURIComponent(name));
+  const opts = {
     method: 'POST',
+    hostname: u.hostname,
+    port: u.port || 443,
+    path: u.pathname + u.search,
     headers: {
       'Authorization': 'Bearer ' + TOKEN,
+      'User-Agent': 'abbeyroad-release',
       'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'abbeyroad-release'
-    },
-    body: fd
+      'Content-Type': 'multipart/form-data; boundary=' + B,
+      'Content-Length': String(body.length)
+    }
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(opts, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const txt = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error('上传资产失败 ' + name + ' -> ' + res.statusCode + ' ' + txt.slice(0, 300)));
+        }
+        let j;
+        try { j = JSON.parse(txt); } catch (err) { return reject(new Error('上传应答不是 JSON：' + txt.slice(0, 200))); }
+        const same = j.size === buf.length;
+        console.log('  资产已上传：' + j.name + '  ' + j.size + ' 字节'
+          + (same ? '  (与本地同尺寸 OK)' : '  !! 尺寸不符，本地 ' + buf.length));
+        if (!same) {
+          return reject(new Error('上传后尺寸不符：' + j.name + ' 远端 ' + j.size + ' / 本地 ' + buf.length));
+        }
+        resolve(j);
+      });
+    });
+    req.on('error', reject);
+    req.end(body);
   });
-  const txt = await res.text();
-  if (!res.ok) { throw new Error('上传资产失败 ' + name + ' -> ' + res.status + ' ' + txt.slice(0, 300)); }
-  const j = JSON.parse(txt);
-  const same = j.size === buf.length;
-  console.log('  资产已上传：' + j.name + '  ' + j.size + ' 字节'
-    + (same ? '  (与本地同尺寸 OK)' : '  !! 尺寸不符，本地 ' + buf.length));
-  if (!same) { throw new Error('上传后尺寸不符：' + j.name + ' 远端 ' + j.size + ' / 本地 ' + buf.length); }
-  return j;
 }
 
 async function release(tag, notesFile, assets) {
@@ -187,7 +221,12 @@ async function release(tag, notesFile, assets) {
   });
   console.log('Release 已创建：' + rel.html_url);
 
-  for (const a of assets) { await uploadAsset(rel.upload_url, a, tag); }
+  if (process.env.GH_UPLOAD_VIA_CLI === '1') {
+    console.log('\n请在 pwsh 里上传资产（本机唯一可靠路径）：');
+    console.log('  gh release upload ' + tag + ' ' + assets.join(' ') + ' --repo ' + REPO + ' --clobber');
+  } else {
+    for (const a of assets) { await uploadAsset(rel.upload_url, a, tag); }
+  }
   console.log('\n完成：' + rel.html_url);
 }
 
