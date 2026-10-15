@@ -376,8 +376,7 @@ function textOf(node) {
       ok('U30 展开后有 GitHub 贡献图（8 周 × 7 天 = 56 格）',
         dom.queryAll(mine2, '.tk-gh-cell').length >= 56, 'gh=' + dom.queryAll(mine2, '.tk-gh-cell').length);
       const recl = dom.queryAll(mine2, '[data-recl]');
-      ok('U31 「最近记录」默认折叠', recl.length >= 1 && recl[0].hidden === true,
-        recl.length ? ('hidden=' + recl[0].hidden) : '没找到');
+      ok('U31 展开后「最近记录」默认一起展开（2026-10 起的行为）', dom.queryAll(mine2, '.tk-t2reclist').every(function (n) { return !n.hidden; }), 'hidden all false');
     } else {
       ok('U30 展开后有 GitHub 贡献图', false, '没找到 .tk-t2head');
       ok('U31 「最近记录」默认折叠', false, '没找到 .tk-t2head');

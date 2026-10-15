@@ -10245,6 +10245,8 @@ var AR = window.AR || (window.AR = {});
       if (ev.target.closest && ev.target.closest('.tk-edit-btn')) { return; }
       TK_MINE_OPEN[t.id] = !TK_MINE_OPEN[t.id];
       if (!TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = false; }
+      /* 展开时「最近记录」默认一起展开（收起时才折叠） */
+      if (TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = true; }
       if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
     });
     /* [编辑] 按钮 → 直接进该任务编辑页 */
@@ -10256,6 +10258,8 @@ var AR = window.AR || (window.AR = {});
         AR.Bridge.haptic('light', expBtn);
         TK_MINE_OPEN[t.id] = !TK_MINE_OPEN[t.id];
         if (!TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = false; }
+        /* 展开时「最近记录」默认一起展开 */
+        if (TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = true; }
         if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
       });
     }
@@ -10404,6 +10408,28 @@ var AR = window.AR || (window.AR = {});
     paint();
     tkSyncSegPills();
     body.appendChild(wrap);
+    /* 编辑页也看最近记录（仅已有任务；可逐笔撤销） */
+    if (!isNew) {
+      var recBox = el('<div class="tk-edit-recs"></div>');
+      function paintRecs() {
+        var cur = AR.Store.todoById(src.id) || src;
+        recBox.innerHTML = '<div class="tk-edit-rech">最近记录</div>' + tkRecList(cur);
+        recBox.querySelectorAll('[data-reck]').forEach(function (b) {
+          b.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            if (AR.Store.todoRemoveEntry(cur.id, (cur.entries || []).filter(function (e) {
+              return !e.deletedAt && AR.Store.todoEntryDay(e) === b.getAttribute('data-reck');
+            }).pop().id)) {
+              AR.UI.toast('已撤销 ' + tkRelDay(b.getAttribute('data-reck')) + ' 的一笔');
+              paintRecs();
+              if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+            }
+          });
+        });
+      }
+      paintRecs();
+      body.appendChild(recBox);
+    }
     var acts = [{
       label: isNew ? '创建' : '保存', kind: 'primary',
       onClick: function (close) {

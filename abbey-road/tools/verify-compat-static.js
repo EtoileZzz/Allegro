@@ -221,5 +221,24 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     /body\[data-perf\] \.tk-t2body\.tk-expand/.test(css3));
 }
 
+
+/* ═══════════ 16. 最近记录的展开口径与编辑页记录（v0.4.2 补） ═══════════ */
+{
+  const ui3 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const css4 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  /* 点开展开时，「最近记录」要一起展开；收起时才折叠。
+     两条展开路径（标题行 / 展开按钮）都得处理。 */
+  const autoOpen = (ui3.match(/if \(TK_MINE_OPEN\[t\.id\]\) \{ TK_REC_OPEN\[t\.id\] = true; \}/g) || []).length;
+  const autoClose = (ui3.match(/if \(!TK_MINE_OPEN\[t\.id\]\) \{ TK_REC_OPEN\[t\.id\] = false; \}/g) || []).length;
+  ok('C54 展开时自动展开最近记录（两条路径都处理）', autoOpen >= 2, 'autoOpen=' + autoOpen);
+  ok('C55 收起时仍然折叠最近记录', autoClose >= 2, 'autoClose=' + autoClose);
+
+  /* 编辑页也能看最近记录 */
+  ok('C56 任务编辑页显示最近记录', ui3.indexOf('tk-edit-recs') >= 0 && ui3.indexOf('paintRecs') >= 0);
+  ok('C57 编辑页记录区可逐笔撤销', /tkRecList\(cur\)/.test(ui3) && /todoRemoveEntry\(cur\.id/.test(ui3));
+  ok('C58 编辑页记录区有样式', css4.indexOf('.tk-edit-recs') >= 0);
+}
+
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exitCode = fail ? 1 : 0;

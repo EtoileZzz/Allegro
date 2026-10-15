@@ -3716,3 +3716,8 @@ body[data-perf] .tk-statpage .tk-wdt i,
 body[data-perf] .tk-statpage .tk-kbar i,
 body[data-perf] .tk-statpage .tk-goalbar i,
 body[data-perf] .tk-statpage .tk-spark polyline { animation: none !important; }
+
+
+/* 任务编辑页里的「最近记录」 */
+.tk-edit-recs { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--divider); }
+.tk-edit-rech { font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 6px; }
