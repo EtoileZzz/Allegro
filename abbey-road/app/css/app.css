@@ -3266,3 +3266,420 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
 /* v0.4.1（按用户选择 A）：模糊只由两条带自己负责 —— 它们是磨砂玻璃，
    内容从下面滚过时被糊掉。内容区里**不放任何模糊层**（那会让顶/底的行始终处于模糊区）。
    带子的高度 + 一点余量由 openModal 量出来写进 --m-pad-top / --m-pad-bottom。 */
+
+
+/* ══════════ 任务（统一模型）══════════
+   今日日程一张「任务」卡：设了计划的显示今天进度，没设的显示累计进度（旧长期任务的样子）。
+   所有条目都能划 + 长按编辑。图标与其它卡统一：纯 --accent 描边的镂空清单。 */
+
+/* 任务图标：不用实心色块徽章，改成与 ◔ ▤ ▦ 同一套的镂空描边 + 三笔清单线 */
+.tk-ico,
+.tk-t2ico {
+  width: 20px; height: 20px; border-radius: 5px; flex: 0 0 auto;
+  border: 1.4px solid var(--accent);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; background: transparent;
+}
+.tk-ico i, .tk-t2ico i { display: block; height: 1.5px; border-radius: 1px; background: var(--accent); }
+.tk-ico i:nth-child(1), .tk-t2ico i:nth-child(1) { width: 9px; }
+.tk-ico i:nth-child(2), .tk-t2ico i:nth-child(2) { width: 6px; }
+.tk-ico i:nth-child(3), .tk-t2ico i:nth-child(3) { width: 8px; }
+.tk-t2ico { width: 18px; height: 18px; border-radius: 4px; }
+
+/* 卡本体 */
+.tk-card {
+  margin-top: 10px; border-radius: var(--r-card); background: var(--glass-card);
+  box-shadow: var(--shadow-card); overflow: hidden;
+}
+.tk-sum {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 14px;
+  border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.tk-t { font-weight: 650; font-size: 13.5px; color: var(--text-primary); }
+.tk-n { margin-left: auto; font-size: 11.5px; color: var(--text-tertiary); }
+.tk-chev { color: var(--text-tertiary); font-size: 11px; transition: transform .2s var(--ease-standard); }
+.tk-sum.open .tk-chev, .tk-donehead.open .tk-chev, .tk-t2rech.open .tk-chev { transform: rotate(90deg); }
+.tk-body { padding: 0 8px 8px; }
+.tk-empty { padding: 16px 12px; text-align: center; color: var(--text-secondary); font-size: 12.5px; }
+
+/* 任务行 */
+.tk-row {
+  position: relative; display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px 9px 12px; border-radius: 11px; background: var(--bg-subtle);
+  margin: 4px 0; will-change: transform; touch-action: pan-y;
+}
+.tk-row.swiping, .tk-row.swipe-ok { background: var(--accent-soft); }
+.tk-bar { width: 3px; align-self: stretch; border-radius: 2px; flex: 0 0 auto; }
+.tk-main { min-width: 0; flex: 1 1 auto; }
+.tk-l1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tk-text {
+  font-weight: 600; font-size: 13.5px; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-marks { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+.tk-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.tk-num { font-size: 11px; color: var(--accent); font-weight: 650; }
+.tk-l2 { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; font-size: 11px; color: var(--text-secondary); }
+.tk-plan { color: var(--text-tertiary); }
+.tk-goal { color: var(--accent); font-weight: 600; }
+.tk-ltrack { display: block; height: 5px; border-radius: 3px; background: var(--divider); overflow: hidden; margin: 6px 0 4px; }
+.tk-lfill { display: block; height: 100%; border-radius: 3px; transition: width .35s var(--ease-emphasized); }
+.tk-hint { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; opacity: .75; }
+
+/* 折叠态迷你格：最近 7 天（一 二 三…▣▣▢ 那排的感觉） */
+.tk-mini { display: inline-flex; gap: 3px; margin-left: auto; align-items: center; flex: 0 0 auto; }
+.tk-mini-cell { width: 8px; height: 8px; border-radius: 2px; background: var(--divider); display: block; }
+.tk-mini-cell.part { background: var(--accent-soft); }
+.tk-mini-cell.full { background: var(--accent); }
+
+/* 已完成 */
+.tk-donewrap { margin-top: 6px; border-top: 1px dashed var(--divider); padding-top: 4px; }
+.tk-donehead {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px;
+  border: 0; background: transparent; font: inherit; font-size: 12.5px;
+  color: var(--text-secondary); text-align: left; cursor: pointer;
+}
+.tk-donehead .tk-chev { margin-left: auto; }
+.tk-done {
+  display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  border-radius: 10px; background: var(--bg-subtle); margin: 3px 0;
+}
+.tk-done .tk-dtext {
+  flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: var(--text-secondary);
+  text-decoration: line-through; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-done .tk-dmeta { font-size: 10.5px; color: var(--text-tertiary); flex: 0 0 auto; }
+.tk-dacts { display: flex; gap: 5px; flex: 0 0 auto; }
+.tk-dbtn {
+  font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--glass-stroke); background: var(--glass-card); color: var(--text-secondary); cursor: pointer;
+}
+.tk-dbtn.p { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); font-weight: 600; }
+
+/* 卡底：数据分析 + 新建任务 */
+.tk-foot { display: flex; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--divider); }
+.tk-fbtn {
+  flex: 1 1 auto; font: inherit; font-size: 12.5px; padding: 9px 12px; border-radius: 11px;
+  border: 1px solid var(--glass-stroke); background: var(--glass-surface); color: var(--text-secondary);
+  cursor: pointer; transition: background 180ms var(--ease-standard), color 180ms var(--ease-standard);
+}
+.tk-fbtn:hover { background: var(--accent-soft); color: var(--accent); }
+.tk-fbtn-p { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tk-fbtn-p:hover { background: var(--accent); color: var(--accent-contrast); }
+
+/* 「我的」汇总卡 */
+.tk-sumcard {
+  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+  padding: 13px 15px; margin-bottom: 9px;
+}
+.tk-sumhead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.tk-sumhead .tk-t { font-weight: 650; font-size: 13.5px; }
+.tk-sumhead .tk-n { margin-left: auto; font-size: 11.5px; color: var(--text-tertiary); }
+.tk-sumline { display: flex; align-items: center; gap: 10px; margin: 7px 0; }
+.tk-sk { font-size: 12px; color: var(--text-secondary); width: 34px; flex: 0 0 auto; }
+.tk-strack { flex: 1 1 auto; height: 7px; border-radius: 5px; background: var(--bg-subtle); overflow: hidden; }
+.tk-strack i { display: block; height: 100%; border-radius: 5px; background: var(--accent); transition: width .35s var(--ease-emphasized); }
+.tk-sv { font-size: 11.5px; color: var(--text-secondary); flex: 0 0 auto; min-width: 76px; text-align: right; }
+.tk-sumtags { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.tk-tag { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; background: var(--bg-subtle); color: var(--text-secondary); }
+.tk-tag-warn { background: rgba(229, 72, 77, .12); color: var(--danger); }
+
+/* 「我的」两行制明细卡 */
+.tk-tcard {
+  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+  padding: 11px 13px; margin-bottom: 8px;
+}
+.tk-t2head { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.tk-t2name {
+  font-weight: 650; font-size: 13.5px; line-height: 1.35; min-width: 0; color: var(--text-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tk-t2right { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding-top: 1px; }
+.tk-t2chev { color: var(--text-tertiary); font-size: 11px; transition: transform .2s var(--ease-standard); }
+.tk-t2head.open .tk-t2chev { transform: rotate(90deg); }
+.tk-t2row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.tk-t2lab { flex: 0 0 auto; width: 42px; font-size: 10.5px; color: var(--text-tertiary); }
+.tk-t2dots { display: flex; align-items: center; gap: 3px; flex: 1 1 auto; }
+.tk-t2dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.tk-t2dot.off { background: var(--divider); }
+.tk-t2num { font-size: 11.5px; color: var(--accent); font-weight: 650; }
+.tk-t2none { font-size: 11px; color: var(--text-tertiary); }
+.tk-t2track { flex: 1 1 auto; height: 6px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
+.tk-t2fill { display: block; height: 100%; border-radius: 4px; transition: width .35s var(--ease-emphasized); }
+.tk-t2val { flex: 0 0 auto; font-size: 11.5px; color: var(--text-secondary); text-align: right; min-width: 82px; }
+.tk-t2val b { color: var(--text-primary); }
+.tk-t2body { margin-top: 11px; border-top: 1px solid var(--divider); padding-top: 10px; }
+
+/* 贡献图：配色跟随主题色（不用 color-mix —— 老 WebView 不认） */
+.tk-gh { display: flex; gap: 4px; }
+.tk-gh-days { display: flex; flex-direction: column; gap: 3px; padding-top: 15px; flex: 0 0 auto; }
+.tk-gh-days i { height: 13px; line-height: 13px; font-style: normal; font-size: 9px; color: var(--text-tertiary); }
+.tk-gh-main { min-width: 0; flex: 1 1 auto; }
+.tk-gh-months { display: flex; gap: 3px; margin-bottom: 3px; height: 12px; }
+.tk-gh-months span { font-size: 9px; color: var(--text-tertiary); flex: 0 0 auto; width: 13px; white-space: nowrap; }
+.tk-gh-grid { display: flex; gap: 3px; }
+.tk-gh-col { display: flex; flex-direction: column; gap: 3px; }
+.tk-gh-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--divider); display: block; }
+.tk-gh-cell.l1 { background: rgba(91, 141, 239, .30); }
+.tk-gh-cell.l2 { background: rgba(91, 141, 239, .50); }
+.tk-gh-cell.l3 { background: rgba(91, 141, 239, .70); }
+.tk-gh-cell.l4 { background: var(--accent); }
+.tk-gh-cell.none { background: var(--divider); opacity: .45; }
+body[data-theme="dark"] .tk-gh-cell { background: #2A3038; }
+body[data-theme="dark"] .tk-gh-cell.l1 { background: rgba(122, 165, 246, .32); }
+body[data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
+body[data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
+body[data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
+body[data-theme="dark"] .tk-gh-cell.none { background: #2A3038; opacity: .5; }
+body[data-perf] .tk-gh-cell { background: #dfe4ed !important; }
+body[data-perf] .tk-gh-cell.l1 { background: #b9cdf3 !important; }
+body[data-perf] .tk-gh-cell.l2 { background: #90aeee !important; }
+body[data-perf] .tk-gh-cell.l3 { background: #6d93e9 !important; }
+body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
+.tk-gh-legend {
+  display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+  margin-top: 8px; font-size: 9.5px; color: var(--text-tertiary);
+}
+.tk-gh-legend .tk-gh-cell { width: 11px; height: 11px; }
+
+/* 折叠的最近记录 */
+.tk-t2recs { margin-top: 11px; }
+.tk-t2rech {
+  display: flex; align-items: center; width: 100%; border: 0; background: transparent;
+  font: inherit; font-size: 11.5px; color: var(--text-secondary); padding: 5px 2px; cursor: pointer; text-align: left;
+}
+.tk-t2rech .tk-chev { margin-left: auto; font-size: 10px; }
+.tk-t2reclist { margin-top: 2px; }
+.tk-rec { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 9px; background: var(--bg-subtle); margin: 3px 0; }
+.tk-rec .tk-rn { font-size: 12px; font-weight: 600; color: var(--text-primary); flex: 1 1 auto; }
+.tk-rec .tk-rx {
+  font: inherit; font-size: 10.5px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--glass-stroke); background: var(--glass-card); color: var(--text-secondary); cursor: pointer;
+}
+.tk-rec .tk-rx.undo { color: var(--danger); border-color: var(--danger); }
+.tk-rech-more { font-size: 10.5px; color: var(--text-tertiary); margin-top: 5px; }
+.tk-badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+.tk-empty-card {
+  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+  padding: 16px; text-align: center; color: var(--text-secondary); font-size: 12.5px;
+}
+
+/* 数据分析弹窗 */
+.tk-statrow {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 0; border-bottom: 1px solid var(--divider); font-size: 13px; color: var(--text-secondary);
+}
+.tk-statrow b { color: var(--text-primary); font-size: 14px; }
+.tk-statline { display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 12.5px; }
+.tk-statdot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.tk-statname { min-width: 0; color: var(--text-primary); font-weight: 600; }
+.tk-statmeta { margin-left: auto; color: var(--text-tertiary); font-size: 11.5px; flex: 0 0 auto; }
+
+/* 作业条目：编辑按钮 + 计划 */
+.hw-acts { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.hw-edit {
+  font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--glass-stroke); background: var(--glass-card);
+  color: var(--text-secondary); cursor: pointer;
+}
+.hw-edit:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.hw-plan { font-size: 10.5px; color: var(--text-tertiary); flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+
+/* ══════════ 「我的 · 任务」一张大卡（v0.4.3）══════════
+   汇总区 + 所有条目 + 卡底按钮都在**同一张卡**里，条目之间用细分隔线，不再一条一张卡。 */
+
+.tk-mine-card {
+  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+  padding: 0 0 12px; margin-bottom: 9px; overflow: hidden;
+}
+.tk-mine-head { padding: 13px 15px 4px; }
+
+/* 一条任务 = 大卡里的一段 */
+.tk-line { padding: 11px 15px 4px; border-top: 1px solid var(--divider); }
+.tk-line:first-of-type { border-top: 0; }
+
+/* 条目头：图标 + 名称 + [编辑] + ▸ */
+.tk-t2head { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.tk-t2name {
+  font-weight: 650; font-size: 13.5px; line-height: 1.35; min-width: 0; color: var(--text-primary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tk-t2right { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.tk-edit-btn {
+  font: inherit; font-size: 11px; padding: 3px 9px; border-radius: 7px;
+  border: 1px solid var(--glass-stroke); background: var(--glass-surface);
+  color: var(--text-secondary); cursor: pointer; flex: 0 0 auto;
+}
+.tk-edit-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.tk-t2chev { color: var(--text-tertiary); font-size: 11px; transition: transform .2s var(--ease-standard); }
+.tk-t2head.open .tk-t2chev { transform: rotate(90deg); }
+
+/* 今天 / 累计 两行 */
+.tk-t2row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.tk-t2lab { flex: 0 0 auto; width: 30px; font-size: 10.5px; color: var(--text-tertiary); }
+.tk-t2dots { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; }
+.tk-t2dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.tk-t2dot.off { background: var(--divider); }
+.tk-t2num { font-size: 12px; color: var(--accent); font-weight: 650; }
+.tk-t2track { flex: 1 1 auto; height: 6px; border-radius: 4px; background: var(--bg-subtle); overflow: hidden; }
+.tk-t2fill { display: block; height: 100%; border-radius: 4px; transition: width .35s var(--ease-emphasized); }
+.tk-t2val { flex: 0 0 auto; font-size: 11.5px; color: var(--text-secondary); text-align: right; min-width: 78px; }
+.tk-t2val b { color: var(--text-primary); }
+
+/* 迷你格：0.4.2 那种大格（撑满宽度、高 32px、写星期字 + 次数） */
+.tk-cells { display: flex; gap: 4px; margin-top: 9px; }
+.tk-cell {
+  flex: 1 1 0; min-width: 0; height: 32px; border-radius: 8px; background: var(--bg-subtle);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 9.5px; color: var(--text-tertiary); font-style: normal; line-height: 1.1;
+}
+.tk-cell b { font-size: 9.5px; font-weight: 650; }
+.tk-cell.off { opacity: .4; }
+.tk-cell.part { background: var(--accent-soft); color: var(--accent); }
+.tk-cell.part b { color: var(--accent); }
+.tk-cell.full { background: var(--accent); color: var(--accent-contrast); }
+.tk-cell.full b { color: var(--accent-contrast); }
+
+/* 展开区：卡内 + 左侧竖线缩进，明确"属于上一条" */
+.tk-t2body {
+  margin: 11px 0 4px; padding: 10px 0 2px 11px;
+  border-left: 2px solid var(--divider); border-top: 1px solid var(--divider);
+}
+.tk-t2recs { margin-top: 11px; }
+.tk-t2rech {
+  display: flex; align-items: center; width: 100%; border: 0; background: transparent;
+  font: inherit; font-size: 11.5px; color: var(--text-secondary); padding: 5px 2px; cursor: pointer; text-align: left;
+}
+.tk-t2rech .tk-chev { margin-left: auto; font-size: 10px; }
+.tk-t2reclist { margin-top: 2px; }
+
+/* 贡献图 */
+.tk-gh { display: flex; gap: 4px; }
+.tk-gh-days { display: flex; flex-direction: column; gap: 3px; padding-top: 15px; flex: 0 0 auto; }
+.tk-gh-days i { height: 13px; line-height: 13px; font-style: normal; font-size: 9px; color: var(--text-tertiary); }
+.tk-gh-main { min-width: 0; flex: 1 1 auto; }
+.tk-gh-months { display: flex; gap: 3px; margin-bottom: 3px; height: 12px; }
+.tk-gh-months span { font-size: 9px; color: var(--text-tertiary); flex: 0 0 auto; width: 13px; white-space: nowrap; }
+.tk-gh-grid { display: flex; gap: 3px; }
+.tk-gh-col { display: flex; flex-direction: column; gap: 3px; }
+.tk-gh-cell { width: 13px; height: 13px; border-radius: 3px; background: var(--divider); display: block; }
+.tk-gh-cell.l1 { background: rgba(91, 141, 239, .30); }
+.tk-gh-cell.l2 { background: rgba(91, 141, 239, .50); }
+.tk-gh-cell.l3 { background: rgba(91, 141, 239, .70); }
+.tk-gh-cell.l4 { background: var(--accent); }
+.tk-gh-cell.none { background: var(--divider); opacity: .45; }
+body[data-theme="dark"] .tk-gh-cell { background: #2A3038; }
+body[data-theme="dark"] .tk-gh-cell.l1 { background: rgba(122, 165, 246, .32); }
+body[data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
+body[data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
+body[data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
+body[data-theme="dark"] .tk-gh-cell.none { background: #2A3038; opacity: .5; }
+body[data-perf] .tk-gh-cell { background: #dfe4ed !important; }
+body[data-perf] .tk-gh-cell.l1 { background: #b9cdf3 !important; }
+body[data-perf] .tk-gh-cell.l2 { background: #90aeee !important; }
+body[data-perf] .tk-gh-cell.l3 { background: #6d93e9 !important; }
+body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
+.tk-gh-legend {
+  display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+  margin-top: 8px; font-size: 9.5px; color: var(--text-tertiary);
+}
+.tk-gh-legend .tk-gh-cell { width: 11px; height: 11px; }
+
+/* 空态与卡底 */
+.tk-empty-card { padding: 16px 15px; text-align: center; color: var(--text-secondary); font-size: 12.5px; }
+.tk-foot {
+  display: flex; gap: 8px; margin: 10px 15px 0; padding-top: 10px; border-top: 1px solid var(--divider);
+}
+
+
+/* ══════════ 任务数据分析（四页）══════════ */
+.tk-stats { padding-bottom: 4px; }
+.tk-tabs-seg { margin-bottom: 12px; }
+.tk-tabs-seg .segmented { margin-bottom: 0; }
+.tk-statpage { min-height: 120px; }
+
+/* KPI 格 */
+.tk-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.tk-kpi {
+  border: 1px solid var(--glass-stroke); border-radius: 12px; padding: 10px 11px;
+  background: var(--glass-surface); min-width: 0;
+}
+.tk-kl { font-size: 11px; color: var(--text-tertiary); }
+.tk-kv {
+  font-size: 21px; font-weight: 700; line-height: 1.2; margin-top: 2px;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.tk-kv i { font-size: 12px; font-weight: 500; font-style: normal; color: var(--text-tertiary); }
+.tk-kbar { height: 5px; border-radius: 4px; background: rgba(128, 138, 156, .22); margin-top: 8px; overflow: hidden; }
+.tk-kbar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.tk-kd { font-size: 11px; margin-top: 5px; }
+.tk-kd.up { color: var(--accent); }
+.tk-kd.down { color: var(--danger); }
+
+.tk-shead { font-size: 11.5px; color: var(--text-tertiary); margin: 16px 0 8px; }
+
+/* 柱状图 */
+.tk-chart { border: 1px solid var(--glass-stroke); border-radius: 12px; padding: 12px 12px 8px; background: var(--glass-surface); }
+.tk-bars { display: flex; align-items: flex-end; gap: 3px; height: 100px; }
+.tk-bar {
+  flex: 1 1 0; min-width: 0; border-radius: 3px 3px 0 0; background: var(--accent); opacity: .45;
+  transform-origin: bottom; transition: opacity 150ms var(--ease-standard);
+}
+.tk-bar:hover { opacity: 1; }
+.tk-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); margin-top: 6px; }
+.tk-spark { display: block; width: 100%; height: 110px; }
+
+/* 星期分布 */
+.tk-wdrow { display: flex; align-items: center; gap: 9px; margin: 6px 0; }
+.tk-wdn { width: 16px; font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; }
+.tk-wdt { flex: 1 1 auto; height: 12px; border-radius: 4px; background: rgba(128, 138, 156, .20); overflow: hidden; }
+.tk-wdt i { display: block; height: 100%; border-radius: 4px; background: var(--accent); opacity: .8; }
+.tk-wdc { width: 34px; text-align: right; font-size: 11.5px; color: var(--text-secondary); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
+/* 各任务 */
+.tk-tstat { border: 1px solid var(--glass-stroke); border-radius: 12px; padding: 11px 12px; margin-bottom: 9px; background: var(--glass-surface); }
+.tk-tsh { display: flex; align-items: center; gap: 8px; }
+.tk-tsdot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.tk-tsname { font-weight: 650; font-size: 13px; min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-tspc { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--accent); flex: 0 0 auto; }
+.tk-tsmeta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 4px; }
+.tk-sparkrow { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 8px; }
+.tk-sparkrow i { flex: 1 1 0; min-width: 0; border-radius: 2px; background: var(--accent); opacity: .6; }
+.tk-goalbar { height: 6px; border-radius: 4px; background: rgba(128, 138, 156, .20); margin-top: 9px; overflow: hidden; }
+.tk-goalbar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+
+/* 洞察 */
+.tk-ins { display: flex; gap: 9px; padding: 10px 0; border-bottom: 1px solid var(--divider); }
+.tk-ins:last-of-type { border-bottom: 0; }
+.tk-ins .tk-ic {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 7px; background: var(--accent);
+  color: var(--accent-contrast); display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.tk-ins p { margin: 0; font-size: 12.5px; color: var(--text-secondary); }
+.tk-ins p b { color: var(--text-primary); }
+.tk-muted { font-size: 11.5px; color: var(--text-tertiary); margin: 10px 0 0; }
+
+/* 内容进场：柱子长出来、横条展开、折线画出来（尊重 prefers-reduced-motion） */
+.tk-statpage .tk-bar { animation: tkGrow 460ms var(--ease-emphasized) both; }
+.tk-statpage .tk-wdt i, .tk-statpage .tk-kbar i, .tk-statpage .tk-goalbar i {
+  animation: tkWipe 520ms var(--ease-emphasized) both;
+}
+.tk-statpage .tk-spark polyline {
+  stroke-dasharray: 1400; stroke-dashoffset: 1400;
+  animation: tkDraw 700ms var(--ease-emphasized) 80ms both;
+}
+@keyframes tkGrow { from { transform: scaleY(.04); } to { transform: none; } }
+@keyframes tkWipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes tkDraw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tk-statpage .tk-bar, .tk-statpage .tk-wdt i, .tk-statpage .tk-kbar i,
+  .tk-statpage .tk-goalbar i, .tk-statpage .tk-spark polyline { animation: none !important; }
+}
+/* 性能模式：不播动画 */
+body[data-perf] .tk-statpage .tk-bar,
+body[data-perf] .tk-statpage .tk-wdt i,
+body[data-perf] .tk-statpage .tk-kbar i,
+body[data-perf] .tk-statpage .tk-goalbar i,
+body[data-perf] .tk-statpage .tk-spark polyline { animation: none !important; }

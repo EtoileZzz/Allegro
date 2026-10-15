@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.1b';
+var APP_VERSION = '0.4.2';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -320,7 +320,7 @@ var APP_VERSION = '0.4.1b';
       settings: defaultSettings(semId),
       semesters: [{
         id: semId, name: '我的学期', startDate: dateKey(mondayOf(now)),
-        weekCount: 20, isCurrent: true, holidays: [],
+        weekCount: 20, isCurrent: true, holidays: [], keyDates: [],
         updatedAt: now.toISOString()
       }],
       periods: makePeriods(semId),
@@ -631,6 +631,328 @@ var APP_VERSION = '0.4.1b';
      和「作业」是两张表，互不影响：作业的条数 / 完成率里不会混进长期任务。
      ══════════════════════════════════════════════════════════════ */
 
+  /* ══════════════════════════════════════════════════════════════
+     任务（v0.4.2：把「每日任务」与「长期任务」合并成一张表）
+
+     一条任务 = 节奏（选填）+ 累计目标（选填）
+       cadence：{ type:'daily|weekly|weekdays|everyN|unlimited', times, weekdays, intervalDays }
+                null / unlimited = 每天不限次（想记就记，永不自动收起）
+       goal   ：{ target, unit } 或 null（只打卡、不攒进度条）
+
+     唯一事实来源是 entries（每一笔完成）：
+       · 节奏的"今天/本周做了几次" = 数落在这个周期里的 entries
+       · 累计进度               = 所有 entries 的 amount 求和
+     所以不存在两份数据要对账，"联动"这个词也就不需要了。
+
+     老数据（longTasks 表）在 migrate 里无损并过来，老表只归档不删除，
+     便于回退；并过的条目带 migratedFrom 标记，可追溯。
+     ══════════════════════════════════════════════════════════════ */
+
+  var TASK_UNLIMITED = { type: 'unlimited' };
+
+  function todoRaw() { return (state.tasks2 || (state.tasks2 = [])); }
+  function todoList() { return liveOnly(todoRaw()); }
+  function todoById(id) {
+    var list = todoRaw();
+    for (var i = 0; i < list.length; i++) { if (list[i].id === id && !list[i].deletedAt) { return list[i]; } }
+    return null;
+  }
+/**
+ * 显示口径（v0.4.3 简化）：不再分「每日/长期」两张卡，只剩显示 / 不显示。
+ * 仍返回 {daily,long} 两个键（老调用方与老配置还在读），两者恒等。
+ * 老字段兼容：showInToday === false 视为两处都不显示。
+ */
+function todoDisplay(t) {
+  if (!t) { return { daily: false, long: false }; }
+  var show = t.showInToday !== false;
+  return { daily: show, long: show };
+}
+
+/**
+ * 今日任务卡的数据源（v0.4.3：不再分「每日/长期」两张卡，统一为一处）。
+ * 兼容老字段：showInToday === false 视为不显示；其余都显示。
+ */
+function todoDailyList() {
+  var list = todoList(), out = [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].archived) { continue; }
+    if (list[i].showInToday === false) { continue; }
+    out.push(list[i]);
+  }
+  return out;
+}
+/** 保留这个名字给老调用方（升级期兼容），语义与 todoDailyList 相同 */
+function todoLongList() { return todoDailyList(); }
+  /** 在今日页出现过的任务（两张卡合并的视图） */
+  function todoTodayList() { return todoDailyList(); }
+  /** 一笔记录落在本地哪一天（老数据只有 at，新数据带 k） */
+  function todoEntryDay(e) {
+    if (!e) { return ''; }
+    if (e.k) { return e.k; }
+    if (!e.at) { return ''; }
+    var d = new Date(e.at);
+    return isNaN(d.getTime()) ? '' : dateKey(d);
+  }
+  function todoLiveEntries(t) {
+    var es = (t && t.entries) || [], out = [];
+    for (var i = 0; i < es.length; i++) { if (!es[i].deletedAt) { out.push(es[i]); } }
+    return out;
+  }
+  /** 某天完成几次（一笔算一次；amount 只用于累计量） */
+  function todoDayCount(t, dayKey) {
+    var es = todoLiveEntries(t), n = 0;
+    for (var i = 0; i < es.length; i++) { if (todoEntryDay(es[i]) === dayKey) { n++; } }
+    return n;
+  }
+  /** 今天/本周 应当做几次；Infinity = 不限次 */
+  function todoRequired(t, date) {
+    var c = (t && t.cadence) || TASK_UNLIMITED;
+    if (c.type === 'unlimited' || !c.type) { return Infinity; }
+    var d0 = new Date(date || new Date()); d0.setHours(0, 0, 0, 0);
+    var anchor = new Date(); anchor.setHours(0, 0, 0, 0);
+    var diffDays = Math.floor((anchor - d0) / 86400000);
+    var interval = Math.max(1, Number(c.intervalDays) || 1);
+    if (c.type === 'daily') { return c.times || 1; }
+    if (c.type === 'weekly') { return c.times || 1; }
+    if (c.type === 'everyN') { return (diffDays % interval === 0) ? (c.times || 1) : 0; }
+    if (c.type === 'weekdays') {
+      var wd = weekdayOf(d0);
+      return (c.weekdays || []).indexOf(wd) >= 0 ? (c.times || 1) : 0;
+    }
+    if (c.type === 'everyNDow') {
+      var wd2 = weekdayOf(d0);
+      if ((c.weekdays || []).indexOf(wd2) < 0) { return 0; }
+      return (Math.floor(diffDays / 7) % interval === 0) ? (c.times || 1) : 0;
+    }
+    return 1;
+  }
+  /** 当期目标（0 = 没有节奏，永不自动收起） */
+  function todoPeriodGoal(t) {
+    var c = (t && t.cadence) || TASK_UNLIMITED;
+    if (c.type === 'unlimited' || !c.type) { return 0; }
+    if (c.type === 'weekly') { return c.times || 1; }
+    if (c.type === 'weekdays' || c.type === 'everyNDow') {
+      return (c.weekdays || []).length * (c.times || 1);
+    }
+    return c.times || 1;
+  }
+  function todoIsWeekly(t) {
+    var c = (t && t.cadence) || TASK_UNLIMITED;
+    return c.type === 'weekly' || c.type === 'weekdays' || c.type === 'everyNDow';
+  }
+  /** 周期标识：用来判断"本期是否已收起"（跨周期自动失效） */
+  function todoPeriodKey(t, date) {
+    if (todoIsWeekly(t)) {
+      var d = date ? new Date(date) : new Date();
+      return 'W' + dateKey(mondayOf(d));
+    }
+    return dateKey(date || new Date());
+  }
+  /** 当期已完成几次 */
+  function todoPeriodDone(t, date) {
+    var dayKey = dateKey(date || new Date());
+    if (todoIsWeekly(t)) {
+      var monday = mondayOf(date || new Date());
+      var sum = 0;
+      for (var i = 0; i < 7; i++) { sum += todoDayCount(t, dateKey(addDays(monday, i))); }
+      return sum;
+    }
+    return todoDayCount(t, dayKey);
+  }
+  /** 累计（所有 entries 的 amount 之和） */
+  function todoTotal(t) {
+    var es = todoLiveEntries(t), sum = 0;
+    for (var i = 0; i < es.length; i++) { sum += Number(es[i].amount) || 0; }
+    return Math.round(sum * 100) / 100;
+  }
+  /** 一条任务的完整进度快照（界面直接用，避免各处各算） */
+  function todoProgress(t, date) {
+    var goal = (t && t.goal) || null;
+    var total = todoTotal(t);
+    var target = goal ? (Number(goal.target) || 0) : 0;
+    return {
+      today: todoDayCount(t, dateKey(date || new Date())),
+      periodDone: todoPeriodDone(t, date),
+      periodGoal: todoPeriodGoal(t),
+      periodUnit: todoIsWeekly(t) ? '本周' : '今天',
+      required: todoRequired(t, date),
+      total: total,
+      target: target,
+      rate: target > 0 ? Math.min(1, total / target) : 0,
+      percent: target > 0 ? Math.round(Math.min(1, total / target) * 100) : 0,
+      hasGoal: !!goal,
+      done: todoPeriodGoal(t) > 0 && todoPeriodDone(t, date) >= todoPeriodGoal(t)
+    };
+  }
+  /**
+   * 本期是否"收起"（→ 折进「已完成」）：
+   *   有节奏且本期做满 → 收起；但用户点过「继续做」（aside === 本期标识）就不再收起。
+   *   周期一换，aside 自动失效（标识不同），于是回到待办。
+   */
+  function todoSettled(t, date) {
+    if (todoPeriodGoal(t) <= 0) { return false; }
+    if (t.aside && t.aside === todoPeriodKey(t, date)) { return false; }
+    return todoPeriodDone(t, date) >= todoPeriodGoal(t);
+  }
+  /** 「继续做」：只取消收起，计数/记录/累计一条不动。收 id（与 todoAddEntry 一致） */
+  function todoContinue(id, date) {
+    var t = (id && typeof id === 'object') ? id : todoById(id);
+    if (!t) { return false; }
+    t.aside = todoPeriodKey(t, date);
+    t.updatedAt = new Date().toISOString();
+    save(true);
+    return true;
+  }
+  /** 打卡一次（确认即 +1，无论完成状态） */
+  function todoAddEntry(id, amount, note, opts) {
+    var t = todoById(id);
+    if (!t) { return null; }
+    var amt = Number(amount);
+    if (!isFinite(amt) || !amt) { amt = 1; }          // 打卡默认 1
+    if (!t.entries) { t.entries = []; }
+    var now = new Date();
+    var e = {
+      id: uid(), k: dateKey(now), at: now.toISOString(),
+      amount: amt, note: String(note || '').slice(0, 120)
+    };
+    if (opts && opts.src) { e.src = opts.src; }
+    t.entries.push(e);
+    t.updatedAt = e.at;
+    if (!t.createdAt) { t.createdAt = e.at; }
+    save(true);
+    return e;
+  }
+  function todoRemoveEntry(id, entryId) {
+    var t = todoById(id);
+    if (!t || !t.entries) { return false; }
+    for (var i = 0; i < t.entries.length; i++) {
+      if (t.entries[i].id === entryId && !t.entries[i].deletedAt) {
+        t.entries[i].deletedAt = new Date().toISOString();   // 软删除，回收站可恢复
+        t.updatedAt = t.entries[i].deletedAt;
+        save(true);
+        return true;
+      }
+    }
+    return false;
+  }
+  /** 撤销"某一天/某一期"最近的一笔（「已完成」里的撤销按一次算） */
+  function todoUndoLast(id) {
+    var t = todoById(id);
+    if (!t || !t.entries) { return false; }
+    for (var i = t.entries.length - 1; i >= 0; i--) {
+      if (!t.entries[i].deletedAt) {
+        t.entries[i].deletedAt = new Date().toISOString();
+        t.updatedAt = t.entries[i].deletedAt;
+        save(true);
+        return true;
+      }
+    }
+    return false;
+  }
+  function todoUpsert(patch) {
+    patch = patch || {};
+    var t = patch.id ? todoById(patch.id) : null;
+    var nowIso = new Date().toISOString();
+    if (!t) {
+      t = {
+        id: uid(), text: '', colorKey: '#5B8DEF',
+        cadence: TASK_UNLIMITED, goal: null,
+        showInToday: true, entries: [], createdAt: nowIso, updatedAt: nowIso
+      };
+      todoRaw().push(t);
+    }
+    var keys = ['text', 'colorKey', 'showInToday', 'archived', 'note', 'aside', 'showDaily', 'showLong'];
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (Object.prototype.hasOwnProperty.call(patch, k)) { t[k] = patch[k]; }
+    }
+    /* v0.4.3：显式设过 showDaily/showLong 就把老的 showInToday 归位，
+       否则 todoDisplay() 里的 showInToday===false 兜底会把两条卡都关掉。 */
+    if (Object.prototype.hasOwnProperty.call(patch, 'showDaily') ||
+        Object.prototype.hasOwnProperty.call(patch, 'showLong')) {
+      if (!Object.prototype.hasOwnProperty.call(patch, 'showInToday')) { t.showInToday = true; }
+      if (!Object.prototype.hasOwnProperty.call(patch, 'showDaily')) { t.showDaily = !!t.showDaily; }
+      if (!Object.prototype.hasOwnProperty.call(patch, 'showLong')) { t.showLong = !!t.showLong; }
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'cadence')) {
+      var c = patch.cadence;
+      t.cadence = (!c || c.type === 'unlimited') ? TASK_UNLIMITED : {
+        type: c.type, times: Math.max(1, Number(c.times) || 1),
+        intervalDays: Math.max(1, Number(c.intervalDays) || 1),
+        weekdays: (c.weekdays || [1, 2, 3, 4, 5]).slice()
+      };
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'goal')) {
+      var g = patch.goal;
+      t.goal = (!g || !(Number(g.target) > 0)) ? null : {
+        target: Number(g.target), unit: String(g.unit || '').slice(0, 12)
+      };
+    }
+    t.updatedAt = nowIso;
+    save(true);
+    return t;
+  }
+  function todoRemove(id) {
+    var t = todoById(id);
+    if (!t) { return false; }
+    softDelete('tasks2', t);
+    save(true);
+    return true;
+  }
+
+  /**
+   * 迁移（v0.4.2）：把老的「长期任务」无损并进新表。
+   *
+   * 老模型 { name, unit, target, entries[{amount, at}] } → 新模型
+   *   { text: name, cadence: unlimited, goal: {target, unit}, entries: 原样保留 }
+   * 老条目没有日期键 k，补一个由 at 推出来的 k（不改 amount，进度一分不差）。
+   *
+   * 幂等：全部并完把老表条目标记 archived，第二次进来就没有可并的了。
+   * 老表**不删除**，留在数据里可回退。
+   */
+  function migrateLongTasksIntoToDos(target) {
+    var st = target || state;
+    if (!st) { return 0; }
+    var old = st.longTasks || [];
+    if (!st.tasks2) { st.tasks2 = []; }
+    var moved = 0;
+    for (var i = 0; i < old.length; i++) {
+      var o = old[i];
+      if (!o || o.archived || o.deletedAt) { continue; }
+      var entries = [];
+      var es = o.entries || [];
+      for (var j = 0; j < es.length; j++) {
+        var e = es[j];
+        if (!e) { continue; }
+        entries.push({
+          id: e.id || uid(), k: todoEntryDay(e), at: e.at || '',
+          amount: Number(e.amount) || 0,
+          note: e.note || '',
+          migratedFrom: 'longTasks',
+          deletedAt: e.deletedAt || null
+        });
+      }
+      st.tasks2.push({
+        id: o.id || uid(),
+        text: o.name || '未命名',
+        colorKey: o.colorKey || '#5B8DEF',
+        cadence: TASK_UNLIMITED,
+        goal: (Number(o.target) > 0) ? { target: Number(o.target), unit: String(o.unit || '') } : null,
+        showInToday: o.showInToday !== false,
+        archived: false,
+        entries: entries,
+        migratedFrom: 'longTasks',
+        createdAt: o.createdAt || (entries.length ? entries[0].at : new Date().toISOString()),
+        updatedAt: o.updatedAt || new Date().toISOString()
+      });
+      o.archived = true;                       // 幂等：不再重复并
+      o.migratedTo = 'tasks2';
+      moved++;
+    }
+    return moved;
+  }
+
+
   function longTaskRaw() { return (state.longTasks || (state.longTasks = [])); }
   /** 还活着的长期任务（界面显示用） */
   function longTaskList() { return liveOnly(longTaskRaw()); }
@@ -889,7 +1211,7 @@ var APP_VERSION = '0.4.1b';
       s.promptTemplates = [{ id: 'default', version: PROMPT_VERSION, title: '默认课表整理提示词', body: PROMPT_TEXT, isDefault: true }];
     }
     var lists = ['semesters', 'teachers', 'locations', 'courses', 'blocks', 'overrides', 'events',
-      'tasks', 'longTasks', 'countdowns', 'quickTodos', 'reminders', 'tombstones'];
+      'tasks', 'tasks2', 'longTasks', 'countdowns', 'quickTodos', 'reminders', 'tombstones'];
     for (var i = 0; i < lists.length; i++) { if (!Array.isArray(s[lists[i]])) { s[lists[i]] = []; } }
 
     /* ── v0.4.0：日程统一 ──────────────────────────────────────
@@ -951,6 +1273,13 @@ var APP_VERSION = '0.4.1b';
       splitLegacyBlockNotes(s);
       if (!s.meta) { s.meta = {}; }
       s.meta.notesSplitAt = APP_VERSION;
+    }
+    /* 老「长期任务」并进统一任务表（无损、幂等、可回退） */
+    if (!s.meta || !s.meta.tasksMergedAt) {
+      var movedN = migrateLongTasksIntoToDos(s);
+      if (!s.meta) { s.meta = {}; }
+      s.meta.tasksMergedAt = APP_VERSION;
+      if (movedN) { s.meta.tasksMergedFrom = movedN; }
     }
     s.schemaVersion = SCHEMA_VERSION;
     return s;
@@ -2217,7 +2546,7 @@ var APP_VERSION = '0.4.1b';
    * 采用「字段级新者胜 + 冲突清单」策略。
    */
   var MERGE_TABLES = ['semesters', 'teachers', 'locations', 'courses', 'blocks', 'overrides', 'events',
-    'tasks', 'longTasks', 'reminders'];
+    'tasks', 'tasks2', 'longTasks', 'reminders'];
   var REF_MAP_NAME = {
     semesters: 'semester', teachers: 'teacher', locations: 'location',
     courses: 'course', blocks: 'block', overrides: 'override'
@@ -2263,6 +2592,13 @@ var APP_VERSION = '0.4.1b';
       bid = rec.blockId && maps.block ? (maps.block[rec.blockId] || rec.blockId) : rec.blockId;
       return ['t', bid || rec.courseId || '', rec.date || '', normTaskText(rec.text)].join('|');
     }
+      /* 统一任务：按「文字 + 创建日」配对 —— 跨设备不会把两条同名任务并成一条，
+         同一条任务也不会因为本地改了颜色/计划而重复导入。 */
+      if (table === 'tasks2') {
+        var t2day = '';
+        if (rec.createdAt) { t2day = String(rec.createdAt).slice(0, 10); }
+        return ['t2', normTaskText(rec.text), t2day].join('|');
+      }
     return null;
   }
 
@@ -2741,6 +3077,17 @@ var APP_VERSION = '0.4.1b';
     longTaskList: longTaskList, longTaskById: longTaskById, longTaskStats: longTaskStats,
     longTaskTodayList: longTaskTodayList, longTaskUpsert: longTaskUpsert, longTaskRemove: longTaskRemove,
     longTaskAddEntry: longTaskAddEntry, longTaskRemoveEntry: longTaskRemoveEntry,
+    /* ── 任务（统一模型） ── */
+    TASK_UNLIMITED: TASK_UNLIMITED,
+    todoList: todoList, todoById: todoById, todoTodayList: todoTodayList, todoDailyList: todoDailyList,
+    todoUpsert: todoUpsert, todoRemove: todoRemove,
+    todoAddEntry: todoAddEntry, todoRemoveEntry: todoRemoveEntry, todoUndoLast: todoUndoLast,
+    todoContinue: todoContinue,
+    todoRequired: todoRequired, todoPeriodGoal: todoPeriodGoal, todoPeriodDone: todoPeriodDone,
+    todoPeriodKey: todoPeriodKey, todoDayCount: todoDayCount, todoTotal: todoTotal,
+    todoProgress: todoProgress, todoSettled: todoSettled, todoEntryDay: todoEntryDay,
+    todoLiveEntries: todoLiveEntries, todoIsWeekly: todoIsWeekly,
+    migrateLongTasksIntoToDos: migrateLongTasksIntoToDos,
     longTaskRecentEntries: longTaskRecentEntries, longTaskEntryDay: longTaskEntryDay,
     renameCourse: renameCourse, unifyColorsByName: unifyColorsByName,
     EVENT_TYPES: EVENT_TYPES, eventType: eventType,

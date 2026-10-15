@@ -968,6 +968,7 @@ var AR = window.AR || (window.AR = {});
 
   /** 模块注册表：k=键 t=名 d=说明（精简版）。顺序就是「可添加」列表的顺序。 */
   var CUSTOM_MODULES = [
+    { k: 'tasks', t: '任务', d: '每天/每周要做的事 · 带进度' },
     { k: 'homework', t: '作业', d: '今天的作业' },
     { k: 'longterm', t: '长期任务', d: '一点一点攒的进度' },
     { k: 'hwstats', t: '作业统计', d: '完成情况一览' },
@@ -1954,6 +1955,7 @@ var AR = window.AR || (window.AR = {});
   }
 
   var CUSTOM_MODULE_BUILDERS = {
+    tasks: modTasks,
     homework: modHomework,
     longterm: modLongterm,
     hwstats: modHwstats,
@@ -2146,7 +2148,7 @@ var AR = window.AR || (window.AR = {});
      * 今天课上的 + 之前没划掉的，今天划掉的进「已完成」，更早划掉的自动隐藏（仍可找回）。
      */
     if (hwZoneVisible()) { body.appendChild(homeworkNode('today')); }
-    if (ltZoneVisible()) { body.appendChild(longTaskCard(true)); }
+    try { body.appendChild(tkTaskCard()); } catch (e) { console.error('任务卡渲染失败', e); }
 
     /* 左侧：本周概览 */
     renderWeekRail(weekNo, sem, ex === 'week', weekCompact);
@@ -2796,7 +2798,7 @@ var AR = window.AR || (window.AR = {});
       body.appendChild(el('<div class="empty"><div class="big">🌤</div><div class="t">最近没有安排</div><div class="muted">未来两周都没有课</div></div>'));
       // 没有下一节课时，作业 / 长期任务照样要出现在这张卡片里
       if (hwZoneVisible()) { body.appendChild(homeworkNode('next')); }
-      if (ltZoneVisible()) { body.appendChild(longTaskCard(true)); }
+      try { body.appendChild(tkTaskCard()); } catch (e) { console.error('任务卡渲染失败', e); }
       return;
     }
     var item = target.item;
@@ -2916,9 +2918,7 @@ var AR = window.AR || (window.AR = {});
     if (hwZoneVisible() && hwVisibleInNext()) {
       body.appendChild(homeworkNode('next'));
     }
-    if (ltZoneVisible() && hwVisibleInNext()) {
-      body.appendChild(longTaskCard(true));
-    }
+    try { body.appendChild(tkTaskCard()); } catch (e) { }
   }
 
   function moduleBtn(k, v, onClick) {
@@ -9538,6 +9538,878 @@ var AR = window.AR || (window.AR = {});
     breakpointKey: breakpointKey,
     layoutState: Layout,
     currentView: function () { return currentView; },
-    modalOpen: function () { return modalStack.length > 0; }
+    modalOpen: function () { return modalStack.length > 0; },
+    /* ── 任务（统一模型） ── */
+    tkTaskCard: tkTaskCard,
+    tkTaskRow: tkTaskRow,
+    tkTaskLine: tkTaskLine,
+    modTasks: modTasks,
+    openTaskEdit: openTaskEdit,
+    openTaskStats: openTaskStats,
+    tkRuleText: tkRuleText,
+    tkPlanText: tkPlanText,
+    refreshTasks: function () {
+      refreshHomework();
+      if (AR.Panels && AR.Panels.renderTaskList) { AR.Panels.renderTaskList(); }
+    }
   };
+  /* ══════════════════════════════════════════════════════════════
+     任务界面（统一模型）
+     · 今日日程只有一张「任务」卡，囊括所有任务条目；**不分每日/长期**。
+       设了计划的条目副行显示今天进度；没设的显示累计进度（旧长期任务的样子）。
+       **所有条目都能划**（划一下 = 完成一次），长按任意条目 → 快速编辑。
+     · 「我的 · 任务」：汇总卡 + 两行制明细 + 折叠态迷你格 + 展开贡献图（配色随主题色）。
+     · 图标与今日日程其它卡统一：纯 --accent 描边的镂空清单，不做实心色块。
+     ══════════════════════════════════════════════════════════════ */
+  var TK_OPEN = true;          // 今日「任务」卡是否展开
+  var TK_DONE_OPEN = false;    // 「已完成」默认折叠
+  var TK_MINE_OPEN = {};       // 「我的」里哪张卡展开了（贡献图 + 记录）
+  var TK_REC_OPEN = {};        // 哪张卡的「最近记录」打开了
+  var TK_MINI_DAYS = 7;        // 折叠态迷你格：最近 7 天
+  var TK_GH_WEEKS = 12;        // 展开的贡献图：多少周
+  function tkColor(t) { return U.colorHex(t.colorKey || '#5B8DEF'); }
+  function tkDayKey(off) { return U.dateKey(U.addDays(new Date(), off || 0)); }
+  function tkIcoHtml() { return '<i></i><i></i><i></i>'; }
+  function tkRelDay(k) {
+    if (k === tkDayKey(0)) { return '今天'; }
+    if (k === tkDayKey(-1)) { return '昨天'; }
+    var p = String(k).split('-');
+    return Number(p[1]) + '/' + Number(p[2]);
+  }
+  function tkPlanText(t) {
+    var c = t.cadence;
+    if (!c || !c.type || c.type === 'unlimited') { return ''; }
+    var n = c.times || 1;
+    if (c.type === 'daily') { return '每天 ' + n + ' 次'; }
+    if (c.type === 'weekly') { return '每周 ' + n + ' 次'; }
+    if (c.type === 'everyN') { return '每 ' + (c.intervalDays || 1) + ' 天 ' + n + ' 次'; }
+    if (c.type === 'weekdays') {
+      var nm = (c.weekdays || []).map(function (w) { return U.WEEKDAY_NAMES[w].replace('周', ''); }).join('');
+      return '周' + nm + ' 各 ' + n + ' 次';
+    }
+    return '';
+  }
+  function tkRuleText(t) {
+    var parts = [];
+    if (t.goal) { parts.push('目标 ' + t.goal.target + (t.goal.unit || '')); }
+    var p = tkPlanText(t);
+    if (p) { parts.push(p); }
+    return parts.length ? parts.join(' · ') : '只打卡';
+  }
+  function tkHasPlan(t) {
+    var req = AR.Store.todoRequired(t, new Date());
+    return req !== Infinity && req > 0;
+  }
+  /* ── 打卡 / 撤销 / 继续做 ── */
+  function tkPunch(t) {
+    var need = AR.Store.todoRequired(t, new Date());
+    if (need !== Infinity && need > 0 && AR.Store.todoDayCount(t, tkDayKey(0)) >= need) {
+      confirmDanger({
+        title: '今天已经做够 ' + need + ' 次了',
+        sub: U.escapeHtml(t.text) + ' · ' + tkPlanText(t),
+        text: '再记一次会继续累加 —— 记录与累计都会 +1，已完成状态不变。',
+        okLabel: '再记一次',
+        onOk: function () { tkAdd(t); }
+      });
+      return;
+    }
+    tkAdd(t);
+  }
+  function tkAdd(t) {
+    AR.Store.todoAddEntry(t.id, 1, '', { src: 'swipe' });
+    AR.Bridge.haptic('medium', document.body);
+    var p = AR.Store.todoProgress(t, new Date());
+    var msg = '「' + t.text + '」+1';
+    if (p.hasGoal) { msg += ' · 累计 ' + p.total + '/' + p.target + (t.goal.unit || ''); }
+    else if (p.periodGoal > 1) { msg += '（' + p.periodUnit + ' ' + p.periodDone + '/' + p.periodGoal + '）'; }
+    toast(msg);
+    AR.UI.refreshTasks();
+  }
+  function tkUndo(t) {
+    if (!AR.Store.todoUndoLast(t.id)) { toast('没有可撤销的记录'); return; }
+    toast('已撤销一次：' + t.text);
+    AR.UI.refreshTasks();
+  }
+  function tkUndoOn(t, dayKey) {
+    var ents = (t.entries || []).filter(function (e) {
+      return !e.deletedAt && AR.Store.todoEntryDay(e) === dayKey;
+    });
+    if (!ents.length) { toast('这天没有可撤销的记录'); return; }
+    if (AR.Store.todoRemoveEntry(t.id, ents[ents.length - 1].id)) {
+      toast('已撤销：' + tkRelDay(dayKey) + ' 的一笔');
+      AR.UI.refreshTasks();
+    }
+  }
+  function tkContinue(t) {
+    AR.Store.todoContinue(t.id);
+    toast('「' + t.text + '」已回到待办 —— 记录与累计都保留');
+    AR.UI.refreshTasks();
+  }
+  /* ── 长按 → 快速编辑 ── */
+  function tkBindLongPress(node, fn) {
+    var timer = null, moved = false, sx = 0, sy = 0;
+    function clear() { if (timer) { clearTimeout(timer); timer = null; } }
+    node.addEventListener('pointerdown', function (e) {
+      if (e.button) { return; }
+      moved = false; sx = e.clientX; sy = e.clientY;
+      clear();
+      timer = setTimeout(function () {
+        timer = null;
+        if (!moved) { AR.Bridge.haptic('medium', node); fn(); }
+      }, 520);
+    });
+    node.addEventListener('pointermove', function (e) {
+      if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) { moved = true; clear(); }
+    });
+    node.addEventListener('pointerup', clear);
+    node.addEventListener('pointercancel', clear);
+    node.addEventListener('pointerleave', clear);
+  }
+  /* ── 迷你格：最近 7 天（0.4.2 那种大格：撑满宽度、写星期字 + 次数） ── */
+  function tkMiniGrid(t) {
+    var out = '';
+    for (var i = TK_MINI_DAYS - 1; i >= 0; i--) {
+      var day = U.addDays(new Date(), -i);
+      var k = U.dateKey(day);
+      var n = AR.Store.todoDayCount(t, k);
+      var req = AR.Store.todoRequired(t, day);
+      var cls = 'tk-cell';
+      if (req !== Infinity && req === 0 && n === 0) { cls += ' off'; }
+      else if (req !== Infinity && req > 0 && n >= req) { cls += ' full'; }
+      else if (n > 0) { cls += ' part'; }
+      out += '<i class="' + cls + '" title="' + k + '">'
+        + U.WEEKDAY_NAMES[U.weekdayOf(day)].replace('周', '')
+        + (n ? '<b>' + n + '</b>' : '') + '</i>';
+    }
+    return '<div class="tk-cells">' + out + '</div>';
+  }
+  /* ── 贡献图：12 周 × 7 天，配色随主题色 ── */
+  function tkGhGrid(t) {
+    var mon = U.addDays(U.mondayOf(new Date()), -(TK_GH_WEEKS - 1) * 7);
+    var cols = '', months = '', lastM = '';
+    for (var w = 0; w < TK_GH_WEEKS; w++) {
+      var cells = '';
+      for (var wd = 0; wd < 7; wd++) {
+        var day = U.addDays(mon, w * 7 + wd);
+        var k = U.dateKey(day);
+        var n = AR.Store.todoDayCount(t, k);
+        var req = AR.Store.todoRequired(t, day);
+        var lv = n === 0 ? 0 : (n === 1 ? 1 : (n === 2 ? 2 : (n === 3 ? 3 : 4)));
+        var cls = n === 0 ? '' : (' l' + lv);
+        if (n === 0 && req === 0) { cls += ' none'; }
+        cells += '<i class="tk-gh-cell' + cls + '" title="' + k + ' · ' + (n ? n + ' 次' : '未记录') + '"></i>';
+      }
+      var mk = (function (dd) { var p = U.dateKey(dd).split('-'); return Number(p[1]) + '月'; })(U.addDays(mon, w * 7));
+      if (w === 0 || mk !== lastM) { months += '<span>' + mk + '</span>'; lastM = mk; }
+      else { months += '<span></span>'; }
+      cols += '<div class="tk-gh-col">' + cells + '</div>';
+    }
+    return '<div class="tk-gh"><div class="tk-gh-days">'
+      + '<i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><i>日</i></div>'
+      + '<div class="tk-gh-main"><div class="tk-gh-months">' + months + '</div>'
+      + '<div class="tk-gh-grid">' + cols + '</div></div></div>'
+      + '<div class="tk-gh-legend"><span>少</span>'
+      + '<i class="tk-gh-cell"></i><i class="tk-gh-cell l1"></i><i class="tk-gh-cell l2"></i>'
+      + '<i class="tk-gh-cell l3"></i><i class="tk-gh-cell l4"></i><span>多</span></div>';
+  }
+  /** 一条任务行：所有条目都能划 + 长按编辑 */
+  function tkTaskRow(t) {
+    var p = AR.Store.todoProgress(t, new Date());
+    var need = p.required;
+    var marks = '';
+    if ((need > 1 && need !== Infinity) || p.today > 1) {
+      var m = Math.min(p.today, 5);
+      for (var k = 0; k < m; k++) { marks += '<i class="tk-dot"></i>'; }
+      if (p.today > 5) { marks += '<b class="tk-num">' + p.today + '</b>'; }
+    }
+    /**
+     * 每个条目底下都有一条进度条：
+     *   有计划 → 今天进度（今天 x / 需要 y 次）
+     *   没计划 → 累计进度（累计 a / 目标 b 单位），沿用旧「长期任务」的样子
+     * 两者都没有（既不设计划也不设目标）→ 不画条，只报今天的次数。
+     */
+    var l2 = '', pct = null, barTip = '';
+    if (tkHasPlan(t)) {
+      l2 = '<span class="tk-plan">' + tkPlanText(t) + '</span>'
+        + '<span class="tk-goal">今天 ' + p.today + '/' + need + ' 次</span>';
+      if (p.hasGoal) { l2 += '<span>累计 ' + p.total + '/' + p.target + U.escapeHtml(t.goal.unit || '') + '</span>'; }
+      pct = need > 0 ? Math.min(100, Math.round(p.periodDone / need * 100)) : 0;
+      barTip = '今天 ' + p.periodDone + '/' + need;
+    } else if (p.hasGoal) {
+      l2 = '<span class="tk-goal">累计 ' + p.total + ' / ' + p.target + U.escapeHtml(t.goal.unit || '') + '</span>';
+      pct = p.percent;
+      barTip = p.total + '/' + p.target;
+    } else {
+      l2 = '<span>今天 ' + p.today + ' 次</span>';
+    }
+    var track = (pct === null) ? ''
+      : ('<span class="tk-ltrack"><span class="tk-lfill" style="width:' + pct + '%;background:' + tkColor(t) + '"></span></span>');
+    var row = el('<div class="tk-row">'
+      + '<span class="tk-bar" style="background:' + tkColor(t) + '"></span>'
+      + '<div class="tk-main"><div class="tk-l1"><span class="tk-text">' + U.escapeHtml(t.text) + '</span>'
+      + (marks ? '<span class="tk-marks">' + marks + '</span>' : '') + '</div>'
+      + track
+      + '<div class="tk-l2">' + l2 + '</div></div>'
+      + '<span class="tk-hint">划掉</span></div>');
+    bindSwipeRow(row, { flyOut: false, onCommit: function () { tkPunch(t); } });
+    tkBindLongPress(row, function () { openTaskEdit(t); });
+    return row;
+  }
+  /* ══════════ 今日日程：一张「任务」大卡 ══════════ */
+  function tkTaskCard() {
+    var list = AR.Store.todoTodayList ? AR.Store.todoTodayList() : [];
+    var card = el('<div class="tk-card" id="tkToday"></div>');
+    card.setAttribute('data-hwnode', 'tk-task');
+    card.__rebuild = tkTaskCard;      // 空列表也注册：之后新建任务才画得出来
+    if (!list.length) { card.hidden = true; return card; }
+    var pend = [], done = [];
+    list.forEach(function (t) {
+      if (AR.Store.todoSettled(t, new Date())) { done.push(t); } else { pend.push(t); }
+    });
+    var todayNeed = 0, todayDone = 0;
+    list.forEach(function (t) {
+      if (tkHasPlan(t)) { todayNeed++; if (AR.Store.todoProgress(t, new Date()).today > 0) { todayDone++; } }
+    });
+    var sumTxt = todayNeed
+      ? ('今天 ' + todayDone + '/' + todayNeed + ' 项 · 待办 ' + pend.length)
+      : ('待办 ' + pend.length);
+    var body = el('<div class="tk-body"></div>');
+    body.hidden = !TK_OPEN;
+    var sum = el('<button class="tk-sum' + (TK_OPEN ? ' open' : '') + '" type="button">'
+      + '<span class="tk-ico">' + tkIcoHtml() + '</span>'
+      + '<span class="tk-t">任务</span>'
+      + '<span class="tk-n">' + sumTxt + '</span>'
+      + '<span class="tk-chev">▸</span></button>');
+    sum.addEventListener('click', function () {
+      AR.Bridge.haptic('light', sum);
+      TK_OPEN = !TK_OPEN;
+      body.hidden = !TK_OPEN;
+      sum.classList.toggle('open', TK_OPEN);
+      tkPlayOpen(body, TK_OPEN);
+    });
+    card.appendChild(sum);
+    if (!pend.length) { body.appendChild(el('<div class="tk-empty">今天的都做完了 👋</div>')); }
+    pend.forEach(function (t) { body.appendChild(tkTaskRow(t)); });
+    if (done.length) {
+      var dw = el('<div class="tk-donewrap"></div>');
+      var dh = el('<button class="tk-donehead' + (TK_DONE_OPEN ? ' open' : '') + '" type="button">'
+        + '<span>已完成 · ' + done.length + '</span><span class="tk-chev">▸</span></button>');
+      var db = el('<div></div>');
+      db.hidden = !TK_DONE_OPEN;
+      dh.addEventListener('click', function () {
+        TK_DONE_OPEN = !TK_DONE_OPEN;
+        AR.UI.refreshTasks();
+      });
+      dw.appendChild(dh); dw.appendChild(db);
+      if (TK_DONE_OPEN) {
+        done.forEach(function (t) {
+          var p = AR.Store.todoProgress(t, new Date());
+          var r = el('<div class="tk-done">'
+            + '<span class="tk-bar" style="background:' + tkColor(t) + '"></span>'
+            + '<span class="tk-dtext">' + U.escapeHtml(t.text) + '</span>'
+            + '<span class="tk-dmeta">' + p.periodUnit + ' ' + p.periodDone + '/' + p.periodGoal + ' 次</span>'
+            + '<span class="tk-dacts"><button class="tk-dbtn" data-a="undo">撤销</button>'
+            + '<button class="tk-dbtn p" data-a="again">继续做</button></span></div>');
+          r.querySelector('[data-a=undo]').addEventListener('click', function () { tkUndo(t); });
+          r.querySelector('[data-a=again]').addEventListener('click', function () { tkContinue(t); });
+          db.appendChild(r);
+        });
+      }
+      body.appendChild(dw);
+    }
+    card.appendChild(body);
+    return card;
+  }
+  /** 统一的展开动画：走 AR.Motion 的 pose（和别处同一个接口） */
+  function tkPlayOpen(node, opening) {
+    if (!node || !AR.Motion) { return; }
+    try {
+      if (AR.Motion.pose) { AR.Motion.pose(node, opening ? 'contentIn' : 'listIn'); }
+    } catch (e) { }
+  }
+  /* ── 数据分析 ── */
+  /* ══════════ 任务数据分析（四页：总览 / 趋势 / 各任务 / 洞察）══════════ */
+
+  var TK_STAT_PAGE = 'overview';
+
+  /** 收集统计数据（一次算完，四页共用） */
+  function tkStatData() {
+    var list = AR.Store.todoTodayList ? AR.Store.todoTodayList() : [];
+    var d = new Date();
+    var i, t;
+    function dayCount(task, k) { return AR.Store.todoDayCount(task, k); }
+    function sumRange(task, from, to) {
+      var n = 0;
+      for (var q = from; q <= to; q++) { n += dayCount(task, U.dateKey(U.addDays(d, -q))); }
+      return n;
+    }
+    /* 每天总次数 */
+    var daily = [];
+    for (i = 29; i >= 0; i--) {
+      var k = U.dateKey(U.addDays(d, -i));
+      var n2 = 0;
+      for (var q2 = 0; q2 < list.length; q2++) { n2 += AR.Store.todoDayCount(list[q2], k); }
+      daily.push({ k: k, n: n2 });
+    }
+    /* 星期分布 */
+    var wd = [0, 0, 0, 0, 0, 0, 0];
+    for (i = 0; i < list.length; i++) {
+      var ents = AR.Store.todoLiveEntries ? AR.Store.todoLiveEntries(list[i]) : (list[i].entries || []);
+      for (var q3 = 0; q3 < ents.length; q3++) {
+        var kk = AR.Store.todoEntryDay(ents[q3]);
+        if (!kk) { continue; }
+        var dd = U.parseDateKey(kk);
+        if (dd) { wd[U.weekdayOf(dd) - 1] += 1; }
+      }
+    }
+    /* 每条的指标 */
+    var rows = list.map(function (task) {
+      var p = AR.Store.todoProgress(task, d);
+      var last7 = sumRange(task, 0, 6), prev7 = sumRange(task, 7, 13), last30 = sumRange(task, 0, 29);
+      /* 当前连续天数 */
+      var cur = 0;
+      for (var z = 0; z < 400; z++) {
+        if (dayCount(task, U.dateKey(U.addDays(d, -z))) > 0) { cur++; }
+        else if (z > 0) { break; }
+      }
+      /* 最长连续（近 60 天） */
+      var best = 0, run = 0;
+      for (var y = 59; y >= 0; y--) {
+        if (dayCount(task, U.dateKey(U.addDays(d, -y))) > 0) { run++; if (run > best) { best = run; } }
+        else { run = 0; }
+      }
+      /* 30 天迷你柱 */
+      var spark = [];
+      var mx = 1;
+      for (var w = 29; w >= 0; w--) {
+        var v = dayCount(task, U.dateKey(U.addDays(d, -w)));
+        if (v > mx) { mx = v; }
+        spark.push(v);
+      }
+      var hasPlan = tkHasPlan(task);
+      return {
+        task: task, p: p, last7: last7, prev7: prev7, last30: last30,
+        cur: cur, best: best, spark: spark, sparkMax: mx,
+        hasPlan: hasPlan, need: hasPlan ? p.required : 0
+      };
+    });
+
+    var planRows = rows.filter(function (r) { return r.hasPlan; });
+    var doneToday = planRows.filter(function (r) { return r.p.today >= r.need; }).length;
+    var weekGoal = 0, weekDone = 0;
+    rows.forEach(function (r) {
+      if (!r.hasPlan) { return; }
+      if (r.p.periodUnit === '本周') { weekGoal += r.p.periodGoal; weekDone += r.p.periodDone; }
+      else { weekGoal += r.need * 7; weekDone += r.p.today; }
+    });
+    var last7All = rows.reduce(function (a, r) { return a + r.last7; }, 0);
+    var prev7All = rows.reduce(function (a, r) { return a + r.prev7; }, 0);
+    var bestCur = rows.reduce(function (a, r) { return Math.max(a, r.cur); }, 0);
+    var bestEver = rows.reduce(function (a, r) { return Math.max(a, r.best); }, 0);
+    var activeDays = daily.filter(function (x) { return x.n > 0; }).length;
+    var wdMax = Math.max.apply(null, wd.concat([1]));
+    var wdIdx = wd.indexOf(Math.max.apply(null, wd));
+    var weakest = rows.slice().sort(function (a, b) { return a.last7 - b.last7; })[0] || null;
+    var steadiest = rows.slice().sort(function (a, b) { return b.cur - a.cur; })[0] || null;
+
+    return {
+      list: list, rows: rows, daily: daily, wd: wd, wdMax: wdMax, wdIdx: wdIdx,
+      planCount: planRows.length, doneToday: doneToday,
+      weekGoal: weekGoal, weekDone: weekDone,
+      last7All: last7All, prev7All: prev7All,
+      last14All: rows.reduce(function (a, r) { return a + sumRange(r.task, 0, 13); }, 0),
+      bestCur: bestCur, bestEver: bestEver, activeDays: activeDays,
+      weakest: weakest, steadiest: steadiest
+    };
+  }
+
+  function tkStatKpi(label, value, unit, pct, delta) {
+    var h = '<div class="tk-kpi"><div class="tk-kl">' + U.escapeHtml(label) + '</div>'
+      + '<div class="tk-kv">' + value + (unit ? '<i> ' + U.escapeHtml(unit) + '</i>' : '') + '</div>';
+    if (pct != null) { h += '<div class="tk-kbar"><i style="width:' + pct + '%"></i></div>'; }
+    if (delta != null) {
+      var up = delta >= 0;
+      h += '<div class="tk-kd ' + (up ? 'up' : 'down') + '">' + (up ? '▲' : '▼')
+        + ' 比上期 ' + Math.abs(delta) + '%</div>';
+    }
+    return h + '</div>';
+  }
+
+  function tkStatBars(daily, h) {
+    var max = Math.max.apply(null, daily.map(function (x) { return x.n; }).concat([1]));
+    var out = '<div class="tk-chart"><div class="tk-bars">';
+    for (var i = 0; i < daily.length; i++) {
+      var hp = Math.max(3, Math.round(daily[i].n / max * 92));
+      out += '<span class="tk-bar" title="' + daily[i].k + ' · ' + daily[i].n + ' 次" style="height:'
+        + hp + 'px;animation-delay:' + (i * 9) + 'ms"></span>';
+    }
+    out += '</div><div class="tk-axis"><span>' + daily[0].k.slice(5) + '</span><span>峰值 ' + max + ' 次</span><span>今天</span></div></div>';
+    return out;
+  }
+
+  function tkStatLine(daily) {
+    var max = Math.max.apply(null, daily.map(function (x) { return x.n; }).concat([1]));
+    var W = 500, H = 110, pad = 6;
+    var pts = daily.map(function (x, i) {
+      var px = (pad + i * ((W - pad * 2) / (daily.length - 1))).toFixed(1);
+      var py = (H - pad - (x.n / max) * (H - pad * 2)).toFixed(1);
+      return px + ',' + py;
+    }).join(' ');
+    return '<div class="tk-chart">'
+      + '<svg class="tk-spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
+      + '<polyline points="' + pts + '" fill="none" stroke="var(--accent)" stroke-width="2" '
+      + 'stroke-linejoin="round" stroke-linecap="round"/></svg>'
+      + '<div class="tk-axis"><span>' + daily[0].k.slice(5) + '</span><span>峰值 ' + max + ' 次</span><span>今天</span></div></div>';
+  }
+
+  function tkStatPage(page, D) {
+    var h = '', i;
+    if (page === 'overview') {
+      var pctT = D.planCount ? Math.round(D.doneToday / D.planCount * 100) : 0;
+      var pctW = D.weekGoal ? Math.min(100, Math.round(D.weekDone / D.weekGoal * 100)) : 0;
+      var delta = D.prev7All ? Math.round((D.last7All - D.prev7All) / D.prev7All * 100) : 0;
+      h += '<div class="tk-kpis">'
+        + tkStatKpi('今天完成', D.doneToday + ' / ' + D.planCount, '项', pctT, null)
+        + tkStatKpi('本周完成', D.weekDone + ' / ' + D.weekGoal, '次', pctW, delta)
+        + tkStatKpi('当前连续', D.bestCur, '天', null, null)
+        + tkStatKpi('最长连续', D.bestEver, '天', null, null)
+        + '</div>';
+      h += '<div class="tk-shead">近 30 天 · 每天完成次数</div>' + tkStatBars(D.daily);
+      h += '<div class="tk-shead">星期分布</div>';
+      for (i = 0; i < 7; i++) {
+        h += '<div class="tk-wdrow"><span class="tk-wdn">' + U.WEEKDAY_NAMES[i + 1].replace('周', '') + '</span>'
+          + '<span class="tk-wdt"><i style="width:' + Math.round(D.wd[i] / D.wdMax * 100)
+          + '%;animation-delay:' + (i * 40) + 'ms"></i></span>'
+          + '<span class="tk-wdc">' + D.wd[i] + '</span></div>';
+      }
+    } else if (page === 'trend') {
+      h += '<div class="tk-shead">近 30 天趋势</div>' + tkStatLine(D.daily);
+      h += '<div class="tk-shead">区间合计</div><div class="tk-kpis">'
+        + tkStatKpi('近 7 天', D.last7All, '次', null, null)
+        + tkStatKpi('近 14 天', D.last14All, '次', null, null)
+        + tkStatKpi('近 30 天', D.rows.reduce(function (a, r) { return a + r.last30; }, 0), '次', null, null)
+        + tkStatKpi('有记录的天', D.activeDays + ' / 30', '天', Math.round(D.activeDays / 30 * 100), null)
+        + '</div>';
+    } else if (page === 'tasks') {
+      if (!D.rows.length) { return '<p class="tk-muted">还没有任务。</p>'; }
+      var ranked = D.rows.slice().sort(function (a, b) { return (b.p.percent || 0) - (a.p.percent || 0); });
+      ranked.forEach(function (r) {
+        var t = r.task;
+        var pct = r.p.hasGoal ? r.p.percent : null;
+        h += '<div class="tk-tstat"><div class="tk-tsh">'
+          + '<span class="tk-tsdot" style="background:' + tkColor(t) + '"></span>'
+          + '<span class="tk-tsname">' + U.escapeHtml(t.text) + '</span>'
+          + '<span class="tk-tspc">' + (pct != null ? pct + '%' : (r.hasPlan ? '' : '—')) + '</span></div>'
+          + '<div class="tk-tsmeta">'
+          + (r.p.hasGoal ? ('累计 ' + r.p.total + ' / ' + r.p.target + ' ' + U.escapeHtml(t.goal.unit || ''))
+            : ('累计 ' + r.p.total + ' 次'))
+          + ' · 近 7 天 ' + r.last7 + ' 次 · 连续 ' + r.cur + ' 天</div>'
+          + '<div class="tk-sparkrow">';
+        for (var q = 0; q < r.spark.length; q++) {
+          var v = r.spark[q];
+          h += '<i style="height:' + (v ? Math.max(3, Math.round(v / r.sparkMax * 24)) : 2)
+            + 'px;opacity:' + (v ? .85 : .2) + ';background:' + tkColor(t) + '"></i>';
+        }
+        h += '</div>';
+        if (pct != null) {
+          h += '<div class="tk-goalbar"><i style="width:' + pct + '%;background:' + tkColor(t) + '"></i></div>';
+        }
+        h += '</div>';
+      });
+      h += '<p class="tk-muted">按完成率排序 —— 最稳的在最上面。</p>';
+    } else {
+      var wk = U.WEEKDAY_NAMES[D.wdIdx + 1] || '';
+      h += '<div class="tk-ins"><span class="tk-ic">★</span><p>你最活跃的是<b>' + wk + '</b>（累计 <b>'
+        + D.wd[D.wdIdx] + '</b> 次）</p></div>';
+      if (D.steadiest) {
+        h += '<div class="tk-ins"><span class="tk-ic">✓</span><p>「<b>' + U.escapeHtml(D.steadiest.task.text)
+          + '</b>」当前连续 <b>' + D.steadiest.cur + ' 天</b>没断，最稳</p></div>';
+      }
+      if (D.weakest) {
+        var d7 = D.weakest.prev7 - D.weakest.last7;
+        h += '<div class="tk-ins"><span class="tk-ic">!</span><p>「<b>' + U.escapeHtml(D.weakest.task.text)
+          + '</b>」近 7 天 <b>' + D.weakest.last7 + '</b> 次'
+          + (d7 > 0 ? ('，比上期少 <b>' + d7 + '</b> 次') : '，与上期持平') + '</p></div>';
+      }
+      h += '<p class="tk-muted">这些结论都是现算的：星期分布取最大值、连续性取当前最长、下滑取近 7 天与上期的差。</p>';
+    }
+    return h;
+  }
+
+  function openTaskStats() {
+    var D = tkStatData();
+    var body = el('<div class="tk-stats"></div>');
+    body.appendChild(el('<div class="tk-tabs-seg"><div class="segmented" id="tkStatSeg"></div></div>'));
+    var pageBox = el('<div class="tk-statpage" id="tkStatPage"></div>');
+    body.appendChild(pageBox);
+
+    var PAGES = [
+      { k: 'overview', t: '总览' }, { k: 'trend', t: '趋势' },
+      { k: 'tasks', t: '各任务' }, { k: 'insight', t: '洞察' }
+    ];
+    var seg = body.querySelector('#tkStatSeg');
+    PAGES.forEach(function (pg) {
+      var b = el('<button class="seg' + (TK_STAT_PAGE === pg.k ? ' active' : '') + '" type="button">' + pg.t + '</button>');
+      b.addEventListener('click', function () {
+        if (TK_STAT_PAGE === pg.k) { return; }
+        TK_STAT_PAGE = pg.k;
+        var all = seg.querySelectorAll('.seg');
+        for (var q = 0; q < all.length; q++) { all[q].classList.toggle('active', all[q] === b); }
+        syncSegPill(seg, true);
+        paintPage();
+      });
+      seg.appendChild(b);
+    });
+
+    function paintPage() {
+      pageBox.innerHTML = tkStatPage(TK_STAT_PAGE, D);
+      /* 内容进场：走统一的 AR.Motion，柱子再单独长出来 */
+      if (AR.Motion && AR.Motion.pose) {
+        try { AR.Motion.pose(pageBox, 'contentIn'); } catch (e) { }
+      }
+      var bars = pageBox.querySelectorAll('.tk-bar');
+      for (var i = 0; i < bars.length; i++) { bars[i].style.animationDelay = (i * 9) + 'ms'; }
+    }
+    paintPage();
+
+    openModal({ title: '任务数据分析', sub: U.dateKey(new Date()), body: body, actions: [] });
+    /* 弹窗进 DOM 之后再量滑块（否则 offsetWidth=0 画不出来） */
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
+    }
+  }
+
+  /* ══════════ 「我的 · 任务」 ══════════ */
+  /** 「我的 · 任务」：一张大卡 —— 汇总区 + 所有条目 + 卡底按钮 */
+  function modTasks() {
+    var list = AR.Store.todoList ? AR.Store.todoList() : [];
+    var d = new Date();
+    var card = el('<div class="tk-mine-card"></div>');
+    card.setAttribute('data-hwnode', 'tk-mine');
+    card.__rebuild = modTasks;
+
+    /* ── 汇总区 ── */
+    var needN = 0, doneN = 0, overdue = 0, wkGoal = 0, wkDone = 0;
+    list.forEach(function (t) {
+      var p = AR.Store.todoProgress(t, d);
+      if (p.periodGoal > 0) {
+        needN++;
+        if (p.periodDone >= p.periodGoal) { doneN++; }
+        else if (p.today === 0) { overdue++; }
+      }
+      if (p.periodUnit === '本周') { wkGoal += p.periodGoal; wkDone += p.periodDone; }
+      else if (p.periodGoal > 0) { wkGoal += ((t.cadence.times || 1) * 7); wkDone += p.today; }
+    });
+    var pct = needN ? Math.round(doneN / needN * 100) : 0;
+    var pctW = wkGoal ? Math.round(Math.min(1, wkDone / wkGoal) * 100) : 0;
+    var head = el('<div class="tk-mine-head">'
+      + '<div class="tk-sumhead"><span class="tk-ico">' + tkIcoHtml() + '</span>'
+      + '<span class="tk-t">任务</span><span class="tk-n">' + list.length + ' 条</span></div>'
+      + '<div class="tk-sumline"><span class="tk-sk">今天</span>'
+      + '<span class="tk-strack"><i style="width:' + pct + '%"></i></span>'
+      + '<span class="tk-sv">' + doneN + ' / ' + needN + ' 项</span></div>'
+      + '<div class="tk-sumline"><span class="tk-sk">本周</span>'
+      + '<span class="tk-strack"><i style="width:' + pctW + '%"></i></span>'
+      + '<span class="tk-sv">' + wkDone + ' / ' + wkGoal + ' 次</span></div>'
+      + (list.length ? ('<div class="tk-sumtags">'
+          + '<span class="tk-tag' + (overdue ? ' tk-tag-warn' : '') + '">逾期 ' + overdue + ' 项</span>'
+          + '<span class="tk-tag">已完成 ' + doneN + ' 项</span></div>') : '')
+      + '</div>');
+    card.appendChild(head);
+
+    if (!list.length) {
+      card.appendChild(el('<div class="tk-empty-card">还没有任务 —— 点下面的「＋ 新建任务」加一条</div>'));
+    }
+
+    /* ── 每条任务：同一张卡内的一段（细分隔线） ── */
+    list.forEach(function (t) {
+      card.appendChild(tkTaskLine(t, d));
+    });
+
+    /* ── 卡底按钮 ── */
+    var foot = el('<div class="tk-foot"></div>');
+    var stBtn = el('<button class="tk-fbtn" type="button">数据分析</button>');
+    stBtn.addEventListener('click', function () { AR.Bridge.haptic('light', stBtn); openTaskStats(); });
+    var addBtn = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 新建任务</button>');
+    addBtn.addEventListener('click', function () { AR.Bridge.haptic('light', addBtn); openTaskEdit(null); });
+    foot.appendChild(stBtn); foot.appendChild(addBtn);
+    card.appendChild(foot);
+
+    return card;
+  }
+
+  /** 最近记录（按天倒序，最多 3 条，每行可单独撤销） */
+  function tkRecList(t) {
+    var byDay = {};
+    (t.entries || []).forEach(function (e) {
+      if (e.deletedAt) { return; }
+      var k = AR.Store.todoEntryDay(e);
+      if (!k) { return; }
+      byDay[k] = (byDay[k] || 0) + 1;
+    });
+    var days = Object.keys(byDay).sort().reverse();
+    if (!days.length) { return '<div class="tk-rec"><span class="tk-rn" style="color:var(--text-tertiary)">还没有记录</span></div>'; }
+    return days.slice(0, 3).map(function (k) {
+      return '<div class="tk-rec"><span class="tk-rn">' + tkRelDay(k) + ' · +' + byDay[k] + ' 次</span>'
+        + '<button class="tk-rx undo" data-reck="' + k + '">撤销</button></div>';
+    }).join('') + (days.length > 3 ? '<div class="tk-rech-more">还有 ' + (days.length - 3) + ' 天有记录…</div>' : '');
+  }
+  /** 大卡里的一条任务：标题行（含编辑按钮）+ 今天/累计 + 大迷你格 + 展开区 */
+  function tkTaskLine(t, d) {
+    d = d || new Date();
+    var p = AR.Store.todoProgress(t, d);
+    var hasGoal = p.hasGoal;
+    var pct = hasGoal ? p.percent : (p.periodGoal ? Math.round(Math.min(1, p.periodDone / p.periodGoal) * 100) : 0);
+    var open = !!TK_MINE_OPEN[t.id];
+    var need = (t.cadence && t.cadence.type !== 'unlimited') ? (t.cadence.times || 1) : 0;
+
+    var html = '<div class="tk-line">'
+      + '<div class="tk-t2head' + (open ? ' open' : '') + '">'
+      + '<span class="tk-t2ico">' + tkIcoHtml() + '</span>'
+      + '<span class="tk-t2name">' + U.escapeHtml(t.text) + '</span>'
+      + '<span class="tk-t2right">'
+      + (p.done ? '<span class="tk-badge">本期已达成</span>' : '')
+      + '<button class="tk-edit-btn" type="button">编辑</button>'
+      + '<span class="tk-t2chev">▸</span></span></div>';
+
+    /* 今天：有计划 → 进度点；没计划 → 只报次数（沿用旧长期任务的样子） */
+    if (need > 0) {
+      var total2 = Math.min(Math.max(need, p.today), 6);
+      var dots = '';
+      for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < p.today ? '' : ' off') + '"></i>'; }
+      html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
+        + '<span class="tk-t2dots">' + dots + (p.today > 6 ? '<b class="tk-t2num">' + p.today + '</b>' : '') + '</span>'
+        + '<span class="tk-t2val"><b>' + p.today + '</b> / ' + need + ' 次</span></div>';
+    } else {
+      html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
+        + '<span class="tk-t2dots"><b class="tk-t2num">' + p.today + '</b></span>'
+        + '<span class="tk-t2val">未设计划</span></div>';
+    }
+    /* 累计：有目标 → 进度条 */
+    if (hasGoal) {
+      html += '<div class="tk-t2row"><span class="tk-t2lab">累计</span>'
+        + '<span class="tk-t2track"><span class="tk-t2fill" style="width:' + pct + '%;background:' + tkColor(t) + '"></span></span>'
+        + '<span class="tk-t2val"><b>' + p.total + '</b> / ' + p.target + ' ' + U.escapeHtml(t.goal.unit || '') + '</span></div>';
+    }
+    /* 大迷你格：常驻 */
+    html += tkMiniGrid(t);
+    /* 展开区（卡内、缩进） */
+    html += '<div class="tk-t2body" data-body hidden></div></div>';
+
+    var line = el(html);
+
+    var body = line.querySelector('[data-body]');
+    if (open) {
+      body.hidden = false;
+      body.innerHTML = tkGhGrid(t)
+        + '<div class="tk-t2recs"><button class="tk-t2rech' + (TK_REC_OPEN[t.id] ? ' open' : '') + '" type="button">'
+        + '<span>最近记录</span><span class="tk-chev">▸</span></button>'
+        + '<div class="tk-t2reclist" data-recl' + (TK_REC_OPEN[t.id] ? '' : ' hidden') + '>'
+        + tkRecList(t) + '</div></div>';
+      body.querySelector('.tk-t2rech').addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        TK_REC_OPEN[t.id] = !TK_REC_OPEN[t.id];
+        if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
+      });
+      body.querySelectorAll('[data-reck]').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          tkUndoOn(t, b.getAttribute('data-reck'));
+        });
+      });
+    }
+    /* 点标题行展开/收起 */
+    line.querySelector('.tk-t2head').addEventListener('click', function (ev) {
+      if (ev.target.closest && ev.target.closest('.tk-edit-btn')) { return; }
+      TK_MINE_OPEN[t.id] = !TK_MINE_OPEN[t.id];
+      if (!TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = false; }
+      if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
+    });
+    /* [编辑] 按钮 → 直接进该任务编辑页 */
+    line.querySelector('.tk-edit-btn').addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      AR.Bridge.haptic('light', ev.currentTarget);
+      openTaskEdit(t);
+    });
+    /* 长按标题行也能编辑（快捷方式） */
+    tkBindLongPress(line.querySelector('.tk-t2head'), function () { openTaskEdit(t); });
+    return line;
+  }
+
+  /* ══════════ 任务编辑页 ══════════
+     顺序：做什么 → 目标（默认让用户设）→ 计划（可选，直接给选项，不要开关）。 */
+  var tkSegAnimate = false;
+  function tkSyncSegPills(animate) {
+    var card = document.getElementById('modalCard');
+    if (!card) { return; }
+    var go = function () {
+      var segs = card.querySelectorAll('.segmented');
+      for (var i = 0; i < segs.length; i++) { try { syncSegPill(segs[i], !!animate); } catch (e) { } }
+    };
+    if (typeof requestAnimationFrame === 'function') { requestAnimationFrame(go); } else { go(); }
+  }
+  function openTaskEdit(t) {
+    var isNew = !t;
+    var src = t || { text: '', colorKey: '#5B8DEF', cadence: null, goal: null };
+    var draft = {
+      text: src.text || '',
+      colorKey: src.colorKey || '#5B8DEF',
+      goal: src.goal ? { target: src.goal.target, unit: src.goal.unit || '' } : null,
+      cadence: (src.cadence && src.cadence.type && src.cadence.type !== 'unlimited') ? {
+        type: src.cadence.type, times: src.cadence.times || 1,
+        intervalDays: src.cadence.intervalDays || 2,
+        weekdays: (src.cadence.weekdays || [1, 2, 3, 4, 5]).slice()
+      } : null
+    };
+    var body = el('<div></div>');
+    var wrap = el('<div id="tkEditWrap"></div>');
+    function stepper(val, lo, hi, onChange) {
+      var row = el('<div class="row gap" style="align-items:center;margin-top:8px"></div>');
+      var minus = el('<button class="chip-btn" type="button">−</button>');
+      var valEl = el('<span style="min-width:44px;text-align:center;font-weight:650">' + val + '</span>');
+      var plus = el('<button class="chip-btn" type="button">＋</button>');
+      minus.addEventListener('click', function () { val = Math.max(lo, val - 1); valEl.textContent = val; onChange(val); });
+      plus.addEventListener('click', function () { val = Math.min(hi, val + 1); valEl.textContent = val; onChange(val); });
+      row.appendChild(minus); row.appendChild(valEl); row.appendChild(plus);
+      return row;
+    }
+    function paint() {
+      wrap.innerHTML = '';
+      wrap.appendChild(el('<div class="field"><label class="field-label">做什么</label>'
+        + '<input class="input" id="tkText" placeholder="例如：背 50 个单词" value="'
+        + U.escapeHtml(draft.text) + '"></div>'));
+      var sw = el('<div class="row gap" style="flex-wrap:wrap;margin:2px 0 6px"></div>');
+      (U.PALETTE || []).forEach(function (c) {
+        var b = el('<button type="button" class="swatch' + (c.key === draft.colorKey ? ' active' : '')
+          + '" title="' + U.escapeHtml(c.name) + '" style="background:' + c.hex + '"></button>');
+        b.addEventListener('click', function () { draft.colorKey = c.key; paint(); });
+        sw.appendChild(b);
+      });
+      wrap.appendChild(el('<div class="field-label">颜色</div>'));
+      wrap.appendChild(sw);
+      /* ① 目标（默认让用户设） */
+      /* 目标：**直接展开**，不用先点按钮；不要目标就点右边那个按钮把它去掉 */
+      wrap.appendChild(el('<div class="field-label" style="margin-top:12px">目标（攒到多少）'
+        + (draft.goal ? '' : '<span class="muted" style="font-weight:400"> — 暂不设目标，只做打卡</span>')
+        + '</div>'));
+      wrap.appendChild(el('<div class="row gap" style="margin-top:6px;align-items:center">'
+        + '<input class="input" type="number" id="tkTarget" min="1" style="width:96px" value="' + (draft.goal ? (draft.goal.target || 1) : 100) + '"'
+        + (draft.goal ? '' : ' disabled') + '>'
+        + '<input class="input" id="tkUnit" placeholder="单位：页 / 小时 / 公里" value="' + U.escapeHtml(draft.goal ? (draft.goal.unit || '') : '页') + '"'
+        + (draft.goal ? '' : ' disabled') + '>'
+        + '<button class="chip-btn' + (draft.goal ? '' : ' active') + '" type="button" id="tkGoalToggle">'
+        + (draft.goal ? '不用目标' : '用目标') + '</button></div>'));
+      /* ② 计划（可选；直接给选项，不要开关） */
+      wrap.appendChild(el('<div class="field-label" style="margin-top:14px">计划（可选）'
+        + '<span class="muted" style="font-weight:400"> — 设了就显示今天进度，做满折进「已完成」</span></div>'));
+      var seg = el('<div class="segmented" data-segkey="tk-edit-plan" style="margin-top:6px"></div>');
+      [{ k: 'none', t: '不做计划' }, { k: 'daily', t: '每天' }, { k: 'weekdays', t: '指定星期' },
+       { k: 'weekly', t: '每周' }, { k: 'everyN', t: '每隔 N 天' }].forEach(function (o) {
+        var cur = draft.cadence ? draft.cadence.type : 'none';
+        var b = el('<button class="seg' + (cur === o.k ? ' active' : '') + '" type="button">' + o.t + '</button>');
+        b.addEventListener('click', function () {
+          tkSegAnimate = true;
+          if (o.k === 'none') { draft.cadence = null; }
+          else if (!draft.cadence) { draft.cadence = { type: o.k, times: 1, intervalDays: 2, weekdays: [1, 3, 5] }; }
+          else { draft.cadence.type = o.k; }
+          if (o.k === 'weekdays' && draft.cadence && !(draft.cadence.weekdays || []).length) {
+            draft.cadence.weekdays = [1, 3, 5];
+          }
+          paint();
+        });
+        seg.appendChild(b);
+      });
+      wrap.appendChild(seg);
+      tkSyncSegPills(tkSegAnimate); tkSegAnimate = false;
+      if (draft.cadence) {
+        wrap.appendChild(el('<div class="field-label" style="margin-top:10px">'
+          + (draft.cadence.type === 'weekly' ? '每周做几次' : '每天做几次') + '</div>'));
+        wrap.appendChild(stepper(draft.cadence.times || 1, 1, 30, function (v) { draft.cadence.times = v; }));
+        if (draft.cadence.type === 'everyN') {
+          wrap.appendChild(el('<div class="field-label" style="margin-top:10px">每隔几天</div>'));
+          wrap.appendChild(stepper(draft.cadence.intervalDays || 2, 1, 30, function (v) { draft.cadence.intervalDays = v; }));
+        }
+        if (draft.cadence.type === 'weekdays') {
+          wrap.appendChild(el('<div class="field-label" style="margin-top:10px">指定星期几</div>'));
+          var wdRow = el('<div class="row gap" style="flex-wrap:wrap;margin-top:4px"></div>');
+          for (var w = 1; w <= 7; w++) {
+            (function (wn) {
+              var on = (draft.cadence.weekdays || []).indexOf(wn) >= 0;
+              /* 必须用 .active：.chip-btn 上只有 .active 有样式（写 .primary 是不生效的） */
+              var b = el('<button type="button" class="chip-btn' + (on ? ' active' : '') + '">'
+                + U.WEEKDAY_NAMES[wn].replace('周', '') + '</button>');
+              b.addEventListener('click', function () {
+                var i = draft.cadence.weekdays.indexOf(wn);
+                if (i >= 0) { if (draft.cadence.weekdays.length > 1) { draft.cadence.weekdays.splice(i, 1); } }
+                else { draft.cadence.weekdays.push(wn); }
+                draft.cadence.weekdays.sort();
+                paint();
+              });
+              wdRow.appendChild(b);
+            })(w);
+          }
+          wrap.appendChild(wdRow);
+        }
+      } else {
+        wrap.appendChild(el('<p class="muted" style="margin:8px 0 0;font-size:12px">'
+          + '不做计划：想记就记，不会自动进「已完成」，今日卡上只显示累计进度。</p>'));
+      }
+      var ti = wrap.querySelector('#tkText');
+      ti.addEventListener('input', function () { draft.text = ti.value; });
+      var goalToggle = wrap.querySelector('#tkGoalToggle');
+      if (goalToggle) {
+        goalToggle.addEventListener('click', function () {
+          draft.goal = draft.goal ? null : { target: 100, unit: '页' };
+          paint();
+        });
+      }
+      var gt = wrap.querySelector('#tkTarget');
+      if (gt) { gt.addEventListener('change', function () { if (draft.goal) { draft.goal.target = Math.max(1, Number(gt.value) || 1); } }); }
+      var gu = wrap.querySelector('#tkUnit');
+      if (gu) { gu.addEventListener('input', function () { if (draft.goal) { draft.goal.unit = gu.value || ''; } }); }
+    }
+    paint();
+    tkSyncSegPills();
+    body.appendChild(wrap);
+    var acts = [{
+      label: isNew ? '创建' : '保存', kind: 'primary',
+      onClick: function (close) {
+        var txt = (draft.text || '').trim();
+        if (!txt) { toast('先写"做什么"'); return; }
+        var t2 = AR.Store.todoUpsert({
+          id: isNew ? null : src.id,
+          text: txt, colorKey: draft.colorKey,
+          cadence: draft.cadence, goal: draft.goal
+        });
+        if (!isNew && t2) { t2.aside = null; }
+        AR.Store.save(true);
+        close();
+        AR.UI.refreshTasks();
+        toast(isNew ? ('已创建：' + txt) : '已保存');
+      }
+    }];
+    if (!isNew) {
+      acts.unshift({
+        label: '删除', kind: 'danger',
+        onClick: function (close) {
+          close();
+          confirmDanger({
+            title: '删除这条任务？', sub: U.escapeHtml(src.text),
+            text: '任务会进回收站（可恢复），它的记录也一并保留。',
+            okLabel: '删除',
+            onOk: function () {
+              AR.Store.todoRemove(src.id);
+              AR.UI.refreshTasks();
+              toast('已删除：' + src.text);
+            }
+          });
+        }
+      });
+    }
+    openModal({
+      title: isNew ? '新建任务' : '编辑任务',
+      sub: tkRuleText(src),
+      body: body, wide: true, actions: acts
+    });
+  }
 })();
