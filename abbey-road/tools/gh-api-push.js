@@ -126,15 +126,16 @@ async function push() {
 async function uploadAsset(uploadUrl, file, tag) {
   const name = path.basename(file);
   const buf = fs.readFileSync(file);
-  const B = '----abbeyroad' + Date.now().toString(16) + Math.floor(Math.random() * 1e6).toString(16);
 
-  const CRLF = Buffer.from('\r\n');
-  const preamble = Buffer.from(
-    '--' + B + '\r\n'
-    + 'Content-Disposition: form-data; name="file"; filename="' + name + '"\r\n'
-    + 'Content-Type: application/octet-stream\r\n\r\n', 'utf8');
-  const epilogue = Buffer.from('\r\n--' + B + '--\r\n', 'utf8');
-  const body = Buffer.concat([preamble, buf, epilogue]);
+  /*
+   * 教训：不要手拼 multipart 字节，也不要只给 fetch 传一个 Buffer/字符串 body。
+   * Node 会自己补 Content-Type（含它自己的 boundary），与手写 header 撞车后，
+   * 整个 body 会被原样当作内容存下去 —— 远端文件开头就变成 "------abbeyroad…"，
+   * 也就是信封字节进了文件，APK 直接不是 ZIP（实测差值正好是信封长度）。
+   * 用标准 FormData + Blob，并显式带上同一个 boundary，才是稳的。
+   */
+  const fd = new FormData();
+  fd.append('file', new Blob([buf], { type: 'application/octet-stream' }), name);
 
   const url = uploadUrl.replace('{?name,label}', '') + '?name=' + encodeURIComponent(name);
   const res = await fetch(url, {
@@ -143,17 +144,17 @@ async function uploadAsset(uploadUrl, file, tag) {
       'Authorization': 'Bearer ' + TOKEN,
       'Accept': 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'abbeyroad-release',
-      'Content-Type': 'multipart/form-data; boundary=' + B,
-      'Content-Length': String(body.length)
+      'User-Agent': 'abbeyroad-release'
     },
-    body: body
+    body: fd
   });
   const txt = await res.text();
   if (!res.ok) { throw new Error('上传资产失败 ' + name + ' -> ' + res.status + ' ' + txt.slice(0, 300)); }
   const j = JSON.parse(txt);
+  const same = j.size === buf.length;
   console.log('  资产已上传：' + j.name + '  ' + j.size + ' 字节'
-    + (j.size === buf.length ? '  (与本地同尺寸 OK)' : '  !! 尺寸不符，本地 ' + buf.length));
+    + (same ? '  (与本地同尺寸 OK)' : '  !! 尺寸不符，本地 ' + buf.length));
+  if (!same) { throw new Error('上传后尺寸不符：' + j.name + ' 远端 ' + j.size + ' / 本地 ' + buf.length); }
   return j;
 }
 

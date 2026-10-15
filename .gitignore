@@ -7,11 +7,13 @@
 # ── 旧版本归档 ─────────────────────────────────────────────
 _legacy/
 
+dist/
+
 # ── 打包工作区（钥匙副本 / 中间产物，一律不进库） ─────────────
 _build/
 
 # ── 构建产物（源码在 abbey-road/ 下，构建也在那里） ──────────
-abbey-road/dist/
+**/dist/
 abbey-road/build/
 android/build/
 windows/build/
