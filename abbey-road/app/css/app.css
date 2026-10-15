@@ -393,7 +393,7 @@ input, textarea { user-select: text; }
 .zone:focus-visible { outline-offset: -3px; }
 
 .input, textarea.input, select.input {
-  width: 100%; font: inherit; font-size: 13.5px; color: var(--text-primary);
+  width: 100%; font: inherit; font-size: calc(13.5px * var(--fs-scale)); color: var(--text-primary);
   background: var(--bg-subtle); border: 1px solid var(--glass-stroke);
   border-radius: var(--r-input); padding: 9px var(--sp-3); outline: none;
   transition: border-color var(--dur-quick) var(--ease-standard),
@@ -3288,14 +3288,14 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
 
 /* 卡本体 */
 .tk-card {
-  margin-top: 10px; border-radius: var(--r-card); background: var(--glass-card);
+    border: 1px solid var(--glass-stroke);  margin-top: 10px; border-radius: 14px; background: var(--glass-surface);
   box-shadow: var(--shadow-card); overflow: hidden;
 }
 .tk-sum {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 14px;
   border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer;
 }
-.tk-t { font-weight: 650; font-size: 13.5px; color: var(--text-primary); }
+.tk-t { font-weight: 650; font-size: calc(13.5px * var(--fs-scale)); color: var(--text-primary); }
 .tk-n { margin-left: auto; font-size: 11.5px; color: var(--text-tertiary); }
 .tk-chev { color: var(--text-tertiary); font-size: 11px; transition: transform .2s var(--ease-standard); }
 .tk-sum.open .tk-chev, .tk-donehead.open .tk-chev, .tk-t2rech.open .tk-chev { transform: rotate(90deg); }
@@ -3309,6 +3309,9 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
   margin: 4px 0; will-change: transform; touch-action: pan-y;
 }
 .tk-row.swiping, .tk-row.swipe-ok { background: var(--accent-soft); }
+  .tk-row.swiping { transition: none; will-change: transform; }
+  .tk-row.swiping .tk-hint { opacity: .85; }
+  .tk-row.swipe-ok .tk-hint { opacity: 1; font-weight: 600; }
 .tk-bar { width: 3px; align-self: stretch; border-radius: 2px; flex: 0 0 auto; }
 .tk-main { min-width: 0; flex: 1 1 auto; }
 .tk-l1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -3319,12 +3322,15 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
 .tk-marks { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; }
 .tk-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
 .tk-num { font-size: 11px; color: var(--accent); font-weight: 650; }
-.tk-l2 { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; font-size: 11px; color: var(--text-secondary); }
+.tk-l2 { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 2px; font-size: 11px; color: var(--text-secondary);  padding-right: 34px; }
 .tk-plan { color: var(--text-tertiary); }
 .tk-goal { color: var(--accent); font-weight: 600; }
 .tk-ltrack { display: block; height: 5px; border-radius: 3px; background: var(--divider); overflow: hidden; margin: 6px 0 4px; }
 .tk-lfill { display: block; height: 100%; border-radius: 3px; transition: width .35s var(--ease-emphasized); }
-.tk-hint { font-size: 11px; color: var(--text-tertiary); flex: 0 0 auto; opacity: .75; }
+.tk-hint {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-size: 10.5px; color: var(--accent); opacity: 0; transition: opacity 140ms;
+  }
 
 /* 折叠态迷你格：最近 7 天（一 二 三…▣▣▢ 那排的感觉） */
 .tk-mini { display: inline-flex; gap: 3px; margin-left: auto; align-items: center; flex: 0 0 auto; }
@@ -3369,7 +3375,7 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
 
 /* 「我的」汇总卡 */
 .tk-sumcard {
-  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+    border: 1px solid var(--glass-stroke);  border-radius: 14px; background: var(--glass-surface); box-shadow: var(--shadow-card);
   padding: 13px 15px; margin-bottom: 9px;
 }
 .tk-sumhead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
@@ -3386,7 +3392,7 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
 
 /* 「我的」两行制明细卡 */
 .tk-tcard {
-  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+    border: 1px solid var(--glass-stroke);  border-radius: 14px; background: var(--glass-surface); box-shadow: var(--shadow-card);
   padding: 11px 13px; margin-bottom: 8px;
 }
 .tk-t2head { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
@@ -3460,7 +3466,7 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
 .tk-rech-more { font-size: 10.5px; color: var(--text-tertiary); margin-top: 5px; }
 .tk-badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
 .tk-empty-card {
-  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+    border: 1px solid var(--glass-stroke);  border-radius: 14px; background: var(--glass-surface); box-shadow: var(--shadow-card);
   padding: 16px; text-align: center; color: var(--text-secondary); font-size: 12.5px;
 }
 
@@ -3490,7 +3496,7 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
    汇总区 + 所有条目 + 卡底按钮都在**同一张卡**里，条目之间用细分隔线，不再一条一张卡。 */
 
 .tk-mine-card {
-  border-radius: var(--r-card); background: var(--glass-card); box-shadow: var(--shadow-card);
+    border: 1px solid var(--glass-stroke);  border-radius: 14px; background: var(--glass-surface); box-shadow: var(--shadow-card);
   padding: 0 0 12px; margin-bottom: 9px; overflow: hidden;
 }
 .tk-mine-head { padding: 13px 15px 4px; }
@@ -3621,12 +3627,12 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
 
 /* 柱状图 */
 .tk-chart { border: 1px solid var(--glass-stroke); border-radius: 12px; padding: 12px 12px 8px; background: var(--glass-surface); }
-.tk-bars { display: flex; align-items: flex-end; gap: 3px; height: 100px; }
-.tk-bar {
+.tk-cbars { display: flex; align-items: flex-end; gap: 3px; height: 100px; }
+.tk-cbar {
   flex: 1 1 0; min-width: 0; border-radius: 3px 3px 0 0; background: var(--accent); opacity: .45;
   transform-origin: bottom; transition: opacity 150ms var(--ease-standard);
 }
-.tk-bar:hover { opacity: 1; }
+.tk-cbar:hover { opacity: 1; }
 .tk-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); margin-top: 6px; }
 .tk-spark { display: block; width: 100%; height: 110px; }
 
@@ -3641,7 +3647,7 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
 .tk-tstat { border: 1px solid var(--glass-stroke); border-radius: 12px; padding: 11px 12px; margin-bottom: 9px; background: var(--glass-surface); }
 .tk-tsh { display: flex; align-items: center; gap: 8px; }
 .tk-tsdot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
-.tk-tsname { font-weight: 650; font-size: 13px; min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-tsname { font-weight: 650; font-size: calc(13px * var(--fs-scale)); min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk-tspc { margin-left: auto; font-size: 12px; font-weight: 650; color: var(--accent); flex: 0 0 auto; }
 .tk-tsmeta { font-size: 11.5px; color: var(--text-tertiary); margin-top: 4px; }
 .tk-sparkrow { display: flex; align-items: flex-end; gap: 2px; height: 26px; margin-top: 8px; }
@@ -3662,7 +3668,7 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
 .tk-muted { font-size: 11.5px; color: var(--text-tertiary); margin: 10px 0 0; }
 
 /* 内容进场：柱子长出来、横条展开、折线画出来（尊重 prefers-reduced-motion） */
-.tk-statpage .tk-bar { animation: tkGrow 460ms var(--ease-emphasized) both; }
+.tk-statpage .tk-cbar { animation: tkGrow 460ms var(--ease-emphasized) both; }
 .tk-statpage .tk-wdt i, .tk-statpage .tk-kbar i, .tk-statpage .tk-goalbar i {
   animation: tkWipe 520ms var(--ease-emphasized) both;
 }
@@ -3674,11 +3680,11 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
 @keyframes tkWipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 @keyframes tkDraw { to { stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .tk-statpage .tk-bar, .tk-statpage .tk-wdt i, .tk-statpage .tk-kbar i,
+  .tk-statpage .tk-cbar, .tk-statpage .tk-wdt i, .tk-statpage .tk-kbar i,
   .tk-statpage .tk-goalbar i, .tk-statpage .tk-spark polyline { animation: none !important; }
 }
 /* 性能模式：不播动画 */
-body[data-perf] .tk-statpage .tk-bar,
+body[data-perf] .tk-statpage .tk-cbar,
 body[data-perf] .tk-statpage .tk-wdt i,
 body[data-perf] .tk-statpage .tk-kbar i,
 body[data-perf] .tk-statpage .tk-goalbar i,

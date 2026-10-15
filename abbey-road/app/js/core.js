@@ -955,7 +955,15 @@ function todoLongList() { return todoDailyList(); }
 
   function longTaskRaw() { return (state.longTasks || (state.longTasks = [])); }
   /** 还活着的长期任务（界面显示用） */
-  function longTaskList() { return liveOnly(longTaskRaw()); }
+  /** 还活着的长期任务（**不含已归档的** —— 迁移后的老记录要藏起来，不能在旧界面复活） */
+  function longTaskList() {
+    var raw = longTaskRaw(), out = [];
+    for (var i = 0; i < raw.length; i++) {
+      if (!raw[i] || raw[i].deletedAt || raw[i].archived) { continue; }
+      out.push(raw[i]);
+    }
+    return out;
+  }
 
   function longTaskById(id) {
     var list = longTaskRaw();
@@ -1274,12 +1282,14 @@ function todoLongList() { return todoDailyList(); }
       if (!s.meta) { s.meta = {}; }
       s.meta.notesSplitAt = APP_VERSION;
     }
-    /* 老「长期任务」并进统一任务表（无损、幂等、可回退） */
-    if (!s.meta || !s.meta.tasksMergedAt) {
-      var movedN = migrateLongTasksIntoToDos(s);
-      if (!s.meta) { s.meta = {}; }
+    /* 老「长期任务」并进统一任务表（无损、幂等、可回退）。
+       不设一次性闸门：导入老配置后可能又冒出 longTasks，每次都跑一遍，
+       函数自身靠 archived 幂等（已迁的不再重复迁）。 */
+    var movedN = migrateLongTasksIntoToDos(s);
+    if (!s.meta) { s.meta = {}; }
+    if (movedN) {
       s.meta.tasksMergedAt = APP_VERSION;
-      if (movedN) { s.meta.tasksMergedFrom = movedN; }
+      s.meta.tasksMergedFrom = (s.meta.tasksMergedFrom || 0) + movedN;
     }
     s.schemaVersion = SCHEMA_VERSION;
     return s;

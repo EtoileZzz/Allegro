@@ -1076,8 +1076,15 @@ var AR = window.AR || (window.AR = {});
   }
 
   function modLongterm() {
-    return longTaskCard(false);
+  /* 老「长期任务」已并入「任务」：没有未归档的老记录时给空节点，
+     免得看起来像"长期任务又出现了"。老数据仍可回退（导出里还在）。 */
+  if (!AR.Store.longTaskList || !AR.Store.longTaskList().length) {
+    var empty = document.createElement("div");
+    empty.hidden = true;
+    return empty;
   }
+  return longTaskCard(false);
+}
 
   function modHwstats() {
     var all = AR.Store.taskList ? AR.Store.taskList() : (AR.Store.get().tasks || []);
@@ -9751,7 +9758,7 @@ var AR = window.AR || (window.AR = {});
       + track
       + '<div class="tk-l2">' + l2 + '</div></div>'
       + '<span class="tk-hint">划掉</span></div>');
-    bindSwipeRow(row, { flyOut: false, onCommit: function () { tkPunch(t); } });
+    bindSwipeRow(row, { flyOut: true, onCommit: function () { tkPunch(t); } });
     tkBindLongPress(row, function () { openTaskEdit(t); });
     return row;
   }
@@ -9937,10 +9944,10 @@ var AR = window.AR || (window.AR = {});
 
   function tkStatBars(daily, h) {
     var max = Math.max.apply(null, daily.map(function (x) { return x.n; }).concat([1]));
-    var out = '<div class="tk-chart"><div class="tk-bars">';
+    var out = '<div class="tk-chart"><div class="tk-cbars">';
     for (var i = 0; i < daily.length; i++) {
       var hp = Math.max(3, Math.round(daily[i].n / max * 92));
-      out += '<span class="tk-bar" title="' + daily[i].k + ' · ' + daily[i].n + ' 次" style="height:'
+      out += '<span class="tk-cbar" title="' + daily[i].k + ' · ' + daily[i].n + ' 次" style="height:'
         + hp + 'px;animation-delay:' + (i * 9) + 'ms"></span>';
     }
     out += '</div><div class="tk-axis"><span>' + daily[0].k.slice(5) + '</span><span>峰值 ' + max + ' 次</span><span>今天</span></div></div>';
@@ -10067,7 +10074,7 @@ var AR = window.AR || (window.AR = {});
       if (AR.Motion && AR.Motion.pose) {
         try { AR.Motion.pose(pageBox, 'contentIn'); } catch (e) { }
       }
-      var bars = pageBox.querySelectorAll('.tk-bar');
+      var bars = pageBox.querySelectorAll('.tk-cbar');
       for (var i = 0; i < bars.length; i++) { bars[i].style.animationDelay = (i * 9) + 'ms'; }
     }
     paintPage();

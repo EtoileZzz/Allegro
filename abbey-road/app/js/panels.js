@@ -738,8 +738,8 @@ var AR = window.AR || (window.AR = {});
         panels: [panelWidgets] },
       { key: 'course', icon: '📚', label: '课程与课表', desc: '学期、作息、配色、提醒',
         panels: [panelSchedule, panelNotify] },
-      { key: 'work', icon: '📝', label: '作业与日程', desc: '作业开关、长期任务、日程类型',
-        quick: quickWork, panels: [panelWork, panelLongTasks] },
+      { key: 'work', icon: '📝', label: '作业与日程', desc: '作业开关、任务、日程类型',
+        quick: quickWork, panels: [panelWork, panelTasks, panelLongTasks] },
       { key: 'mine', icon: '🧩', label: '我的页面', desc: '模块自由组合',
         quick: quickMine, panels: [panelMine] },
       { key: 'syncdata', icon: '💾', label: '数据与同步', desc: '导入、系统集成、备份与清空',
@@ -2460,7 +2460,100 @@ var AR = window.AR || (window.AR = {});
    * 志愿时长、阅读量这类"攒进度"的目标：各自统计（今日 / 近 7 天 / 累计），
    * 每条单独决定要不要在今日页以独立卡片出现。数据进配置文件。
    */
-  function panelLongTasks() {
+  function panelTasks() {
+  var box = el('<div></div>');
+  box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
+    + '任务可以只打卡，也可以设「目标」（攒到多少）和「计划」（每天/每周做几次）。'
+    + '设了计划的会显示今天进度，做满折进「已完成」。</p>'));
+  var host = el('<div class="lt-list" id="tkSetList"></div>');
+  box.appendChild(host);
+  renderTaskList(host);
+  var add = el('<button class="btn" type="button" style="margin-top:10px">＋ 新建任务</button>');
+  add.addEventListener('click', function () {
+    AR.Bridge.haptic('light', add);
+    if (AR.UI.openTaskEdit) { AR.UI.openTaskEdit(null); }
+  });
+  box.appendChild(add);
+  return panel('任务', box, 'tasks');
+}
+
+/**
+ * 设置页里的任务清单。每条一行：
+ *   色点 + 名称 + 计划 + 进度条 + 「今天 x/y 次 · 累计 a/b 单位 · 完成率 n%」+ 划一下 / 编辑 / 删除。
+ * 传 host 时渲染到指定容器，不传就找页面上的 #tkSetList（保存后局部刷新用）。
+ */
+function renderTaskList(host) {
+  var box = host || document.getElementById('tkSetList');
+  if (!box) { return; }
+  var S = AR.Store;
+  var list = S.todoList ? S.todoList() : [];
+  box.innerHTML = '';
+  if (!list.length) {
+    box.appendChild(el('<div class="muted">还没有任务。比如「背单词 · 每天 3 次」或「志愿时长 · 目标 20 小时」。</div>'));
+    return;
+  }
+  var d = new Date();
+  for (var i = 0; i < list.length; i++) {
+    (function (t) {
+      var p = S.todoProgress(t, d);
+      var color = AR.Util.colorHex(t.colorKey || '#5B8DEF');
+      var num = function (n) { return String(Math.round((Number(n) || 0) * 100) / 100); };
+      var plan = (AR.UI.tkPlanText ? AR.UI.tkPlanText(t) : '') || '只打卡';
+      var pct = p.hasGoal ? p.percent : (p.periodGoal > 0 ? Math.round(Math.min(1, p.periodDone / p.periodGoal) * 100) : 0);
+      var sub = '';
+      if (p.periodGoal > 0) { sub += p.periodUnit + ' ' + p.periodDone + '/' + p.periodGoal + ' 次'; }
+      if (p.hasGoal) {
+        sub += (sub ? ' · ' : '') + '累计 ' + num(p.total) + ' / ' + num(p.target) + ' ' + esc(t.goal.unit || '');
+        sub += ' · 完成率 ' + p.percent + '%';
+      } else if (!p.periodGoal) {
+        sub += '累计 ' + num(p.total) + ' 次';
+      }
+      var barW = p.hasGoal ? Math.round(p.rate * 100) : (p.periodGoal > 0 ? Math.round(Math.min(1, p.periodDone / p.periodGoal) * 100) : 0);
+      var row = el('<div class="lt-set-row">'
+        + '<span class="lt-dot" style="background:' + color + '"></span>'
+        + '<span class="lt-main">'
+        + '<span class="lt-name">' + esc(t.text || '未命名') + '</span>'
+        + '<span class="lt-bar"><i style="width:' + barW + '%;background:' + color + '"></i></span>'
+        + '<span class="lt-sub">' + esc(plan) + (sub ? ' · ' + esc(sub) : '') + '</span>'
+        + '</span>'
+        + '<span class="lt-actions"></span></div>');
+      var acts = row.querySelector('.lt-actions');
+      var plus = el('<button class="chip-btn" type="button" title="记一次">+1</button>');
+      plus.addEventListener('click', function () {
+        S.todoAddEntry(t.id, 1, '', { src: 'panel' });
+        AR.Bridge.haptic('light', plus);
+        AR.UI.toast('已记 +1：' + (t.text || ''));
+        renderTaskList();
+        if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+      });
+      acts.appendChild(plus);
+      var edit = el('<button class="chip-btn" type="button">编辑</button>');
+      edit.addEventListener('click', function () {
+        if (AR.UI.openTaskEdit) { AR.UI.openTaskEdit(t); }
+      });
+      acts.appendChild(edit);
+      var del = el('<button class="chip-btn" type="button">删除</button>');
+      del.addEventListener('click', function () {
+        if (!AR.UI.confirmDanger) { return; }
+        AR.UI.confirmDanger({
+          title: '删除这条任务？', sub: esc(t.text || ''),
+          text: '任务会进回收站（可恢复），记录也一并保留。',
+          okLabel: '删除',
+          onOk: function () {
+            S.todoRemove(t.id);
+            AR.UI.toast('已删除：' + (t.text || ''));
+            renderTaskList();
+            if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+          }
+        });
+      });
+      acts.appendChild(del);
+      box.appendChild(row);
+    })(list[i]);
+  }
+}
+
+function panelLongTasks() {
     var box = el('<div></div>');
     box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
       + '志愿时长、阅读量这种要一点点攒的目标：进度各自算，'
@@ -2482,7 +2575,22 @@ var AR = window.AR || (window.AR = {});
    * 每条一行：色点 + 名称 + 进度条 + 「x / y 单位 · 完成率」+ 今日页开关 + 快捷记一笔 / 编辑。
    * 传 host 时渲染到指定容器，不传就找页面上的 #hwLongTasks（保存后局部刷新用，不整页重建）。
    */
-  function renderLongTaskList(host) {
+
+    function list0HasLiveLongTasks() {
+  var raw = (AR.Store.longTaskRaw ? AR.Store.longTaskRaw() : []) || [];
+  for (var i = 0; i < raw.length; i++) {
+    if (raw[i] && !raw[i].deletedAt && !raw[i].archived) { return true; }
+  }
+  return false;
+  }
+
+function renderLongTaskList(host) {
+  /* 老「长期任务」已并入「任务」：没有未归档的老记录时说明一下，别给空列表 */
+  if (!list0HasLiveLongTasks()) {
+    host.innerHTML = '<p class="muted" style="padding:8px 2px;font-size:12.5px">' +
+      '长期任务已并入「任务」，在这里统一管理。</p>';
+    return;
+  }
     var box = host || document.getElementById('hwLongTasks');
     if (!box) { return; }
     var list = AR.Store.longTaskList ? AR.Store.longTaskList() : [];
@@ -3182,7 +3290,8 @@ var AR = window.AR || (window.AR = {});
     serializeParsed: serializeParsed,
     quickAddCourse: quickAddCourse,
     quickAddEvent: quickAddEvent,
-    renderLongTaskList: renderLongTaskList,
+    renderTaskList: renderTaskList,
+  renderLongTaskList: renderLongTaskList,
     refreshAll: refreshAll
   };
 })();

@@ -112,5 +112,57 @@ const bp = fs.readFileSync(path.join(appDir, '..', 'android', 'build.ps1'), 'utf
 const bpCode = (/\$versionCode = (\d+)/.exec(bp) || [])[1];
 ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build=' + bpCode + ' manifest=' + mCode);
 
+
+/* ═══════════ 13. 任务模块的样式与入口（v0.4.2 补） ═══════════ */
+{
+  const css = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+  const ui = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panels = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+
+  /* 卡片必须和全项目统一的模块外壳 .hw-card 一致（描边 + 底色 + 圆角） */
+  const shell = (sel) => {
+    const m = new RegExp('\\' + sel + '\\s*\\{[^}]*\\}').exec(css);
+    return m ? m[0] : '';
+  };
+  const hw = shell('.hw-card');
+  ['tk-card', 'tk-mine-card', 'tk-sumcard', 'tk-tcard', 'tk-empty-card'].forEach((sel) => {
+    const v = shell('.' + sel);
+    ok('C30 卡 .' + sel + ' 与 .hw-card 同样有高光描边',
+      v.indexOf('--glass-stroke') >= 0, v ? '有' : '没找到规则');
+    ok('C31 卡 .' + sel + ' 底色用 glass-surface（不是更暗的 glass-card）',
+      v.indexOf('--glass-surface') >= 0 && v.indexOf('--glass-card') < 0);
+  });
+  ok('C32 .hw-card 参照本身含描边与 glass-surface',
+    hw.indexOf('--glass-stroke') >= 0 && hw.indexOf('--glass-surface') >= 0);
+
+  /* 类名撞车：.tk-bar 不能既做条目色条又做柱状图 */
+  const barRules = (css.match(/\.tk-bar\s*\{[^}]*\}/g) || []);
+  ok('C33 .tk-bar 只有一条规则（条目左侧色条），不与柱状图撞车',
+    barRules.length === 1 && barRules[0].indexOf('width: 3px') >= 0,
+    '规则数=' + barRules.length);
+  ok('C34 柱状图用独立的 .tk-cbar 类', css.indexOf('.tk-cbar') >= 0 && ui.indexOf('tk-cbar') >= 0);
+
+  /* 设置里必须能管理「任务」，不能只剩长期任务 */
+  ok('C35 设置里注册了任务管理面板', panels.indexOf('panelTasks') >= 0 && panels.indexOf('panelTasks,') >= 0);
+  ok('C36 设置里的任务清单能增删改（+1 / 编辑 / 删除）',
+    panels.indexOf('function renderTaskList') >= 0 &&
+    panels.indexOf('todoAddEntry') >= 0 && panels.indexOf('todoRemove') >= 0);
+  ok('C37 面板已导出给保存后局部刷新用', panels.indexOf('renderTaskList: renderTaskList') >= 0);
+
+  /* 划动效果与「划掉」提示对齐作业 */
+  ok('C38 任务条目划动用 flyOut（与作业同款手感）',
+    /bindSwipeRow\(row, \{ flyOut: true, onCommit: function \(\) \{ tkPunch\(t\); \} \}\)/.test(ui));
+  const tkHint = /(?:^|\n)\s*\.tk-hint \{[^}]*\}/.exec(css);
+  const hwHint = /\.hw-swipe-hint \{[^}]*\}/.exec(css);
+  ok('C39 「划掉」提示与作业同款（绝对定位右侧 + 主题色 + 平时透明）',
+    !!tkHint && !!hwHint &&
+    tkHint[0].indexOf('position: absolute') >= 0 &&
+    tkHint[0].indexOf('var(--accent)') >= 0 &&
+    tkHint[0].indexOf('opacity: 0') >= 0);
+  ok('C40 划动达标态与作业一致（划动 .85 / 达标加粗）',
+    css.indexOf('.tk-row.swiping .tk-hint { opacity: .85; }') >= 0 &&
+    css.indexOf('.tk-row.swipe-ok .tk-hint { opacity: 1; font-weight: 600; }') >= 0);
+}
+
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exitCode = fail ? 1 : 0;
