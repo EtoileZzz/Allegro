@@ -121,7 +121,7 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
 
   /* 卡片必须和全项目统一的模块外壳 .hw-card 一致（描边 + 底色 + 圆角） */
   const shell = (sel) => {
-    const m = new RegExp('\\' + sel + '\\s*\\{[^}]*\\}').exec(css);
+    const m = new RegExp('(?:^|\\n)\\s*\\' + sel + '\\s*\\{[^}]*\\}').exec(css);
     return m ? m[0] : '';
   };
   const hw = shell('.hw-card');
@@ -162,6 +162,31 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C40 划动达标态与作业一致（划动 .85 / 达标加粗）',
     css.indexOf('.tk-row.swiping .tk-hint { opacity: .85; }') >= 0 &&
     css.indexOf('.tk-row.swipe-ok .tk-hint { opacity: 1; font-weight: 600; }') >= 0);
+}
+
+
+/* ═══════════ 14. 导入必须立刻迁移 + 模块卡间距（v0.4.2 补） ═══════════ */
+{
+  const core = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  const cio = fs.readFileSync(path.join(appDir, 'js/configio.js'), 'utf8');
+  const css2 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  /* 导入走 mergePayload → applyMerge，不走 load()；迁移必须在这里显式跑，
+     否则导入老配置后老「长期任务」不会被并进「任务」，而且不重启就永远不转。 */
+  const ci = cio.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  ok('C41 mergePayload 里显式调用了迁移', ci.indexOf('migrateNow') >= 0);
+  ok('C42 core 导出了 migrateNow', core.indexOf('migrateNow: migrateNow') >= 0);
+  ok('C43 migrateNow 会归档老 longTasks（复用同一迁移函数）',
+    /function migrateNow\(\)[\s\S]{0,400}migrateLongTasksIntoToDos/.test(core));
+
+  /* 「我的」是 flex 纵向布局，卡片间距靠 margin-top（.hw-card 就是这套）；
+     任务大卡必须并入同一套，否则会贴住/叠在别的模块卡上。 */
+  ok('C44 任务大卡并入 .custom-modules 的 margin-top 间距机制',
+    /\.custom-modules \.tk-mine-card \{[^}]*margin-top: 10px/.test(css2));
+  ok('C45 任务大卡作为首张时上间距归零（与 .hw-card 一致）',
+    /\.custom-modules \.tk-mine-card:first-child \{[^}]*margin-top: 0/.test(css2));
+  ok('C46 任务大卡自带 margin-top（任何容器里都不会贴住上一张）',
+    /(?:^|\n)\s*\.tk-mine-card \{[^}]*margin-top: 10px/.test(css2));
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

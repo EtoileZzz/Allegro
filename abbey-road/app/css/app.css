@@ -2636,6 +2636,9 @@ body.dev-outline .segmented, body.dev-outline .btn, body.dev-outline .chip-btn {
 .custom-modules { display: flex; flex-direction: column; padding-bottom: 20px; }
 .custom-modules .hw-card { margin-top: 10px; }
 .custom-modules .hw-card:first-child { margin-top: 0; }
+/* 任务大卡与其它模块卡同一套间距：靠 margin-top，第一张归零 */
+.custom-modules .tk-mine-card { margin-top: 10px; margin-bottom: 0; }
+.custom-modules .tk-mine-card:first-child { margin-top: 0; }
 .cm-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 4px 2px 8px; }
 .cm-stat {
   background: var(--bg-subtle); border-radius: 10px; padding: 8px 6px; text-align: center;
@@ -3497,7 +3500,7 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
 
 .tk-mine-card {
     border: 1px solid var(--glass-stroke);  border-radius: 14px; background: var(--glass-surface); box-shadow: var(--shadow-card);
-  padding: 0 0 12px; margin-bottom: 9px; overflow: hidden;
+  padding: 0 0 12px; margin-top: 10px; margin-bottom: 9px; overflow: hidden;
 }
 .tk-mine-head { padding: 13px 15px 4px; }
 
@@ -3518,8 +3521,8 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
   color: var(--text-secondary); cursor: pointer; flex: 0 0 auto;
 }
 .tk-edit-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-.tk-t2chev { color: var(--text-tertiary); font-size: 11px; transition: transform .2s var(--ease-standard); }
-.tk-t2head.open .tk-t2chev { transform: rotate(90deg); }
+
+
 
 /* 今天 / 累计 两行 */
 .tk-t2row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }

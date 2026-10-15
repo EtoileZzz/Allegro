@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.2';
+var APP_VERSION = '0.4.3';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -1136,6 +1136,20 @@ function todoLongList() { return todoDailyList(); }
   }
 
   /** 版本迁移入口：目前只有 v1，保留结构方便以后加字段 */
+  /**
+   * 对当前内存里的 state 立刻跑一次迁移并保存。
+   * 用途：导入配置后（applyMerge）需要马上完成 longTasks → tasks2，
+   * 因为迁移原先只挂在 load() 上，导入后不重启 App 就永远不迁移。
+   * 返回这次迁进来的条数（0 表示没有可迁的）。
+   */
+  function migrateNow() {
+    if (!state) { return 0; }
+    var moved = migrateLongTasksIntoToDos(state);
+    state = migrate(state);
+    if (moved) { save(true); }
+    return moved;
+  }
+
   function migrate(s) {
     if (!s.settings) { s.settings = defaultSettings((s.semesters && s.semesters[0] && s.semesters[0].id) || uid()); }
     if (!s.settings.layout) { s.settings.layout = { preset: 'dual-horizontal', followDeviceSuggestion: true }; }
@@ -3098,6 +3112,8 @@ function todoLongList() { return todoDailyList(); }
     todoProgress: todoProgress, todoSettled: todoSettled, todoEntryDay: todoEntryDay,
     todoLiveEntries: todoLiveEntries, todoIsWeekly: todoIsWeekly,
     migrateLongTasksIntoToDos: migrateLongTasksIntoToDos,
+    /* 导入配置后立刻跑一次迁移（导入不走 load()，否则老 longTasks 不会被并进来） */
+    migrateNow: migrateNow,
     longTaskRecentEntries: longTaskRecentEntries, longTaskEntryDay: longTaskEntryDay,
     renameCourse: renameCourse, unifyColorsByName: unifyColorsByName,
     EVENT_TYPES: EVENT_TYPES, eventType: eventType,

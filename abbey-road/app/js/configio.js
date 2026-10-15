@@ -277,6 +277,15 @@ var AR = window.AR || (window.AR = {});
 
     AR.Store.applyMerge(payload, {});
 
+    /*
+     * 立刻完成数据迁移（合并不走 load()）。
+     * 少了这一步，导入老配置后老「长期任务」不会并进「任务」，
+     * 用户会看到长期任务列表照旧存在，而且不重启 App 就永远不会转。
+     */
+    try {
+      if (AR.Store.migrateNow) { AR.Store.migrateNow(); }
+    } catch (e) { console.error('导入后迁移失败', e); }
+
     /**
      * 个性化设置是"挂在 body 上的派生状态"（data-theme / data-perf / data-glass /
      * 行内 CSS 变量 / 动效表），光把数据合并进来界面不会自己变 ——
