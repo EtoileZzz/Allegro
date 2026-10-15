@@ -3404,7 +3404,17 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .tk-t2right { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 5px; padding-top: 1px; }
-.tk-t2chev { color: var(--text-tertiary); font-size: 11px; transition: transform .2s var(--ease-standard); }
+  .tk-exp-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    font: inherit; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 999px;
+    border: 1px solid var(--glass-stroke); background: var(--glass-surface);
+    color: var(--text-secondary); cursor: pointer; flex: 0 0 auto;
+  }
+  .tk-exp-btn i { font-style: normal; display: block; transition: transform 240ms var(--ease-emphasized); }
+  .tk-exp-btn em { font-style: normal; }
+  .tk-exp-btn.open { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .tk-exp-btn.open i { transform: rotate(90deg); }
+  .tk-exp-btn:hover { border-color: var(--accent); color: var(--accent); }
 .tk-t2head.open .tk-t2chev { transform: rotate(90deg); }
 .tk-t2row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
 .tk-t2lab { flex: 0 0 auto; width: 42px; font-size: 10.5px; color: var(--text-tertiary); }
@@ -3417,6 +3427,16 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
 .tk-t2fill { display: block; height: 100%; border-radius: 4px; transition: width .35s var(--ease-emphasized); }
 .tk-t2val { flex: 0 0 auto; font-size: 11.5px; color: var(--text-secondary); text-align: right; min-width: 82px; }
 .tk-t2val b { color: var(--text-primary); }
+  /* 展开动画：先给起始姿态，再浮入（CSS 兜底，老 WebView 也生效） */
+  .tk-t2body.tk-expand { animation: tkExpandIn 320ms var(--ease-emphasized) both; }
+  .tk-t2body.tk-expand > * { animation: tkFadeUp 340ms var(--ease-emphasized) 40ms both; }
+  @keyframes tkExpandIn { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes tkFadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .tk-t2body.tk-expand, .tk-t2body.tk-expand > * { animation: none !important; }
+    .tk-exp-btn i { transition: none; }
+  }
+  body[data-perf] .tk-t2body.tk-expand, body[data-perf] .tk-t2body.tk-expand > * { animation: none !important; }
 .tk-t2body { margin-top: 11px; border-top: 1px solid var(--divider); padding-top: 10px; }
 
 /* 贡献图：配色跟随主题色（不用 color-mix —— 老 WebView 不认） */
@@ -3515,11 +3535,15 @@ body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .tk-t2right { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-.tk-edit-btn {
-  font: inherit; font-size: 11px; padding: 3px 9px; border-radius: 7px;
-  border: 1px solid var(--glass-stroke); background: var(--glass-surface);
-  color: var(--text-secondary); cursor: pointer; flex: 0 0 auto;
-}
+  .tk-edit-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    font: inherit; font-size: 11.5px; font-weight: 650; padding: 5px 11px; border-radius: 999px;
+    border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
+    cursor: pointer; flex: 0 0 auto;
+  }
+  .tk-edit-btn i { font-style: normal; font-size: 11px; }
+  .tk-edit-btn:hover { background: var(--accent); color: var(--accent-contrast); }
+  .tk-edit-btn:hover i { color: var(--accent-contrast); }
 .tk-edit-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 
 

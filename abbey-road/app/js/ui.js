@@ -9828,6 +9828,18 @@ var AR = window.AR || (window.AR = {});
     return card;
   }
   /** 统一的展开动画：走 AR.Motion 的 pose（和别处同一个接口） */
+  /** 展开动画：优先走统一的 AR.Motion，再叠一层 CSS 过渡兜底 */
+  function tkAnimateExpand(node) {
+    if (!node) { return; }
+    node.classList.remove('tk-expand');
+    /* 强制回流，保证动画能重播 */
+    void node.offsetHeight;
+    node.classList.add('tk-expand');
+    if (AR.Motion && AR.Motion.pose) {
+      try { AR.Motion.pose(node, 'contentIn'); } catch (e) { }
+    }
+  }
+
   function tkPlayOpen(node, opening) {
     if (!node || !AR.Motion) { return; }
     try {
@@ -10176,8 +10188,9 @@ var AR = window.AR || (window.AR = {});
       + '<span class="tk-t2name">' + U.escapeHtml(t.text) + '</span>'
       + '<span class="tk-t2right">'
       + (p.done ? '<span class="tk-badge">本期已达成</span>' : '')
-      + '<button class="tk-edit-btn" type="button">编辑</button>'
-      + '<span class="tk-t2chev">▸</span></span></div>';
+      + '<button class="tk-edit-btn" type="button"><i>✎</i>编辑</button>'
+      + '<button class="tk-exp-btn' + (open ? ' open' : '') + '" type="button">'
+      + '<i>▸</i><em>' + (open ? '收起' : '展开') + '</em></button></span></div>';
 
     /* 今天：有计划 → 进度点；没计划 → 只报次数（沿用旧长期任务的样子） */
     if (need > 0) {
@@ -10208,6 +10221,8 @@ var AR = window.AR || (window.AR = {});
     var body = line.querySelector('[data-body]');
     if (open) {
       body.hidden = false;
+      /* 展开动画：内容重建后浮入（CSS 兜底 + 统一接口） */
+      tkAnimateExpand(body);
       body.innerHTML = tkGhGrid(t)
         + '<div class="tk-t2recs"><button class="tk-t2rech' + (TK_REC_OPEN[t.id] ? ' open' : '') + '" type="button">'
         + '<span>最近记录</span><span class="tk-chev">▸</span></button>'
@@ -10233,6 +10248,17 @@ var AR = window.AR || (window.AR = {});
       if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
     });
     /* [编辑] 按钮 → 直接进该任务编辑页 */
+    /* [展开/收起] 按钮：与点标题行同效 */
+    var expBtn = line.querySelector('.tk-exp-btn');
+    if (expBtn) {
+      expBtn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        AR.Bridge.haptic('light', expBtn);
+        TK_MINE_OPEN[t.id] = !TK_MINE_OPEN[t.id];
+        if (!TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = false; }
+        if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
+      });
+    }
     line.querySelector('.tk-edit-btn').addEventListener('click', function (ev) {
       ev.stopPropagation();
       AR.Bridge.haptic('light', ev.currentTarget);

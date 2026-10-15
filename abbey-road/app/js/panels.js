@@ -739,7 +739,7 @@ var AR = window.AR || (window.AR = {});
       { key: 'course', icon: '📚', label: '课程与课表', desc: '学期、作息、配色、提醒',
         panels: [panelSchedule, panelNotify] },
       { key: 'work', icon: '📝', label: '作业与日程', desc: '作业开关、任务、日程类型',
-        quick: quickWork, panels: [panelWork, panelTasks, panelLongTasks] },
+        quick: quickWork, panels: [panelWork, panelTasks] },
       { key: 'mine', icon: '🧩', label: '我的页面', desc: '模块自由组合',
         quick: quickMine, panels: [panelMine] },
       { key: 'syncdata', icon: '💾', label: '数据与同步', desc: '导入、系统集成、备份与清空',

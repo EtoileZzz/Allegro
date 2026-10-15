@@ -143,7 +143,9 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C34 柱状图用独立的 .tk-cbar 类', css.indexOf('.tk-cbar') >= 0 && ui.indexOf('tk-cbar') >= 0);
 
   /* 设置里必须能管理「任务」，不能只剩长期任务 */
-  ok('C35 设置里注册了任务管理面板', panels.indexOf('panelTasks') >= 0 && panels.indexOf('panelTasks,') >= 0);
+  ok('C35 设置里注册了任务管理面板', /panels: \[panelWork, panelTasks/.test(panels));
+  ok('C35b 设置里已移除「长期任务」面板（任务已统一）',
+    panels.indexOf('panelTasks, panelLongTasks') < 0 && !/panels: \[[^\]]*panelLongTasks/.test(panels));
   ok('C36 设置里的任务清单能增删改（+1 / 编辑 / 删除）',
     panels.indexOf('function renderTaskList') >= 0 &&
     panels.indexOf('todoAddEntry') >= 0 && panels.indexOf('todoRemove') >= 0);
@@ -187,6 +189,36 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     /\.custom-modules \.tk-mine-card:first-child \{[^}]*margin-top: 0/.test(css2));
   ok('C46 任务大卡自带 margin-top（任何容器里都不会贴住上一张）',
     /(?:^|\n)\s*\.tk-mine-card \{[^}]*margin-top: 10px/.test(css2));
+}
+
+
+/* ═══════════ 15. 「我的」任务条目的按钮与展开动画（v0.4.4 补） ═══════════ */
+{
+  const ui2 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const css3 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  /* 按钮要显眼：编辑按钮走主题色（描边 + 淡底），不是原来的灰底小按钮 */
+  ok('C47 编辑按钮用主题色描边 + 淡底（醒目）',
+    /(?:^|\n)\s*\.tk-edit-btn \{[^}]*border: 1px solid var\(--accent\)[^}]*background: var\(--accent-soft\)/.test(css3));
+  ok('C48 展开按钮是带底色的胶囊，且展开时高亮 + 箭头旋转',
+    /\.tk-exp-btn \{[^}]*border-radius: 999px/.test(css3) &&
+    /\.tk-exp-btn\.open \{[^}]*var\(--accent\)/.test(css3) &&
+    /\.tk-exp-btn\.open i \{[^}]*rotate\(90deg\)/.test(css3));
+  ok('C49 展开按钮带「展开/收起」文字',
+    ui2.indexOf("(open ? '收起' : '展开')") >= 0);
+  ok('C50 展开按钮可点（与点标题行同效）',
+    ui2.indexOf("line.querySelector('.tk-exp-btn')") >= 0);
+
+  /* 展开动画：JS 触发 + CSS 兜底，两条都要有 */
+  ok('C51 展开时触发动画（tkAnimateExpand）',
+    /tkAnimateExpand\(body\)/.test(ui2) && ui2.indexOf('function tkAnimateExpand') >= 0);
+  ok('C52 展开动画有 CSS 兜底（老 WebView 也生效）',
+    /\.tk-t2body\.tk-expand \{[^}]*animation: tkExpandIn/.test(css3) &&
+    css3.indexOf('@keyframes tkExpandIn') >= 0 &&
+    css3.indexOf('@keyframes tkFadeUp') >= 0);
+  ok('C53 展开动画尊重 reduce-motion 与性能模式',
+    /\.tk-t2body\.tk-expand, \.tk-t2body\.tk-expand > \* \{ animation: none !important; \}/.test(css3) &&
+    /body\[data-perf\] \.tk-t2body\.tk-expand/.test(css3));
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
