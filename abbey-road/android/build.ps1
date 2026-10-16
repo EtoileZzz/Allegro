@@ -30,7 +30,7 @@ $sdk       = Join-Path $buildRoot 'sdk'
 $platform  = Join-Path $sdk 'platforms\android-34\android.jar'
 $bt        = Join-Path $sdk 'build-tools\34.0.0'
 $version   = '0.4.3'
-$versionCode = 57
+$versionCode = 58
 
 $env:JAVA_HOME = $jdk
 $env:PATH = "$jdk\bin;$bt;$env:PATH"

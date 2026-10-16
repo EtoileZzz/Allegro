@@ -761,7 +761,7 @@ function todoLongList() { return todoDailyList(); }
   }
   /** 累计（所有 entries 的 amount 之和） */
   /**
-   * 本周一共应做几次：按计划**逐天**累加（每天 / 指定星期 / 每隔 N 天 都能算）。
+   * 本周一共应做几次：按计划**逐天**累加（每天 / 指定星期 / 每 N 天 都能算）。
    * 因为 everyN 的「周期」是一天，光靠 todoPeriodGoal 拿不到一周的总量。
    */
   function todoWeekGoal(t, date) {

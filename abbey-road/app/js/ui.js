@@ -1397,6 +1397,8 @@ var AR = window.AR || (window.AR = {});
    */
   /* ══════════ 日程总览（A 月历条点阵 + B 纵向时间轴，滑块切换）══════════ */
   var AGV_TAB = 'map';
+  var AGV_MONTH = null;   /* 月视图当前显示的月份 {y,m}；null = 本月 */
+  var AGV_DAY = '';       /* 选中的某一天（时间轴按它筛） */
 
   function agvTypeOf(key) {
     var list = AR.Store.typeList ? AR.Store.typeList() : [];
@@ -1409,30 +1411,47 @@ var AR = window.AR || (window.AR = {});
   }
 
   /** A：月历条点阵（当月 + 下月），一眼看出哪几天有安排 */
-  function agvMonthStrip(byDay, todayK) {
-    var now = new Date(), out = '';
-    for (var off = 0; off < 2; off++) {
-      var base = new Date(now.getFullYear(), now.getMonth() + off, 1);
-      var y = base.getFullYear(), mo = base.getMonth();
-      var lastDay = new Date(y, mo + 1, 0).getDate();
-      var lead = (new Date(y, mo, 1).getDay() + 6) % 7;
-      out += '<div class="agv-mo"><div class="agv-mt">' + y + ' 年 ' + (mo + 1) + ' 月</div><div class="agv-grid">';
-      for (var b = 0; b < lead; b++) { out += '<span class="agv-gd empty"></span>'; }
-      for (var dd = 1; dd <= lastDay; dd++) {
-        var key = U.dateKey(new Date(y, mo, dd));
-        var evs = byDay[key] || [];
-        var cls = 'agv-gd' + (evs.length ? ' ev' : '') + (key === todayK ? ' today' : '');
-        out += '<span class="' + cls + '" title="' + key + (evs.length ? ' · ' + evs.length + ' 条' : '') + '">'
-          + '<span class="agv-gdd">' + dd + '</span>';
-        for (var q = 0; q < evs.length && q < 4; q++) {
-          out += '<span class="agv-pk" style="background:' + agvColor(evs[q].type)
-            + ';right:' + (q % 2 ? 0 : 5) + 'px;bottom:' + (q < 2 ? 0 : 5) + 'px"></span>';
+  /** 月视图：一次只画一个月（一次一个月才不会在直板机上被挤到横滑） */
+  function agvMonthView(byDay, todayK, ym, selDay) {
+    var y = ym.y, mo = ym.m, out = '';
+    var monthStart = new Date(y, mo, 1);
+    var lastDay = new Date(y, mo + 1, 0).getDate();
+    var lead = (monthStart.getDay() + 6) % 7;   /* 周一起 */
+    var dayCount = 0;
+    for (var q = 1; q <= lastDay; q++) { if (byDay[U.dateKey(new Date(y, mo, q))]) { dayCount++; } }
+
+    out += '<div class="agv-mhead">'
+      + '<button class="agv-nav" type="button" data-nav="-1" aria-label="上个月">‹</button>'
+      + '<span class="agv-mtitle">' + y + ' 年 ' + (mo + 1) + ' 月</span>'
+      + '<button class="agv-nav" type="button" data-nav="1" aria-label="下个月">›</button>'
+      + '<span class="agv-mn">' + dayCount + ' 天有安排</span>'
+      + '</div>';
+
+    out += '<div class="agv-wk">';
+    for (var h = 1; h <= 7; h++) { out += '<i>' + U.WEEKDAY_NAMES[h].replace('周', '') + '</i>'; }
+    out += '</div>';
+
+    out += '<div class="agv-grid">';
+    for (var b2 = 0; b2 < lead; b2++) { out += '<span class="agv-gd empty"></span>'; }
+    for (var dd = 1; dd <= lastDay; dd++) {
+      var key = U.dateKey(new Date(y, mo, dd));
+      var evs = byDay[key] || [];
+      var cls = 'agv-gd' + (evs.length ? ' ev' : '')
+        + (key === todayK ? ' today' : '') + (key === selDay ? ' sel' : '');
+      out += '<button class="' + cls + '" type="button" data-day="' + key + '"'
+        + ' title="' + key + (evs.length ? ' · ' + evs.length + ' 条' : ' · 无安排') + '">'
+        + '<span class="agv-gdd">' + dd + '</span>';
+      if (evs.length) {
+        out += '<span class="agv-pks">';
+        for (var w = 0; w < evs.length && w < 4; w++) {
+          out += '<i style="background:' + agvColor(evs[w].type) + '"></i>';
         }
         out += '</span>';
       }
-      out += '</div></div>';
+      out += '</button>';
     }
-    return '<div class="agv-strip">' + out + '</div>';
+    out += '</div>';
+    return out;
   }
 
   /** B：纵向时间轴（按日期升序，带星期与相对天数） */
@@ -1458,6 +1477,7 @@ var AR = window.AR || (window.AR = {});
   }
 
   function openAgendaOverview() {
+    if (!AGV_MONTH) { var _n = new Date(); AGV_MONTH = { y: _n.getFullYear(), m: _n.getMonth() }; }
     var now = new Date(), todayK = U.dateKey(now);
     var all = AR.Store.eventsBetween
       ? AR.Store.eventsBetween(U.dateKey(U.addDays(now, -60)), U.dateKey(U.addDays(now, 180))) : [];
@@ -1482,15 +1502,14 @@ var AR = window.AR || (window.AR = {});
     }
 
     var body = el('<div class="agv"></div>');
-    var tiles = el('<div class="tk-kpis">'
+    body.appendChild(el('<div class="tk-kpis">'
       + '<div class="tk-kpi"><div class="tk-kl">未来 7 天</div><div class="tk-kv">' + in7 + '<i> 项</i></div></div>'
       + '<div class="tk-kpi"><div class="tk-kl">本月</div><div class="tk-kv">' + inMonth + '<i> 项</i></div></div>'
       + '<div class="tk-kpi"><div class="tk-kl">星标</div><div class="tk-kv">' + stars + '<i> 项</i></div></div>'
       + '<div class="tk-kpi"><div class="tk-kl">已归档</div><div class="tk-kv">' + archived.length + '<i> 项</i></div></div>'
-      + '</div>');
-    body.appendChild(tiles);
+      + '</div>'));
 
-    /* 类型计数压成一行（替代原来的横条图） */
+    /* 类型计数压成一行图例（替代原来的横条图） */
     var typeKeys = Object.keys(types);
     if (typeKeys.length) {
       var legend = '<div class="agv-legend">';
@@ -1501,15 +1520,16 @@ var AR = window.AR || (window.AR = {});
       body.appendChild(el(legend + '</div>'));
     }
 
-    /* 滑块：月历条点阵 / 纵向时间轴 */
+    /* 滑块：月视图 / 时间轴 */
     var seg = el('<div class="segmented" data-segkey="agv-tab" style="margin:12px 0 10px"></div>');
-    [{ k: 'map', t: '月历条点阵' }, { k: 'list', t: '纵向时间轴' }].forEach(function (o) {
+    [{ k: 'map', t: '月视图' }, { k: 'list', t: '时间轴' }].forEach(function (o) {
       var b = el('<button class="seg' + (AGV_TAB === o.k ? ' active' : '') + '" type="button">' + o.t + '</button>');
       b.addEventListener('click', function () {
         if (AGV_TAB === o.k) { return; }
         AGV_TAB = o.k;
+        if (o.k === 'map') { AGV_DAY = ''; }
         var sib = seg.querySelectorAll('.seg');
-        for (var w = 0; w < sib.length; w++) { sib[w].classList.toggle('active', sib[w] === b); }
+        for (var v = 0; v < sib.length; v++) { sib[v].classList.toggle('active', sib[v] === b); }
         syncSegPill(seg, true);
         paint();
       });
@@ -1520,9 +1540,56 @@ var AR = window.AR || (window.AR = {});
     body.appendChild(pane);
 
     function paint() {
-      pane.innerHTML = (AGV_TAB === 'map')
-        ? agvMonthStrip(byDay, todayK)
-        : agvTimeline(upcoming.slice(0, 30), todayK);
+      if (AGV_TAB === 'map') {
+        pane.innerHTML = agvMonthView(byDay, todayK, AGV_MONTH, AGV_DAY);
+        /* ‹ › 切月 */
+        var navs = pane.querySelectorAll('[data-nav]');
+        for (var k = 0; k < navs.length; k++) {
+          (function (btn) {
+            btn.addEventListener('click', function () {
+              var d = Number(btn.getAttribute('data-nav')) || 0;
+              AGV_MONTH = { y: AGV_MONTH.y, m: AGV_MONTH.m + d };
+              var dt = new Date(AGV_MONTH.y, AGV_MONTH.m, 1);
+              AGV_MONTH = { y: dt.getFullYear(), m: dt.getMonth() };
+              AGV_DAY = '';
+              AR.Bridge.haptic('light', btn);
+              paint();
+            });
+          })(navs[k]);
+        }
+        /* 点某一天 → 切到时间轴并按那天筛 */
+        var days = pane.querySelectorAll('[data-day]');
+        for (var m2 = 0; m2 < days.length; m2++) {
+          (function (cell) {
+            cell.addEventListener('click', function () {
+              AGV_DAY = cell.getAttribute('data-day');
+              AGV_TAB = 'list';
+              var sib2 = seg.querySelectorAll('.seg');
+              for (var z = 0; z < sib2.length; z++) { sib2[z].classList.toggle('active', z === 1); }
+              syncSegPill(seg, true);
+              AR.Bridge.haptic('light', cell);
+              paint();
+            });
+          })(days[m2]);
+        }
+      } else {
+        var list2 = upcoming;
+        var top = '';
+        if (AGV_DAY) {
+          list2 = [];
+          for (var t2 = 0; t2 < all.length; t2++) { if (all[t2].date === AGV_DAY) { list2.push(all[t2]); } }
+          top = '<button class="agv-chip" type="button" data-clear="1">只看 ' + AGV_DAY.slice(5).replace('-', '/') + ' ✕</button>';
+        }
+        pane.innerHTML = top + agvTimeline(list2.slice(0, 40), todayK)
+          + (AGV_DAY ? '' : '<p class="tk-muted">只列接下来 40 条；点月视图里的某一天可以只看那天。</p>');
+        var clr = pane.querySelector('[data-clear]');
+        if (clr) {
+          clr.addEventListener('click', function () {
+            AGV_DAY = '';
+            paint();
+          });
+        }
+      }
       if (AR.Motion && AR.Motion.pose) { try { AR.Motion.pose(pane, 'contentIn'); } catch (e) { } }
       pane.className = 'agv-pane agv-in';
     }
@@ -10025,9 +10092,11 @@ var AR = window.AR || (window.AR = {});
           var r = el('<div class="tk-done">'
             + '<span class="tk-bar" style="background:' + tkColor(t) + '"></span>'
             + '<span class="tk-dtext">' + U.escapeHtml(t.text) + '</span>'
+            + '<span class="tk-dtail">'
             + '<span class="tk-dmeta">' + (tkPeriodText(t, p) || ('今天 ' + p.today + ' 次')) + '</span>'
             + '<span class="tk-dacts"><button class="tk-dbtn" data-a="undo">撤销</button>'
-            + '<button class="tk-dbtn p" data-a="again">继续做</button></span></div>');
+            + '<button class="tk-dbtn p" data-a="again">继续做</button></span>'
+            + '</span></div>');
           r.querySelector('[data-a=undo]').addEventListener('click', function () { tkUndo(t); });
           r.querySelector('[data-a=again]').addEventListener('click', function () { tkContinue(t); });
           db.appendChild(r);
@@ -10632,7 +10701,7 @@ var AR = window.AR || (window.AR = {});
         + '<span class="muted" style="font-weight:400"> — 设了就显示今天进度，做满折进「已完成」</span></div>'));
       var seg = el('<div class="segmented" data-segkey="tk-edit-plan" style="margin-top:6px"></div>');
       [{ k: 'none', t: '不做计划' }, { k: 'daily', t: '每天' }, { k: 'weekdays', t: '指定星期' },
-       { k: 'weekly', t: '每周' }, { k: 'everyN', t: '每隔 N 天' }].forEach(function (o) {
+       { k: 'weekly', t: '每周' }, { k: 'everyN', t: '每 N 天' }].forEach(function (o) {
         var cur = draft.cadence ? draft.cadence.type : 'none';
         var b = el('<button class="seg' + (cur === o.k ? ' active' : '') + '" type="button">' + o.t + '</button>');
         b.addEventListener('click', function () {
@@ -10654,7 +10723,7 @@ var AR = window.AR || (window.AR = {});
           + (draft.cadence.type === 'weekly' ? '每周做几次' : '每天做几次') + '</div>'));
         wrap.appendChild(stepper(draft.cadence.times || 1, 1, 30, function (v) { draft.cadence.times = v; }));
         if (draft.cadence.type === 'everyN') {
-          wrap.appendChild(el('<div class="field-label" style="margin-top:10px">每隔几天</div>'));
+          wrap.appendChild(el('<div class="field-label" style="margin-top:10px">每几天</div>'));
           wrap.appendChild(stepper(draft.cadence.intervalDays || 2, 1, 30, function (v) { draft.cadence.intervalDays = v; }));
         }
         if (draft.cadence.type === 'weekdays') {

@@ -136,7 +136,7 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     hw.indexOf('--glass-stroke') >= 0 && hw.indexOf('--glass-surface') >= 0);
 
   /* 类名撞车：.tk-bar 不能既做条目色条又做柱状图 */
-  const barRules = (css.match(/\.tk-bar\s*\{[^}]*\}/g) || []);
+  const barRules = (css.match(/(?:^|\n)\s*\.tk-bar\s*\{[^}]*\}/g) || []);
   ok('C33 .tk-bar 只有一条规则（条目左侧色条），不与柱状图撞车',
     barRules.length === 1 && barRules[0].indexOf('width: 3px') >= 0,
     '规则数=' + barRules.length);
@@ -276,11 +276,60 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C70 日程模块卡底有「日程总览」与「添加日程」',
     ui4.indexOf('function openAgendaOverview') >= 0 && ui4.indexOf('日程总览') >= 0 &&
     /tk-fbtn tk-fbtn-p" type="button">＋ 添加日程/.test(ui4));
-  ok('C71 日程总览有 A 月历条点阵 + B 纵向时间轴（滑块切换）',
-    ui4.indexOf('function agvMonthStrip') >= 0 && ui4.indexOf('function agvTimeline') >= 0 &&
-    ui4.indexOf("data-segkey=\"agv-tab\"") >= 0);
+  ok('C71 日程总览有月视图 + 时间轴（滑块切换）',
+    ui4.indexOf('function agvMonthView') >= 0 && ui4.indexOf('function agvTimeline') >= 0 &&
+    ui4.indexOf("data-segkey=\"agv-tab\"") >= 0 &&
+    ui4.indexOf("'月视图'") >= 0 && ui4.indexOf("'时间轴'") >= 0);
   ok('C72 顶部那颗「添加日程」chip 已移除（只剩卡底那颗）',
     ui4.indexOf('margin:2px 2px 8px">＋ 添加日程') < 0);
+}
+
+
+/* ═══════════ 18. 文案与窄屏排版（v0.4.3 补） ═══════════ */
+{
+  const ui5 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const css6 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  /* 「每隔 N 天」统一成「每 N 天」 */
+  ok('C73 计划文案用「每 N 天」（不再有「每隔」）',
+    ui5.indexOf('每 N 天') >= 0 && ui5.indexOf('每隔') < 0);
+
+  /* 「已完成」名称在窄屏不被挤没：最小宽度 + 可换行 */
+  ok('C74 已完成行的名称有最小宽度（窄屏不会被挤成 0）',
+    /(?:^|\n)\s*\.tk-done \.tk-dtext \{[^}]*min-width: 7em/.test(css6));
+  ok('C75 已完成行可换行（放不下时尾部整组换行）',
+    /(?:^|\n)\s*\.tk-done \{[^}]*flex-wrap: wrap/.test(css6) &&
+    /\.tk-done \.tk-dtail \{[^}]*flex: 0 0 auto/.test(css6));
+  ok('C76 已完成行尾部已拆成 .tk-dtail', ui5.indexOf('tk-dtail') >= 0);
+
+  /* 卡底按钮不能压住 .hw-card 的圆角边框 */
+  ok('C77 .hw-card 里的卡底按钮有下外边距（不压边框）',
+    css6.indexOf('.hw-card > .tk-foot') >= 0);
+
+  /* 月历条点阵：星期表头 + 数字与点上下分行 */
+  ok('C78 月历条有点阵的星期表头', ui5.indexOf('agv-wk') >= 0 && css6.indexOf('.agv-wk') >= 0);
+  ok('C79 月历格子是竖排（数字在上、点在下），点不再绝对定位压数字',
+    /\.agv-gd \{[^}]*flex-direction: column/.test(css6) &&
+    css6.indexOf('.agv-pks') >= 0 && css6.indexOf('.agv-pk {') < 0);
+}
+
+
+/* ═══════════ 19. 月视图（一次一个月 + 点天筛时间轴） ═══════════ */
+{
+  const ui6 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const css7 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  ok('C80 月视图一次只画一个月（有 ‹ › 切月）',
+    /function agvMonthView\(byDay, todayK, ym, selDay\)/.test(ui6) &&
+    ui6.indexOf('data-nav') >= 0 && ui6.indexOf('AGV_MONTH') >= 0);
+  ok('C81 月视图有星期表头', ui6.indexOf('agv-wk') >= 0 && css7.indexOf('.agv-wk') >= 0);
+  ok('C82 格子自适应列宽（1fr）不靠横向滚动',
+    /\.agv-grid \{[^}]*repeat\(7, 1fr\)/.test(css7) && css7.indexOf('.agv-strip') < 0);
+  ok('C83 事件点不再绝对定位（数字与点上下分行）',
+    /\.agv-gd \{[^}]*flex-direction: column/.test(css7) &&
+    /\.agv-gd \.agv-pks \{/.test(css7) && css7.indexOf('.agv-pk {') < 0);
+  ok('C84 点某一天会切到时间轴并按那天筛（带清除）',
+    ui6.indexOf('AGV_DAY') >= 0 && ui6.indexOf('data-clear') >= 0 && ui6.indexOf('agv-chip') >= 0);
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
