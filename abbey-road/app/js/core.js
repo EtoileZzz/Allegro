@@ -923,7 +923,7 @@ function todoLongList() { return todoDailyList(); }
       };
       todoRaw().push(t);
     }
-    var keys = ['text', 'colorKey', 'showInToday', 'archived', 'note', 'aside', 'showDaily', 'showLong'];
+    var keys = ['text', 'colorKey', 'showInToday', 'archived', 'note', 'aside', 'showDaily', 'showLong', 'swipeTimes'];
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i];
       if (Object.prototype.hasOwnProperty.call(patch, k)) { t[k] = patch[k]; }

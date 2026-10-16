@@ -2186,6 +2186,25 @@ var AR = window.AR || (window.AR = {});
     card.appendChild(el('<div class="hw-head"><span class="lt-ico">☑</span>'
       + '<span class="hw-t">待办速记</span>'
       + '<span class="hw-n">' + (all.length ? (op.length + ' 条没做 / 共 ' + all.length) : '空的') + '</span></div>'));
+    /* 添加：保持原来的内联输入框样式（随手记一条 + ＋） */
+    var addRow = el('<div class="cm-todo-add">'
+      + '<input class="input" id="qtText" placeholder="随手记一条…">'
+      + '<button class="chip-btn" id="qtAdd" type="button">＋</button></div>');
+    card.appendChild(addRow);
+    var doAdd = function () {
+      var inp = addRow.querySelector('#qtText');
+      var txt = ((inp && inp.value) || '').trim();
+      if (!txt) { toast('先写点什么'); return; }
+      AR.Store.quickTodoUpsert({ text: txt });
+      inp.value = '';
+      AR.Bridge.haptic('light', addRow);
+      toast('已记下：' + txt);
+      refreshHomework();
+    };
+    addRow.querySelector('#qtAdd').addEventListener('click', doAdd);
+    addRow.querySelector('#qtText').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); doAdd(); }
+    });
 
     var bodyEl = el('<div class="hw-body"><div class="hw-list"></div></div>');
     var listBox = bodyEl.querySelector('.hw-list');
@@ -2211,31 +2230,27 @@ var AR = window.AR || (window.AR = {});
     }
     card.appendChild(bodyEl);
 
-    /* 卡底：清掉已完成 + 新建速记 */
-    var foot = el('<div class="tk-foot"></div>');
-    var clr = el('<button class="tk-fbtn" type="button">清掉已完成</button>');
-    clr.addEventListener('click', function () {
-      if (!dn2.length) { toast('还没有做完的'); return; }
-      confirmDanger({
-        title: '清掉 ' + dn2.length + ' 条已完成？', sub: '',
-        text: '清掉的会进回收站，之后去「设置 → 数据与同步 → 回收站」也能找回。',
-        okLabel: '清掉',
-        onOk: function () {
-          var arr = AR.Store.quickTodoList();
-          for (var k = 0; k < arr.length; k++) { if (arr[k].done) { AR.Store.quickTodoRemove(arr[k].id); } }
-          refreshHomework();
-          toast('已清掉做完的');
-        }
+    /* 卡底只在「我的」里给管理按钮；今日日程里保持干净 */
+    if (!opts.inToday) {
+      var foot = el('<div class="tk-foot"></div>');
+      var clr = el('<button class="tk-fbtn" type="button">清掉已完成</button>');
+      clr.addEventListener('click', function () {
+        if (!dn2.length) { toast('还没有做完的'); return; }
+        confirmDanger({
+          title: '清掉 ' + dn2.length + ' 条已完成？', sub: '',
+          text: '清掉的会进回收站，之后去「设置 → 数据与同步 → 回收站」也能找回。',
+          okLabel: '清掉',
+          onOk: function () {
+            var arr = AR.Store.quickTodoList();
+            for (var k = 0; k < arr.length; k++) { if (arr[k].done) { AR.Store.quickTodoRemove(arr[k].id); } }
+            refreshHomework();
+            toast('已清掉做完的');
+          }
+        });
       });
-    });
-    var add = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 新建速记</button>');
-    add.addEventListener('click', function () {
-      AR.Bridge.haptic('light', add);
-      openQuickTodoEdit(null);
-    });
-    foot.appendChild(clr);
-    foot.appendChild(add);
-    card.appendChild(foot);
+      foot.appendChild(clr);
+      card.appendChild(foot);
+    }
     return card;
   }
 
@@ -2243,7 +2258,7 @@ var AR = window.AR || (window.AR = {});
   function modTodo() { return qtCard({ key: 'mod-todo' }); }
 
   /** 今日日程里的速记卡（同一个渲染，换个 data-hwnode 以便分别刷新） */
-  function qtTodayCard() { return qtCard({ key: 'qt-today' }); }
+  function qtTodayCard() { return qtCard({ key: 'qt-today', inToday: true }); }
 
   /** 新建 / 编辑一条速记（文字 + 删除） */
   function openQuickTodoEdit(item) {
@@ -9922,6 +9937,7 @@ var AR = window.AR || (window.AR = {});
     tkPlanText: tkPlanText,
     tkPeriodText: tkPeriodText, tkPeriodInfo: tkPeriodInfo,
   tkCountInput: tkCountInput,
+  tkSwipeTimes: tkSwipeTimes,
     refreshTasks: function () {
       refreshHomework();
       if (AR.Panels && AR.Panels.renderTaskList) { AR.Panels.renderTaskList(); }
@@ -10013,7 +10029,7 @@ var AR = window.AR || (window.AR = {});
       confirmDanger({
         title: '今天已经做够 ' + need + ' 次了',
         sub: U.escapeHtml(t.text) + ' · ' + tkPlanText(t),
-        text: '再记一次会继续累加 —— 记录与累计都会 +1，已完成状态不变。',
+        text: '再记会继续累加 —— 记录与累计都会 +' + tkSwipeTimes(t) + '，已完成状态不变。',
         okLabel: '再记一次',
         onOk: function () { tkAdd(t); }
       });
@@ -10021,11 +10037,17 @@ var AR = window.AR || (window.AR = {});
     }
     tkAdd(t);
   }
+  /** 一次滑动算几次（任务自己的设置，默认 1） */
+  function tkSwipeTimes(t) {
+    var n = Number(t && t.swipeTimes);
+    return (isFinite(n) && n > 0) ? Math.round(n * 100) / 100 : 1;
+  }
   function tkAdd(t) {
-    AR.Store.todoAddEntry(t.id, 1, '', { src: 'swipe' });
+    var n = tkSwipeTimes(t);
+    AR.Store.todoAddEntry(t.id, n, '', { src: 'swipe' });
     AR.Bridge.haptic('medium', document.body);
     var p = AR.Store.todoProgress(t, new Date());
-    var msg = '「' + t.text + '」+1';
+    var msg = '「' + t.text + '」+' + n;
     if (p.hasGoal) { msg += ' · 累计 ' + p.total + '/' + p.target + (t.goal.unit || ''); }
     else if (p.periodGoal > 1) { msg += '（' + p.periodUnit + ' ' + p.periodDone + '/' + p.periodGoal + '）'; }
     toast(msg);
@@ -10155,7 +10177,7 @@ var AR = window.AR || (window.AR = {});
       + (marks ? '<span class="tk-marks">' + marks + '</span>' : '') + '</div>'
       + track
       + '<div class="tk-l2">' + l2 + '</div></div>'
-      + '<span class="tk-hint">划掉</span></div>');
+      + '<span class="tk-hint">+' + tkSwipeTimes(t) + '</span></div>');
     bindSwipeRow(row, { flyOut: true, onCommit: function () { tkPunch(t); } });
     tkBindLongPress(row, function () { openTaskEdit(t); });
     return row;
@@ -10558,20 +10580,19 @@ var AR = window.AR || (window.AR = {});
     return card;
   }
 
-  /** 最近记录（按天倒序，最多 3 条，每行可单独撤销） */
   /**
-   * 「记几次」输入 —— 编辑页与详情弹窗共用。
-   *   · 一次提交 = 一条记录：输入的数字进累计（按目标单位），计划进度按条数 +1
+   * 「手动添加」—— 编辑页与详情弹窗共用。
+   *   · 一次提交 = 一条记录：数字进累计（按目标单位），计划进度按条数 +1
    *   · 支持小数（单位是小时/页时常见，如 1.6）
-   *   · 有目标单位时标签跟着单位走（记多少（小时）／记 1.6 小时）
-   *   · 不聚焦输入框 —— 打开弹窗不弹输入法（部分 WebView 会自动聚焦第一个 input）
+   *   · 下面可改「滑动一次算几次」（存在任务的 swipeTimes，默认 1）
+   *   · 不聚焦输入框 —— 打开弹窗不弹输入法
    */
   function tkCountInput(cur, onDone) {
     var hasUnit = !!(cur.goal && cur.goal.unit);
     var unit = hasUnit ? String(cur.goal.unit) : '';
     var word = hasUnit ? unit : '次';
     var box = el('<div class="tk-count"></div>');
-    box.appendChild(el('<div class="tk-count-h">' + (hasUnit ? ('记多少（' + U.escapeHtml(unit) + '）') : '记几次') + '</div>'));
+    box.appendChild(el('<div class="tk-count-h">手动添加</div>'));
     var row = el('<div class="tk-count-row"></div>');
     var input = el('<input class="input tk-count-in" type="number" inputmode="decimal" step="0.1" min="0" value="1">');
     var btn = el('<button class="tk-count-go" type="button">记 1 ' + U.escapeHtml(word) + '</button>');
@@ -10595,8 +10616,35 @@ var AR = window.AR || (window.AR = {});
     row.appendChild(input);
     row.appendChild(btn);
     box.appendChild(row);
-    box.appendChild(el('<p class="tk-count-tip">小提示：把任务条<b>往右滑一下就是 +1</b>'
-      + (hasUnit ? ('；这里可以填小数，比如 1.5 ' + U.escapeHtml(unit)) : '') + '。</p>'));
+
+    /* 滑动一次算几次（默认 1，和以前一样） */
+    var swRow = el('<div class="tk-swipe-row"></div>');
+    swRow.appendChild(el('<span class="tk-swipe-lb">滑动一次算几次</span>'));
+    var step = el('<span class="tk-step"></span>');
+    var minus = el('<button type="button" aria-label="减少">−</button>');
+    var valEl = el('<span>' + tkSwipeTimes(cur) + '</span>');
+    var plus = el('<button type="button" aria-label="增加">＋</button>');
+    function bump(d) {
+      var n = Math.max(1, Math.min(50, tkSwipeTimes(cur) + d));
+      AR.Store.todoUpsert({ id: cur.id, swipeTimes: n });
+      cur.swipeTimes = n;
+      valEl.textContent = n;
+      tip.innerHTML = '小提示：把任务条<b>往左划或往右划都可以 +' + n + '</b>'
+        + (hasUnit ? ('；也可以在这里填小数，比如 1.5 ' + U.escapeHtml(unit)) : '') + '。';
+      AR.Bridge.haptic('light', d > 0 ? plus : minus);
+      if (typeof onDone === 'function') { onDone(); }
+    }
+    minus.addEventListener('click', function () { bump(-1); });
+    plus.addEventListener('click', function () { bump(1); });
+    step.appendChild(minus);
+    step.appendChild(valEl);
+    step.appendChild(plus);
+    swRow.appendChild(step);
+    box.appendChild(swRow);
+
+    var tip = el('<p class="tk-count-tip">小提示：把任务条<b>往左划或往右划都可以 +' + tkSwipeTimes(cur) + '</b>'
+      + (hasUnit ? ('；也可以在这里填小数，比如 1.5 ' + U.escapeHtml(unit)) : '') + '。</p>');
+    box.appendChild(tip);
     return box;
   }
 
@@ -10664,7 +10712,7 @@ var AR = window.AR || (window.AR = {});
     body.appendChild(el(tkGhGrid(cur)));
 
     /* 最近记录（可逐笔撤销） */
-    /* 「记几次」放在最近记录上面 */
+    /* 「手动添加」放在最近记录上面 */
     body.appendChild(tkCountInput(cur, function () {
       paintRecs();
       if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
@@ -10945,7 +10993,7 @@ var AR = window.AR || (window.AR = {});
     body.appendChild(wrap);
     /* 编辑页也看最近记录（仅已有任务；可逐笔撤销） */
     if (!isNew) {
-      /* 「记几次」放在最近记录上面：输入与结果紧挨着 */
+      /* 「手动添加」放在最近记录上面：输入与结果紧挨着 */
       body.appendChild(tkCountInput(src, function () {
         paintRecs();
         if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }

@@ -350,13 +350,14 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     ui7.indexOf('function tkCountInput') >= 0 &&
     ui7.indexOf("inputmode=\"decimal\"") >= 0 &&
     ui7.indexOf("data-add") < 0);
-  ok('C87 次数标签跟单位走（有单位显示单位，无单位显示次）',
-    ui7.indexOf("hasUnit ? unit : '次'") >= 0 &&
-    /记多少（/.test(ui7));
+  ok('C87 手动添加的按钮文案跟单位走（有单位显示单位，无单位显示次）',
+    ui7.indexOf("var word = hasUnit ? unit : '次';") >= 0 &&
+    ui7.indexOf("btn.textContent = '记 ' + txt + ' ' + word") >= 0);
   ok('C88 次数输入在最近记录之前（编辑页与详情弹窗都插在记录标题前）',
     ui7.indexOf('tkCountInput(src,') >= 0 && ui7.indexOf('tkCountInput(cur,') >= 0);
-  ok('C89 底部有小字提示右滑 +1',
-    /\.tk-count-tip/.test(css8) && ui7.indexOf('往右滑一下就是 +1') >= 0);
+  ok('C89 底部小字提示左右划都 +N（数字跟着设置变）',
+    /\.tk-count-tip/.test(css8) &&
+    ui7.indexOf('往左划或往右划都可以 +') >= 0);
   ok('C90 最近记录按单位显示（+1.6 小时 / +1 次）',
     ui7.indexOf('function amtText') >= 0 && ui7.indexOf('amtText(byDay[k])') >= 0);
 
@@ -373,8 +374,9 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C93 速记有「已完成」折叠分组（长按找回）',
     ui7.indexOf('function qtDoneRow') >= 0 && ui7.indexOf('hw-done-head') >= 0 &&
     ui7.indexOf('长按找回') >= 0);
-  ok('C94 速记卡底两个按钮（清掉已完成 / 新建速记）',
-    /＋ 新建速记/.test(ui7) && /清掉已完成/.test(ui7));
+  ok('C94 速记「我的」里有清掉已完成；今日日程里不渲染卡底',
+    /清掉已完成/.test(ui7) && /if \(!opts\.inToday\) \{/.test(ui7) &&
+    ui7.indexOf('＋ 新建速记') < 0);
   ok('C95 速记不再用圆圈/✕ 那套老写法',
     ui7.indexOf('cm-todo-check') < 0 && ui7.indexOf('cm-todo-row') < 0);
 
@@ -394,6 +396,62 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C99 core 导出速记的增改与勾选',
     core7.indexOf('quickTodoUpsert: quickTodoUpsert') >= 0 &&
     core7.indexOf('quickTodoToggle: quickTodoToggle') >= 0);
+}
+
+
+/* ═══════════ 21. 手动添加 / 滑动一次算几次 / 引导重做 ═══════════ */
+{
+  const core8 = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  const ui8 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panels8 = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+  const css9 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  ok('C100 「记几次」已改名为「手动添加」',
+    ui8.indexOf('手动添加') >= 0 && ui8.indexOf('记几次') < 0);
+  ok('C101 可编辑「滑动一次算几次」，默认 1 并写进任务',
+    ui8.indexOf('滑动一次算几次') >= 0 && ui8.indexOf('function tkSwipeTimes') >= 0 &&
+    /swipeTimes: n/.test(ui8) && /todoUpsert\(\{ id: cur\.id, swipeTimes/.test(ui8) &&
+    core8.indexOf("'swipeTimes'") >= 0);
+  ok('C102 滑动按 N 记（不再写死 1）',
+    /AR\.Store\.todoAddEntry\(t\.id, n, ''/.test(ui8) &&
+    ui8.indexOf("'<span class=\"tk-hint\">+' + tkSwipeTimes(t) + '</span>") >= 0);
+  ok('C103 步进器有样式', css9.indexOf('.tk-swipe-row') >= 0 && css9.indexOf('.tk-step') >= 0);
+
+  /* 引导重做 */
+  ok('C104 引导改成 7 步', /var OB_STEPS = 7;/.test(panels8));
+  ok('C105 引导第 2 步讲「导入 / 我的」而不是旧的四入口',
+    panels8.indexOf('导入 / 我的') >= 0);
+  ok('C106 引导新增「任务与打卡」一步（含左右划与滑动次数）',
+    panels8.indexOf('任务与打卡') >= 0 && panels8.indexOf('往左划或往右划都可以') >= 0 &&
+    panels8.indexOf('滑动一次算几次') >= 0);
+  ok('C107 引导末尾提到我的模块 / 日程总览 / 关键时间点 / 色盘',
+    panels8.indexOf('我的模块') >= 0 && panels8.indexOf('日程总览') >= 0 &&
+    panels8.indexOf('关键时间点') >= 0 && panels8.indexOf('色盘') >= 0);
+  ok('C108 引导不再提「导入 → 手动添加」登记考试（已并入日程类型）',
+    panels8.indexOf('在「导入 → 手动添加」登记') < 0);
+}
+
+
+/* ═══════════ 22. 速记添加样式 / 今日日程干净 / 设置顺序 / 引导 ═══════════ */
+{
+  const ui9 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panels9 = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+
+  ok('C109 速记添加恢复成原来的内联输入框样式',
+    ui9.indexOf('class=\"cm-todo-add\"') >= 0 && ui9.indexOf('id=\"qtAdd\"') >= 0 &&
+    ui9.indexOf('id=\"qtText\"') >= 0);
+  ok('C110 今日日程里的速记不显示卡底按钮（传给 qtCard 的 inToday 标记）',
+    ui9.indexOf('inToday: true') >= 0);
+  ok('C111 设置里「待办速记」块挪到「作业与日程」面板最下面',
+    (function () {
+      var iQt = panels9.indexOf('待办速记是否进今日日程');
+      var iRet = panels9.indexOf("return panel('作业与日程'");
+      return iQt > 0 && iRet > iQt && (iRet - iQt) < 900;
+    })());
+  ok('C112 引导 7 步且新增「任务与打卡」', /var OB_STEPS = 7;/.test(panels9) && panels9.indexOf('任务与打卡') >= 0);
+  ok('C113 引导讲了左右划都可以、滑动次数、手动添加小数',
+    panels9.indexOf('往左划或往右划都可以') >= 0 && panels9.indexOf('滑动一次算几次') >= 0 &&
+    panels9.indexOf('手动添加') >= 0);
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

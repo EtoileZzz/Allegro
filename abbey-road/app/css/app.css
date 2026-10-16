@@ -3860,3 +3860,24 @@ body[data-perf] .agv-pane.agv-in { animation: none !important; }
 .tk-count-go:active { transform: scale(.97); }
 .tk-count-tip { font-size: 11px; color: var(--text-tertiary); margin: 9px 0 0; line-height: 1.5; }
 .tk-count-tip b { color: var(--text-secondary); font-weight: 650; }
+
+
+/* 「滑动一次算几次」步进器（手动添加区里） */
+.tk-swipe-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--divider);
+}
+.tk-swipe-lb { font-size: 11.5px; color: var(--text-tertiary); flex: 1 1 auto; }
+.tk-step { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.tk-step button {
+  width: 30px; height: 30px; border-radius: 9px; padding: 0;
+  border: 1px solid var(--glass-stroke); background: var(--glass-surface);
+  color: var(--text-primary); font: inherit; font-size: 15px; line-height: 1;
+  cursor: pointer;
+}
+.tk-step button:hover { border-color: var(--accent); color: var(--accent); }
+.tk-step button:active { transform: scale(.94); }
+.tk-step span {
+  min-width: 26px; text-align: center; font-weight: 700;
+  font-variant-numeric: tabular-nums; color: var(--text-primary);
+}

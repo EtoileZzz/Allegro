@@ -2282,18 +2282,6 @@ var AR = window.AR || (window.AR = {});
         AR.Bridge.haptic('light', $('settingsGrid'));
         refreshAll();
       }));
-    /* ── 待办速记是否进今日日程（默认关，不动现有用户的今日页）── */
-    box.appendChild(el('<h3 class="set-sub">待办速记</h3>'));
-    var qt = (S.settings.schedule.quickTodo = S.settings.schedule.quickTodo || { inToday: false });
-    box.appendChild(rowSwitch('在今日日程显示待办速记',
-      '打开后「今日日程」底部会多一张速记卡，随手记的事不用切到「我的」',
-      qt.inToday === true, function (v) {
-        qt.inToday = v;
-        AR.Store.save(true);
-        AR.Bridge.haptic('light', $('settingsGrid'));
-        refreshAll();
-        AR.UI.toast(v ? '速记会显示在今日日程' : '今日日程不再显示速记');
-      }));
     var modeSeg = el('<div class="segmented" id="hwMode" style="margin-top:6px"></div>');
     var modes = [
       { k: 'line', t: '一行算一条' },
@@ -2389,6 +2377,19 @@ var AR = window.AR || (window.AR = {});
       if (AR.UI.openTypeManage) { AR.UI.openTypeManage(); }
     });
     box.appendChild(typeBtn);
+    /* ── 待办速记是否进今日日程（默认关，不动现有用户的今日页）── */
+    box.appendChild(el('<h3 class="set-sub">待办速记</h3>'));
+    var qt = (S.settings.schedule.quickTodo = S.settings.schedule.quickTodo || { inToday: false });
+    box.appendChild(rowSwitch('在今日日程显示待办速记',
+      '打开后「今日日程」底部会多一张速记卡，随手记的事不用切到「我的」',
+      qt.inToday === true, function (v) {
+        qt.inToday = v;
+        AR.Store.save(true);
+        AR.Bridge.haptic('light', $('settingsGrid'));
+        refreshAll();
+        AR.UI.toast(v ? '速记会显示在今日日程' : '今日日程不再显示速记');
+      }));
+
     return panel('作业与日程', box, 'work');
   }
 
@@ -3194,7 +3195,7 @@ function renderLongTaskList(host) {
   /* ══════════════════════════ 首次引导 ══════════════════════════ */
 
   var obStep = 0;
-  var OB_STEPS = 6;
+  var OB_STEPS = 7;
 
   function startOnboarding(force) {
     ensure();
@@ -3233,21 +3234,23 @@ function renderLongTaskList(host) {
         + '<p class="ob-step-sub">本地优先的课表与日程管理。数据只保存在你自己的设备上：'
         + '没有账号、也没有云同步，换设备时导出一份配置文件带过去就行。</p>'
         + '<div class="ob-features">'
-        + '<div class="ob-feature"><div class="icon">📅</div><div class="t">今日一屏</div><div class="d">本周概览、今日日程、最近的课，每一块点击都会放大看详情</div></div>'
-        + '<div class="ob-feature"><div class="icon">🤖</div><div class="t">AI 帮你排课</div><div class="d">复制固定提示词，交给 DeepSeek / 豆包整理，再把结果粘回来</div></div>'
-        + '<div class="ob-feature"><div class="icon">🧭</div><div class="t">一键导航</div><div class="d">自动去掉教室号、补上大学名，直接跳到地图或导航 App</div></div>'
-        + '<div class="ob-feature"><div class="icon">🔔</div><div class="t">系统日历与闹钟</div><div class="d">把课程写进手机自带的日历、时钟，按时提醒</div></div>'
+        + '<div class="ob-feature"><div class="icon">📅</div><div class="t">今日一屏</div><div class="d">本周概览、今日日程、任务、最近的课，点任意一块放大看详情</div></div>'
+        + '<div class="ob-feature"><div class="icon">🤖</div><div class="t">AI 帮你排课</div><div class="d">复制固定提示词交给 AI，把结果粘回来就成课表</div></div>'
+        + '<div class="ob-feature"><div class="icon">✅</div><div class="t">任务与打卡</div><div class="d">目标 + 计划，左右划一下就是一次；带进度与数据分析</div></div>'
+        + '<div class="ob-feature"><div class="icon">🧭</div><div class="t">一键导航</div><div class="d">自动去掉教室号、补上大学名，直接跳地图</div></div>'
         + '</div>';
     }
     if (step === 1) {
       return '<h2 class="ob-step-title">四个入口</h2>'
-        + '<p class="ob-step-sub">手机上在底部、电脑上在左侧，切换页面用的都是下面这四个按钮。</p>'
+        + '<p class="ob-step-sub">手机上在底部、电脑上在左侧。第三个按钮会随设置变名字。</p>'
         + '<div class="ob-features">'
-        + '<div class="ob-feature"><div class="icon">🕘</div><div class="t">今日</div><div class="d">点任意一块放大；再点位置 / 时间 / 老师 / 备注，弹出质感模糊的详情窗</div></div>'
-        + '<div class="ob-feature"><div class="icon">🗓</div><div class="t">周表</div><div class="d">一整周的课表，可切换周次与月视图，自动检测时间冲突</div></div>'
-        + '<div class="ob-feature"><div class="icon">📥</div><div class="t">导入</div><div class="d">粘贴 AI 整理好的课表文本、手动添加课程、导入配置文件</div></div>'
-        + '<div class="ob-feature"><div class="icon">⚙️</div><div class="t">设置</div><div class="d">外观、布局与尺寸、课程与课表、提醒、系统集成、数据备份</div></div>'
-        + '</div>';
+        + '<div class="ob-feature"><div class="icon">🕘</div><div class="t">今日</div><div class="d">点任意一块放大；再点位置 / 时间 / 老师 / 备注看详情</div></div>'
+        + '<div class="ob-feature"><div class="icon">🗓</div><div class="t">周表</div><div class="d">一整周课表，可切周次与月视图，自动检测时间冲突</div></div>'
+        + '<div class="ob-feature"><div class="icon">📥</div><div class="t">导入 / 我的</div><div class="d">导入课表文本与配置文件；开启「自定义模块页」后变成「我的」</div></div>'
+        + '<div class="ob-feature"><div class="icon">⚙️</div><div class="t">设置</div><div class="d">外观、布局、课程与课表、作业与日程、我的页面、数据同步</div></div>'
+        + '</div>'
+        + '<p class="muted" style="margin-top:12px">「我的」是一页可自由组合的模块墙：'
+        + '任务、作业、日程、学期进度、待办速记、周表、日历…在 设置 → 我的页面 里勾选与排序。</p>';
     }
     if (step === 2) {
       return '<h2 class="ob-step-title">先填三项基本信息</h2>'
@@ -3257,11 +3260,13 @@ function renderLongTaskList(host) {
         + '<div class="field"><label class="field-label">所在城市</label>'
         + '<input class="input" id="obCity" value="' + esc(S.settings.integration.city) + '" placeholder="例如：北京市"></div>'
         + '<div class="field"><label class="field-label">开学第一周周一</label>'
-        + '<input class="input" id="obStart" type="date" value="' + esc(AR.Store.currentSemester().startDate) + '"></div>';
+        + '<input class="input" id="obStart" type="date" value="' + esc(AR.Store.currentSemester().startDate) + '"></div>'
+        + '<p class="muted" style="margin-top:10px">期中、期末、交作业这类日子，'
+        + '之后在 设置 → 课程与课表 → 关键时间点 里加，学期进度卡片会显示还有几天。</p>';
     }
     if (step === 3) {
       return '<h2 class="ob-step-title">选一个顺手的布局</h2>'
-        + '<p class="ob-step-sub">点一下先试试效果；宽高也能在「设置 → 布局与尺寸」里用滑块微调。</p>'
+        + '<p class="ob-step-sub">点一下先试试效果；宽高也能在「设置 → 外观与布局」里用滑块微调。</p>'
         + '<div class="preset-cards" id="obPresets">'
         + presetCard('dual-horizontal', '左右', '左上是本周概览、左下是今日日程，右边是最近的课（推荐）')
         + presetCard('stacked-vertical', '上中下', '从上到下依次是本周概览、今日日程、最近的课')
@@ -3282,13 +3287,27 @@ function renderLongTaskList(host) {
         + '<p class="muted" style="margin-top:12px">不想用 AI 也行：在导入页切到「手动添加」逐门录入，'
         + '或者让同学发你一份配置文件直接导入。</p>';
     }
+    if (step === 5) {
+      return '<h2 class="ob-step-title">任务与打卡</h2>'
+        + '<p class="ob-step-sub">一条任务 = 目标（选填）+ 计划（选填）。今日日程与「我的」里都能直接划。</p>'
+        + '<div class="ob-features">'
+        + '<div class="ob-feature"><div class="icon">👉</div><div class="t">怎么划</div><div class="d">往左划或往右划都可以记一次，划到位条目飞出去</div></div>'
+        + '<div class="ob-feature"><div class="icon">🔢</div><div class="t">划几次</div><div class="d">默认一次算 1 次；「滑动一次算几次」可以自己改</div></div>'
+        + '<div class="ob-feature"><div class="icon">✍️</div><div class="t">记小数</div><div class="d">单位是小时这类，用「手动添加」填 1.5、1.6</div></div>'
+        + '<div class="ob-feature"><div class="icon">📈</div><div class="t">计划与进度</div><div class="d">设了计划显示今天 / 本周进度，做满折进「已完成」；没设就只累计</div></div>'
+        + '<div class="ob-feature"><div class="icon">📊</div><div class="t">数据分析</div><div class="d">卡底「数据分析」：总览 / 趋势 / 各任务 / 洞察 四页</div></div>'
+        + '<div class="ob-feature"><div class="icon">👆</div><div class="t">长按</div><div class="d">长按任意条目进快速编辑</div></div>'
+        + '</div>';
+    }
     return '<h2 class="ob-step-title">可以开始用了</h2>'
       + '<p class="ob-step-sub">几个常用入口，忘了也不怕，设置里都能找到。</p>'
       + '<div class="ob-features">'
-      + '<div class="ob-feature"><div class="icon">🎨</div><div class="t">外观</div><div class="d">深浅色、主题色、质感模糊效果、动画速度、震动反馈都在「设置 → 外观」</div></div>'
-      + '<div class="ob-feature"><div class="icon">🔄</div><div class="t">换设备</div><div class="d">「导入 → 配置文件」导出，在另一台设备导入即可</div></div>'
-      + '<div class="ob-feature"><div class="icon">🎓</div><div class="t">考试 / 讲座</div><div class="d">在「导入 → 手动添加」登记，本周概览会用特殊颜色标出来</div></div>'
-      + '<div class="ob-feature"><div class="icon">❔</div><div class="t">随时回看</div><div class="d">设置 → 关于与帮助 → 重新观看引导</div></div>'
+        + '<div class="ob-feature"><div class="icon">🧩</div><div class="t">我的模块</div><div class="d">任务 / 作业 / 日程 / 学期进度 / 待办速记…按需勾选（设置 → 我的页面）</div></div>'
+        + '<div class="ob-feature"><div class="icon">📅</div><div class="t">日程总览</div><div class="d">日程卡底的「日程总览」里有月视图与时间轴</div></div>'
+        + '<div class="ob-feature"><div class="icon">🎓</div><div class="t">关键时间点</div><div class="d">期中 / 期末 / DDL 在 设置 → 课程与课表 里加</div></div>'
+        + '<div class="ob-feature"><div class="icon">🎨</div><div class="t">颜色</div><div class="d">任务、日程类型、主题色都能打开色盘自由选</div></div>'
+        + '<div class="ob-feature"><div class="icon">🔄</div><div class="t">换设备</div><div class="d">设置 → 数据与同步 导出配置，在另一台导入</div></div>'
+        + '<div class="ob-feature"><div class="icon">❔</div><div class="t">随时回看</div><div class="d">设置 → 关于与帮助 → 重新观看引导</div></div>'
       + '</div>';
   }
 
