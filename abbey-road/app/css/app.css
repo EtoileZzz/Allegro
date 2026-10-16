@@ -3353,11 +3353,16 @@ body[data-perf][data-theme="dark"] .modal-card { background: #1C212B; }
   display: flex; align-items: center; gap: 8px; padding: 7px 9px;
   border-radius: 10px; background: var(--bg-subtle); margin: 3px 0;
 }
-.tk-done .tk-dtext {
-  flex: 1 1 auto; min-width: 0; font-size: 12.5px; color: var(--text-secondary);
-  text-decoration: line-through; opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.tk-done .tk-dmeta { font-size: 10.5px; color: var(--text-tertiary); flex: 0 0 auto; }
+  .tk-done .tk-dtext {
+    flex: 1 1 auto; min-width: 0; font-size: calc(12.5px * var(--fs-scale));
+    /* 名称要看得见：正文色 + 文字下方细删除线（不用整体降透明度） */
+    color: var(--text-primary); font-weight: 600;
+    text-decoration: line-through;
+    text-decoration-color: var(--text-tertiary); text-decoration-thickness: 1px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .tk-done .tk-dmeta { font-size: 11px; color: var(--accent); font-weight: 600; flex: 0 0 auto; }
+
 .tk-dacts { display: flex; gap: 5px; flex: 0 0 auto; }
 .tk-dbtn {
   font: inherit; font-size: 11px; padding: 3px 8px; border-radius: 7px;
@@ -3721,3 +3726,81 @@ body[data-perf] .tk-statpage .tk-spark polyline { animation: none !important; }
 /* 任务编辑页里的「最近记录」 */
 .tk-edit-recs { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--divider); }
 .tk-edit-rech { font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 6px; }
+
+
+/* ══════════ 学期进度卡片里的关键时间点（期中 / 期末 / DDL）══════════ */
+.cm-sem-kds { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--divider); }
+.cm-sem-kd {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  font: inherit; text-align: left; cursor: pointer;
+  padding: 7px 9px; border-radius: 9px; border: 0; background: var(--bg-subtle);
+  margin: 3px 0;
+}
+.cm-sem-kd:hover { background: var(--accent-soft); }
+.cm-sem-kdd { font-size: 11.5px; color: var(--text-tertiary); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.cm-sem-kdn {
+  font-size: 12.5px; font-weight: 600; color: var(--text-primary); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cm-sem-kdw { margin-left: auto; font-size: 11px; color: var(--accent); font-weight: 600; flex: 0 0 auto; }
+.cm-sem-kdadd {
+  display: block; width: 100%; margin-top: 10px; font: inherit; font-size: 12px;
+  padding: 7px 10px; border-radius: 9px; border: 1px dashed var(--glass-stroke);
+  background: transparent; color: var(--text-tertiary); cursor: pointer;
+}
+.cm-sem-kdadd:hover { border-color: var(--accent); color: var(--accent); }
+
+
+/* ══════════ 日程总览：A 月历条点阵 + B 纵向时间轴 ══════════ */
+.agv-legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.agv-lg { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-secondary); }
+.agv-lg i { width: 8px; height: 8px; border-radius: 2px; display: block; }
+.agv-pane.agv-in { animation: agvIn 300ms var(--ease-emphasized) both; }
+@keyframes agvIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* A 月历条 */
+.agv-strip { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 4px; }
+.agv-mo { flex: 0 0 auto; }
+.agv-mt { font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 7px; }
+.agv-grid { display: grid; grid-template-columns: repeat(7, 16px); gap: 3px; }
+.agv-gd {
+  width: 16px; height: 16px; border-radius: 4px; background: var(--bg-subtle);
+  position: relative; display: flex; align-items: center; justify-content: center;
+}
+.agv-gd .agv-gdd { font-size: 8px; color: var(--text-tertiary); line-height: 1; }
+.agv-gd.ev { background: var(--divider); }
+.agv-gd .agv-pk { position: absolute; width: 4px; height: 4px; border-radius: 2px; }
+.agv-gd.today { box-shadow: inset 0 0 0 1.6px var(--accent); }
+.agv-gd.today .agv-gdd { color: var(--accent); font-weight: 700; }
+.agv-gd.empty { background: transparent; }
+
+/* B 纵向时间轴 */
+.agv-vtl { position: relative; padding-left: 76px; }
+.agv-vtl::before {
+  content: ""; position: absolute; left: 62px; top: 6px; bottom: 10px;
+  width: 2px; background: var(--divider);
+}
+.agv-vi { position: relative; padding-bottom: 15px; }
+.agv-vi .agv-vd { position: absolute; left: -76px; width: 56px; text-align: right; top: 0; }
+.agv-vi .agv-vd b { display: block; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.agv-vi .agv-vd em { font-style: normal; font-size: 10px; color: var(--text-tertiary); }
+.agv-vi .agv-vdot {
+  position: absolute; left: -18px; top: 5px; width: 10px; height: 10px; border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--glass-card);
+}
+.agv-vi .agv-vcard { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
+.agv-vi .agv-vsub { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+.agv-vi.now .agv-vd b { color: var(--accent); font-weight: 700; }
+.agv-vi.now .agv-vdot { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+@media (prefers-reduced-motion: reduce) { .agv-pane.agv-in { animation: none !important; } }
+body[data-perf] .agv-pane.agv-in { animation: none !important; }
+
+
+/* ══════════ 任务详情弹窗 ══════════ */
+.tkd { padding-bottom: 2px; }
+.tkd.tk-expand { animation: tkExpandIn 300ms var(--ease-emphasized) both; }
+.tkd-line { font-size: 12px; color: var(--text-tertiary); margin-top: 9px; }
+.tkd-recs { margin-top: 4px; }
+/* 详情弹窗里的「最近 12 周」标题（复用统计页的 .tk-shead） */
+.tkd .tk-shead { margin: 15px 0 8px; }

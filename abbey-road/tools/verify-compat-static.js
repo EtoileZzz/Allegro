@@ -229,15 +229,58 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
 
   /* 点开展开时，「最近记录」要一起展开；收起时才折叠。
      两条展开路径（标题行 / 展开按钮）都得处理。 */
-  const autoOpen = (ui3.match(/if \(TK_MINE_OPEN\[t\.id\]\) \{ TK_REC_OPEN\[t\.id\] = true; \}/g) || []).length;
-  const autoClose = (ui3.match(/if \(!TK_MINE_OPEN\[t\.id\]\) \{ TK_REC_OPEN\[t\.id\] = false; \}/g) || []).length;
-  ok('C54 展开时自动展开最近记录（两条路径都处理）', autoOpen >= 2, 'autoOpen=' + autoOpen);
-  ok('C55 收起时仍然折叠最近记录', autoClose >= 2, 'autoClose=' + autoClose);
+  /* 「展开」现在打开详情弹窗，卡内不再内联展开 */
+  ok('C54 条目「展开」调用 openTaskDetail', /openTaskDetail\(t\)/.test(ui3));
+  ok('C55 卡内内联展开区已移除（tk-t2body 不再出现）', ui3.indexOf('tk-t2body') < 0);
 
   /* 编辑页也能看最近记录 */
   ok('C56 任务编辑页显示最近记录', ui3.indexOf('tk-edit-recs') >= 0 && ui3.indexOf('paintRecs') >= 0);
   ok('C57 编辑页记录区可逐笔撤销', /tkRecList\(cur\)/.test(ui3) && /todoRemoveEntry\(cur\.id/.test(ui3));
   ok('C58 编辑页记录区有样式', css4.indexOf('.tk-edit-recs') >= 0);
+}
+
+
+/* ═══════════ 17. v0.4.3 收尾项 ═══════════ */
+{
+  const core2 = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  const ui4 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panels4 = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+  const css5 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  /* 长期任务残留：清单里不该再有 longterm，且有老配置迁移 */
+  ok('C59 模块清单已删掉 longterm', ui4.indexOf("{ k: 'longterm'") < 0);
+  ok('C60 默认模块不再含 longterm', ui4.indexOf("'homework', 'longterm'") < 0);
+  ok('C61 有「我的」模块清单迁移（longterm → tasks）',
+    core2.indexOf('function migrateCustomModules') >= 0 && /migrateCustomModules\(s\)/.test(core2));
+
+  /* 周期词：每隔 N 天走「本周」 */
+  ok('C62 周期词按计划类型给「今天/本周」', ui4.indexOf('function tkPeriodInfo') >= 0 && ui4.indexOf('function tkPeriodText') >= 0);
+  ok('C63 core 提供周维度计算（everyN → 本周 n 次）',
+    core2.indexOf('function todoWeekGoal') >= 0 && core2.indexOf('function todoWeekDone') >= 0);
+  ok('C64 weekly 不逐天累加（有特判）', /if \(c\.type === 'weekly'\) \{ return c\.times \|\| 1; \}/.test(core2));
+
+  /* 目标滑块 */
+  ok('C65 编辑页目标用滑块（两档 .segmented）',
+    ui4.indexOf('data-segkey="tk-edit-goal"') >= 0 && ui4.indexOf("'不做目标'") >= 0 && ui4.indexOf("'设置总目标'") >= 0);
+  ok('C66 目标旧按钮已移除', ui4.indexOf('tkGoalToggle') < 0);
+
+  /* 学期关键时间点 */
+  ok('C67 core 有关键时间点 API（增删改 + daysUntil）',
+    core2.indexOf('function semesterKeyDates') >= 0 && core2.indexOf('function semesterKeyDateUpsert') >= 0 &&
+    core2.indexOf('function semesterKeyDateRemove') >= 0 && core2.indexOf('function daysUntil') >= 0);
+  ok('C68 设置 → 课程与课表 注册了「关键时间点」面板',
+    /panels: \[panelSchedule, panelKeyDates/.test(panels4));
+  ok('C69 学期进度卡片会显示关键时间点', ui4.indexOf('cm-sem-kd') >= 0);
+
+  /* 日程：卡底两个按钮 + 总览 A/B */
+  ok('C70 日程模块卡底有「日程总览」与「添加日程」',
+    ui4.indexOf('function openAgendaOverview') >= 0 && ui4.indexOf('日程总览') >= 0 &&
+    /tk-fbtn tk-fbtn-p" type="button">＋ 添加日程/.test(ui4));
+  ok('C71 日程总览有 A 月历条点阵 + B 纵向时间轴（滑块切换）',
+    ui4.indexOf('function agvMonthStrip') >= 0 && ui4.indexOf('function agvTimeline') >= 0 &&
+    ui4.indexOf("data-segkey=\"agv-tab\"") >= 0);
+  ok('C72 顶部那颗「添加日程」chip 已移除（只剩卡底那颗）',
+    ui4.indexOf('margin:2px 2px 8px">＋ 添加日程') < 0);
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

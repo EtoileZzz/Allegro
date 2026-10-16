@@ -17,6 +17,7 @@ const path = require('path');
 const vm = require('vm');
 
 const appJs = path.join(__dirname, '..', 'app', 'js');
+const uiText = fs.readFileSync(path.join(__dirname, '..', 'app/js/ui.js'), 'utf8');
 
 /* ══════════════ 自带 DOM 桩 ══════════════ */
 function createDom() {
@@ -370,21 +371,21 @@ function textOf(node) {
 
     // 展开「我的」第一张卡 → 贡献图 + 记录默认折叠
     const head2 = dom.queryAll(mine, '.tk-t2head')[0];
-    if (head2) {
-      head2.click();
-      const mine2 = AR.UI.modTasks();
-      ok('U30 展开后有 GitHub 贡献图（8 周 × 7 天 = 56 格）',
-        dom.queryAll(mine2, '.tk-gh-cell').length >= 56, 'gh=' + dom.queryAll(mine2, '.tk-gh-cell').length);
-      const recl = dom.queryAll(mine2, '[data-recl]');
-      ok('U31 展开后「最近记录」默认一起展开（2026-10 起的行为）', dom.queryAll(mine2, '.tk-t2reclist').every(function (n) { return !n.hidden; }), 'hidden all false');
-    } else {
-      ok('U30 展开后有 GitHub 贡献图', false, '没找到 .tk-t2head');
-      ok('U31 「最近记录」默认折叠', false, '没找到 .tk-t2head');
-    }
+    /* 现在「展开」打开的是详情弹窗（卡内不再内联展开） */
+    ok('U30 「展开」按钮调用 openTaskDetail（不再内联展开）',
+      uiText.indexOf('openTaskDetail(t)') >= 0 && uiText.indexOf('tk-t2body') < 0,
+      'inline gone=' + (uiText.indexOf('tk-t2body') < 0));
+    const dtl = AR.UI.openTaskDetail(S.todoList()[0]);
+    const modalBody = dom.registry.modalCard;
+    ok('U31 详情弹窗里有 GitHub 贡献图（≥56 格）',
+      dom.queryAll(modalBody, '.tk-gh-cell').length >= 56,
+      'gh=' + dom.queryAll(modalBody, '.tk-gh-cell').length);
+    ok('U32 详情弹窗里有最近记录', dom.queryAll(modalBody, '.tk-rec').length >= 1,
+      'rec=' + dom.queryAll(modalBody, '.tk-rec').length);
 
     // 编辑页：显示口径两个开关
     const sheet = dom.registry.modalCard;
-    ok('U32 编辑页能拿到 modalCard', !!sheet);
+    ok('U32b 编辑页能拿到 modalCard', !!sheet);
 
     // ── v0.4.3 统一卡：折叠态迷你格 / 主图标 / 卡底按钮 ──
     const miniToday = dom.queryAll(card2, '.tk-mini-cell');
@@ -400,7 +401,7 @@ function textOf(node) {
     // 「我的」贡献图与主题色
     const mine3 = AR.UI.modTasks();
     const ghCells = dom.queryAll(mine3, '.tk-gh-cell');
-    ok('U36 「我的」贡献图可用（30 格以上）', ghCells.length >= 30, 'gh=' + ghCells.length);
+    ok('U36 详情弹窗的贡献图可用（≥30 格）', dom.queryAll(modalBody, '.tk-gh-cell').length >= 30, 'gh=' + dom.queryAll(modalBody, '.tk-gh-cell').length);
 
     // 数据分析弹窗
     let stErr = '';

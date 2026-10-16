@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.2';
+var APP_VERSION = '0.4.3';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -760,6 +760,32 @@ function todoLongList() { return todoDailyList(); }
     return todoDayCount(t, dayKey);
   }
   /** 累计（所有 entries 的 amount 之和） */
+  /**
+   * 本周一共应做几次：按计划**逐天**累加（每天 / 指定星期 / 每隔 N 天 都能算）。
+   * 因为 everyN 的「周期」是一天，光靠 todoPeriodGoal 拿不到一周的总量。
+   */
+  function todoWeekGoal(t, date) {
+    var c = (t && t.cadence) || TASK_UNLIMITED;
+    if (!c.type || c.type === 'unlimited') { return 0; }
+    /* weekly 的目标本来就是"一周几次"，不能逐天累加（会变成 7 倍） */
+    if (c.type === 'weekly') { return c.times || 1; }
+    /* 其余按天算：daily → times×7；weekdays → 命中的天数×times；everyN → 落在节奏上的天数×times */
+    var d = date || new Date();
+    var monday = mondayOf(d), sum = 0;
+    for (var i = 0; i < 7; i++) {
+      var req = todoRequired(t, addDays(monday, i));
+      if (req !== Infinity && req > 0) { sum += req; }
+    }
+    return sum;
+  }
+  /** 本周已完成几次（按天累加） */
+  function todoWeekDone(t, date) {
+    var d = date || new Date();
+    var monday = mondayOf(d), sum = 0;
+    for (var i = 0; i < 7; i++) { sum += todoDayCount(t, dateKey(addDays(monday, i))); }
+    return sum;
+  }
+
   function todoTotal(t) {
     var es = todoLiveEntries(t), sum = 0;
     for (var i = 0; i < es.length; i++) { sum += Number(es[i].amount) || 0; }
@@ -952,6 +978,75 @@ function todoLongList() { return todoDailyList(); }
     return moved;
   }
 
+
+  /* ── 学期关键时间点（期中 / 期末 / 交作业 DDL / 其他） ──────────
+     存在 semester.keyDates，跟着学期一起走，导出导入天然带上。
+     形状：{ id, date: 'YYYY-MM-DD', title, type, note, updatedAt }
+     ─────────────────────────────────────────────────────────── */
+
+  var KEYDATE_TYPES = [
+    { k: 'midterm', t: '期中', color: '#F5A524' },
+    { k: 'final', t: '期末', color: '#E5484D' },
+    { k: 'ddl', t: '截止', color: '#5B8DEF' },
+    { k: 'other', t: '其他', color: '#30A46C' }
+  ];
+
+  /** 某学期的关键时间点（按日期升序） */
+  function semesterKeyDates(sem) {
+    sem = sem || currentSemester();
+    var list = (sem && sem.keyDates) || [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && !list[i].deletedAt) { out.push(list[i]); }
+    }
+    out.sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    return out;
+  }
+  /** 今天到某个日期的天数差（正数=还有几天，0=今天，负数=已过） */
+  function daysUntil(dateKeyStr) {
+    if (!dateKeyStr) { return 0; }
+    var a = new Date(); a.setHours(0, 0, 0, 0);
+    var b = parseDateKey(dateKeyStr);
+    if (!b) { return 0; }
+    return Math.round((b - a) / 86400000);
+  }
+  /** 新增 / 修改一个关键时间点 */
+  function semesterKeyDateUpsert(patch) {
+    patch = patch || {};
+    var sem = currentSemester();
+    if (!sem) { return null; }
+    if (!sem.keyDates) { sem.keyDates = []; }
+    var rec = patch.id ? null : null, i;
+    for (i = 0; i < sem.keyDates.length; i++) {
+      if (patch.id && sem.keyDates[i].id === patch.id) { rec = sem.keyDates[i]; break; }
+    }
+    if (!rec) {
+      rec = { id: uid(), createdAt: new Date().toISOString() };
+      sem.keyDates.push(rec);
+    }
+    if (patch.date != null) { rec.date = patch.date; }
+    if (patch.title != null) { rec.title = String(patch.title); }
+    if (patch.type != null) { rec.type = patch.type; }
+    if (patch.note != null) { rec.note = String(patch.note); }
+    rec.updatedAt = new Date().toISOString();
+    sem.updatedAt = new Date().toISOString();
+    save();
+    return rec;
+  }
+  /** 删掉一个关键时间点（软删除，进回收站可恢复） */
+  function semesterKeyDateRemove(id) {
+    var sem = currentSemester();
+    if (!sem || !sem.keyDates) { return false; }
+    for (var i = 0; i < sem.keyDates.length; i++) {
+      if (sem.keyDates[i].id === id) {
+        sem.keyDates[i].deletedAt = new Date().toISOString();
+        sem.updatedAt = new Date().toISOString();
+        save();
+        return true;
+      }
+    }
+    return false;
+  }
 
   function longTaskRaw() { return (state.longTasks || (state.longTasks = [])); }
   /** 还活着的长期任务（界面显示用） */
@@ -1150,6 +1245,27 @@ function todoLongList() { return todoDailyList(); }
     return moved;
   }
 
+  /**
+   * 老配置里「我的」模块清单可能还含 longterm（长期任务已并入「任务」）。
+   * 就地换成 tasks（保持它原来的位置），并把多余的 longterm 去掉。
+   * 幂等：改完就没有 longterm 了。
+   */
+  function migrateCustomModules(s) {
+    var exp = s && s.settings && s.settings.experimental;
+    var ct = exp && exp.customTab;
+    if (!ct || Object.prototype.toString.call(ct.modules) !== '[object Array]') { return 0; }
+    var out = [], seen = {}, changed = 0;
+    for (var i = 0; i < ct.modules.length; i++) {
+      var k = ct.modules[i];
+      if (k === 'longterm') { k = 'tasks'; changed++; }
+      if (!k || seen[k]) { continue; }
+      seen[k] = 1;
+      out.push(k);
+    }
+    if (changed) { ct.modules = out; }
+    return changed;
+  }
+
   function migrate(s) {
     if (!s.settings) { s.settings = defaultSettings((s.semesters && s.semesters[0] && s.semesters[0].id) || uid()); }
     if (!s.settings.layout) { s.settings.layout = { preset: 'dual-horizontal', followDeviceSuggestion: true }; }
@@ -1296,6 +1412,9 @@ function todoLongList() { return todoDailyList(); }
       if (!s.meta) { s.meta = {}; }
       s.meta.notesSplitAt = APP_VERSION;
     }
+    /* 「我的」模块清单里的 longterm → tasks（长期任务已并入任务） */
+    migrateCustomModules(s);
+
     /* 老「长期任务」并进统一任务表（无损、幂等、可回退）。
        不设一次性闸门：导入老配置后可能又冒出 longTasks，每次都跑一遍，
        函数自身靠 archived 幂等（已迁的不再重复迁）。 */
@@ -3111,6 +3230,11 @@ function todoLongList() { return todoDailyList(); }
     todoPeriodKey: todoPeriodKey, todoDayCount: todoDayCount, todoTotal: todoTotal,
     todoProgress: todoProgress, todoSettled: todoSettled, todoEntryDay: todoEntryDay,
     todoLiveEntries: todoLiveEntries, todoIsWeekly: todoIsWeekly,
+    todoWeekGoal: todoWeekGoal, todoWeekDone: todoWeekDone,
+    /* ── 学期关键时间点 ── */
+    KEYDATE_TYPES: KEYDATE_TYPES,
+    semesterKeyDates: semesterKeyDates, daysUntil: daysUntil,
+    semesterKeyDateUpsert: semesterKeyDateUpsert, semesterKeyDateRemove: semesterKeyDateRemove,
     migrateLongTasksIntoToDos: migrateLongTasksIntoToDos,
     /* 导入配置后立刻跑一次迁移（导入不走 load()，否则老 longTasks 不会被并进来） */
     migrateNow: migrateNow,

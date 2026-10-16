@@ -736,8 +736,8 @@ var AR = window.AR || (window.AR = {});
         quick: quickPrefs, panels: [panelAppearance, panelLayout] },
       { key: 'widgets', icon: '📱', label: '桌面卡片', desc: '把课表放到手机桌面',
         panels: [panelWidgets] },
-      { key: 'course', icon: '📚', label: '课程与课表', desc: '学期、作息、配色、提醒',
-        panels: [panelSchedule, panelNotify] },
+      { key: 'course', icon: '📚', label: '课程与课表', desc: '学期、关键时间点、作息、提醒',
+        panels: [panelSchedule, panelKeyDates, panelNotify] },
       { key: 'work', icon: '📝', label: '作业与日程', desc: '作业开关、任务、日程类型',
         quick: quickWork, panels: [panelWork, panelTasks] },
       { key: 'mine', icon: '🧩', label: '我的页面', desc: '模块自由组合',
@@ -2553,6 +2553,144 @@ function renderTaskList(host) {
   }
 }
 
+/* ══════════ 学期关键时间点（期中 / 期末 / 截止 / 其他）══════════
+   设置 → 课程与课表 → 「关键时间点」。存在 semester.keyDates，跟着学期走。
+   ══════════════════════════════════════════════════════════════ */
+
+function keyDateTypeOf(k) {
+  var list = (AR.Store.KEYDATE_TYPES || []);
+  for (var i = 0; i < list.length; i++) { if (list[i].k === k) { return list[i]; } }
+  return list[list.length - 1] || { k: "other", t: "其他", color: "#30A46C" };
+}
+
+function panelKeyDates() {
+  var box = el('<div></div>');
+  box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
+    + '标上期中、期末、交作业这类重要日子，'
+    + '「学期进度」卡片会按它们显示距离还有几天。</p>'));
+  var host = el('<div class="lt-list" id="kdList"></div>');
+  box.appendChild(host);
+  renderKeyDateList(host);
+  var add = el('<button class="btn" type="button" style="margin-top:10px">＋ 添加时间点</button>');
+  add.addEventListener('click', function () {
+    AR.Bridge.haptic('light', add);
+    openKeyDateEdit(null);
+  });
+  box.appendChild(add);
+  return panel('关键时间点', box, 'keydates');
+}
+
+/** 设置页里的关键时间点清单（传 host 可局部刷新） */
+function renderKeyDateList(host) {
+  var box = host || document.getElementById('kdList');
+  if (!box) { return; }
+  var list = AR.Store.semesterKeyDates ? AR.Store.semesterKeyDates() : [];
+  box.innerHTML = '';
+  if (!list.length) {
+    box.appendChild(el('<div class="muted">还没有时间点。比如「高等数学期中 · 10/24」。</div>'));
+    return;
+  }
+  var today = AR.Util.dateKey(new Date());
+  for (var i = 0; i < list.length; i++) {
+    (function (k) {
+      var ty = keyDateTypeOf(k.type);
+      var n = AR.Store.daysUntil(k.date);
+      var when = n === 0 ? '今天' : (n > 0 ? ('还有 ' + n + ' 天') : '已过');
+      var past = k.date < today;
+      var row = el('<div class="lt-set-row"' + (past ? ' style="opacity:.55"' : '') + '>'
+        + '<span class="lt-dot" style="background:' + ty.color + '"></span>'
+        + '<span class="lt-main">'
+        + '<span class="lt-name">' + esc(k.title || '未命名') + '</span>'
+        + '<span class="lt-sub">' + esc(ty.t) + ' · ' + esc(k.date) + ' · ' + when
+        + (k.note ? ' · ' + esc(k.note) : '') + '</span>'
+        + '</span>'
+        + '<span class="lt-actions"></span></div>');
+      var acts = row.querySelector('.lt-actions');
+      var edit = el('<button class="chip-btn" type="button">编辑</button>');
+      edit.addEventListener('click', function () { openKeyDateEdit(k); });
+      acts.appendChild(edit);
+      var del = el('<button class="chip-btn" type="button">删除</button>');
+      del.addEventListener('click', function () {
+        if (!AR.UI.confirmDanger) { return; }
+        AR.UI.confirmDanger({
+          title: '删除这个时间点？', sub: esc(k.title || ''),
+          text: '删掉后「学期进度」里不再显示它。',
+          okLabel: '删除',
+          onOk: function () {
+            AR.Store.semesterKeyDateRemove(k.id);
+            AR.UI.toast('已删除：' + (k.title || ''));
+            renderKeyDateList();
+            if (AR.UI.refreshHomework) { AR.UI.refreshHomework(); }
+          }
+        });
+      });
+      acts.appendChild(del);
+      box.appendChild(row);
+    })(list[i]);
+  }
+}
+
+/** 新增 / 编辑一个关键时间点（date / title / type / note） */
+function openKeyDateEdit(item) {
+  var isNew = !item;
+  var cur = item || { date: AR.Util.dateKey(AR.Util.addDays(new Date(), 7)), title: '', type: 'midterm', note: '' };
+  var draft = { date: cur.date, title: cur.title || '', type: cur.type || 'midterm', note: cur.note || '' };
+  var body = el('<div></div>');
+
+  body.appendChild(el('<div class="field"><label class="field-label">日期</label>'
+    + '<input class="input" type="date" id="kdDate" value="' + esc(draft.date) + '"></div>'));
+  body.appendChild(el('<div class="field"><label class="field-label">名称</label>'
+    + '<input class="input" id="kdTitle" placeholder="例如：高等数学期中" value="' + esc(draft.title) + '"></div>'));
+
+  body.appendChild(el('<div class="field-label" style="margin-top:10px">类型</div>'));
+  var typeRow = el('<div class="row gap" style="flex-wrap:wrap;margin-top:4px"></div>');
+  (AR.Store.KEYDATE_TYPES || []).forEach(function (ty) {
+    var b = el('<button type="button" class="chip-btn' + (draft.type === ty.k ? ' active' : '') + '">'
+      + esc(ty.t) + '</button>');
+    b.addEventListener('click', function () {
+      draft.type = ty.k;
+      var sib = typeRow.querySelectorAll('.chip-btn');
+      for (var q = 0; q < sib.length; q++) { sib[q].classList.toggle('active', sib[q] === b); }
+    });
+    typeRow.appendChild(b);
+  });
+  body.appendChild(typeRow);
+
+  body.appendChild(el('<div class="field" style="margin-top:12px"><label class="field-label">备注（可选）</label>'
+    + '<input class="input" id="kdNote" placeholder="例如：第 1-6 章" value="' + esc(draft.note) + '"></div>'));
+
+  var bind = function (id, key) {
+    var elx = body.querySelector('#' + id);
+    if (!elx) { return; }
+    elx.addEventListener('input', function () { draft[key] = elx.value; });
+    elx.addEventListener('change', function () { draft[key] = elx.value; });
+  };
+  bind('kdDate', 'date'); bind('kdTitle', 'title'); bind('kdNote', 'note');
+
+  var acts = [{
+    label: isNew ? '添加' : '保存', kind: 'primary',
+    onClick: function (close) {
+      if (!draft.title.trim()) { AR.UI.toast('先写个名称'); return; }
+      if (!draft.date) { AR.UI.toast('先选日期'); return; }
+      AR.Store.semesterKeyDateUpsert({
+        id: isNew ? null : cur.id,
+        date: draft.date, title: draft.title.trim(),
+        type: draft.type, note: draft.note.trim()
+      });
+      close();
+      renderKeyDateList();
+      if (AR.UI.refreshHomework) { AR.UI.refreshHomework(); }
+      AR.UI.toast(isNew ? ('已添加：' + draft.title.trim()) : '已保存');
+    }
+  }];
+
+  AR.UI.openModal({
+    title: isNew ? '添加时间点' : '编辑时间点',
+    sub: isNew ? '期中 / 期末 / 交作业这类重要日子' : (cur.title || ''),
+    body: body, actions: acts
+  });
+}
+
 function panelLongTasks() {
     var box = el('<div></div>');
     box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
@@ -3291,6 +3429,7 @@ function renderLongTaskList(host) {
     quickAddCourse: quickAddCourse,
     quickAddEvent: quickAddEvent,
     renderTaskList: renderTaskList,
+  renderKeyDateList: renderKeyDateList, openKeyDateEdit: openKeyDateEdit,
   renderLongTaskList: renderLongTaskList,
     refreshAll: refreshAll
   };

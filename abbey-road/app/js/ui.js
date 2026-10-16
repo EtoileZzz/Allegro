@@ -970,7 +970,6 @@ var AR = window.AR || (window.AR = {});
   var CUSTOM_MODULES = [
     { k: 'tasks', t: '任务', d: '每天/每周要做的事 · 带进度' },
     { k: 'homework', t: '作业', d: '今天的作业' },
-    { k: 'longterm', t: '长期任务', d: '一点一点攒的进度' },
     { k: 'hwstats', t: '作业统计', d: '完成情况一览' },
     { k: 'todaycourses', t: '今日课表', d: '今天要上的课' },
     { k: 'nextclass', t: '接下来', d: '下一节课' },
@@ -987,10 +986,10 @@ var AR = window.AR || (window.AR = {});
     if (!exp || typeof exp !== 'object') { exp = S.settings.experimental = {}; }
     var ct = exp.customTab;
     if (!ct || typeof ct !== 'object') {
-      ct = exp.customTab = { enabled: false, modules: ['homework', 'longterm', 'hwstats', 'weekgrid'] };
+      ct = exp.customTab = { enabled: false, modules: ['tasks', 'homework', 'hwstats', 'weekgrid'] };
     }
     if (!ct.modules || Object.prototype.toString.call(ct.modules) !== '[object Array]') {
-      ct.modules = ['homework', 'longterm', 'hwstats', 'weekgrid'];
+      ct.modules = ['tasks', 'homework', 'hwstats', 'weekgrid'];
     }
     // v0.4.0 旧 key 映射：重要事件 / 倒计时 / 星标日程 → 都并进「日程」一张卡
     var mapped = [];
@@ -1396,6 +1395,144 @@ var AR = window.AR || (window.AR = {});
    *   · 已归档段折叠在底部，可找回 / 删除
    *   · 筛选 chips 按用户实际用到的类型生成，作用于整卡
    */
+  /* ══════════ 日程总览（A 月历条点阵 + B 纵向时间轴，滑块切换）══════════ */
+  var AGV_TAB = 'map';
+
+  function agvTypeOf(key) {
+    var list = AR.Store.typeList ? AR.Store.typeList() : [];
+    for (var i = 0; i < list.length; i++) { if (list[i].key === key) { return list[i]; } }
+    return { key: 'other', label: '其他' };
+  }
+  function agvColor(key) {
+    var t = agvTypeOf(key);
+    return t.color || U.colorHex(t.colorKey || '#5B8DEF');
+  }
+
+  /** A：月历条点阵（当月 + 下月），一眼看出哪几天有安排 */
+  function agvMonthStrip(byDay, todayK) {
+    var now = new Date(), out = '';
+    for (var off = 0; off < 2; off++) {
+      var base = new Date(now.getFullYear(), now.getMonth() + off, 1);
+      var y = base.getFullYear(), mo = base.getMonth();
+      var lastDay = new Date(y, mo + 1, 0).getDate();
+      var lead = (new Date(y, mo, 1).getDay() + 6) % 7;
+      out += '<div class="agv-mo"><div class="agv-mt">' + y + ' 年 ' + (mo + 1) + ' 月</div><div class="agv-grid">';
+      for (var b = 0; b < lead; b++) { out += '<span class="agv-gd empty"></span>'; }
+      for (var dd = 1; dd <= lastDay; dd++) {
+        var key = U.dateKey(new Date(y, mo, dd));
+        var evs = byDay[key] || [];
+        var cls = 'agv-gd' + (evs.length ? ' ev' : '') + (key === todayK ? ' today' : '');
+        out += '<span class="' + cls + '" title="' + key + (evs.length ? ' · ' + evs.length + ' 条' : '') + '">'
+          + '<span class="agv-gdd">' + dd + '</span>';
+        for (var q = 0; q < evs.length && q < 4; q++) {
+          out += '<span class="agv-pk" style="background:' + agvColor(evs[q].type)
+            + ';right:' + (q % 2 ? 0 : 5) + 'px;bottom:' + (q < 2 ? 0 : 5) + 'px"></span>';
+        }
+        out += '</span>';
+      }
+      out += '</div></div>';
+    }
+    return '<div class="agv-strip">' + out + '</div>';
+  }
+
+  /** B：纵向时间轴（按日期升序，带星期与相对天数） */
+  function agvTimeline(list, todayK) {
+    if (!list.length) { return '<p class="tk-muted">接下来没有日程。</p>'; }
+    var out = '<div class="agv-vtl">';
+    for (var i = 0; i < list.length; i++) {
+      (function (e) {
+        var d = U.parseDateKey(e.date);
+        var n = AR.Store.daysUntil(e.date);
+        var rel = n === 0 ? '今天' : (n === 1 ? '明天' : (n > 0 ? ('还有 ' + n + ' 天') : (Math.abs(n) + ' 天前')));
+        out += '<div class="agv-vi' + (n === 0 ? ' now' : '') + '">'
+          + '<span class="agv-vd"><b>' + e.date.slice(5).replace('-', '/') + '</b><em>'
+          + (d ? U.WEEKDAY_NAMES[U.weekdayOf(d)] : '') + '</em></span>'
+          + '<span class="agv-vdot" style="background:' + agvColor(e.type) + '"></span>'
+          + '<div class="agv-vcard"><b>' + U.escapeHtml(e.title || '') + '</b>'
+          + (e.star ? ' <span style="color:var(--accent)">★</span>' : '') + '</div>'
+          + '<div class="agv-vsub">' + U.escapeHtml(agvTypeOf(e.type).label) + ' · ' + rel + '</div>'
+          + '</div>';
+      })(list[i]);
+    }
+    return out + '</div>';
+  }
+
+  function openAgendaOverview() {
+    var now = new Date(), todayK = U.dateKey(now);
+    var all = AR.Store.eventsBetween
+      ? AR.Store.eventsBetween(U.dateKey(U.addDays(now, -60)), U.dateKey(U.addDays(now, 180))) : [];
+    var archived = AR.Store.archivedEvents ? AR.Store.archivedEvents() : [];
+    var byDay = {}, upcoming = [];
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      (byDay[e.date] = byDay[e.date] || []).push(e);
+      if (e.date >= todayK) { upcoming.push(e); }
+    }
+    upcoming.sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+    var monthEnd = U.dateKey(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    var in7 = 0, inMonth = 0, stars = 0, types = {};
+    for (var u = 0; u < upcoming.length; u++) {
+      var eu = upcoming[u];
+      var n = AR.Store.daysUntil(eu.date);
+      if (n <= 7) { in7++; }
+      if (eu.date <= monthEnd) { inMonth++; }
+      if (eu.star) { stars++; }
+      var tk = eu.type || 'other';
+      types[tk] = (types[tk] || 0) + 1;
+    }
+
+    var body = el('<div class="agv"></div>');
+    var tiles = el('<div class="tk-kpis">'
+      + '<div class="tk-kpi"><div class="tk-kl">未来 7 天</div><div class="tk-kv">' + in7 + '<i> 项</i></div></div>'
+      + '<div class="tk-kpi"><div class="tk-kl">本月</div><div class="tk-kv">' + inMonth + '<i> 项</i></div></div>'
+      + '<div class="tk-kpi"><div class="tk-kl">星标</div><div class="tk-kv">' + stars + '<i> 项</i></div></div>'
+      + '<div class="tk-kpi"><div class="tk-kl">已归档</div><div class="tk-kv">' + archived.length + '<i> 项</i></div></div>'
+      + '</div>');
+    body.appendChild(tiles);
+
+    /* 类型计数压成一行（替代原来的横条图） */
+    var typeKeys = Object.keys(types);
+    if (typeKeys.length) {
+      var legend = '<div class="agv-legend">';
+      for (var q = 0; q < typeKeys.length; q++) {
+        legend += '<span class="agv-lg"><i style="background:' + agvColor(typeKeys[q]) + '"></i>'
+          + U.escapeHtml(agvTypeOf(typeKeys[q]).label) + ' ' + types[typeKeys[q]] + '</span>';
+      }
+      body.appendChild(el(legend + '</div>'));
+    }
+
+    /* 滑块：月历条点阵 / 纵向时间轴 */
+    var seg = el('<div class="segmented" data-segkey="agv-tab" style="margin:12px 0 10px"></div>');
+    [{ k: 'map', t: '月历条点阵' }, { k: 'list', t: '纵向时间轴' }].forEach(function (o) {
+      var b = el('<button class="seg' + (AGV_TAB === o.k ? ' active' : '') + '" type="button">' + o.t + '</button>');
+      b.addEventListener('click', function () {
+        if (AGV_TAB === o.k) { return; }
+        AGV_TAB = o.k;
+        var sib = seg.querySelectorAll('.seg');
+        for (var w = 0; w < sib.length; w++) { sib[w].classList.toggle('active', sib[w] === b); }
+        syncSegPill(seg, true);
+        paint();
+      });
+      seg.appendChild(b);
+    });
+    body.appendChild(seg);
+    var pane = el('<div class="agv-pane"></div>');
+    body.appendChild(pane);
+
+    function paint() {
+      pane.innerHTML = (AGV_TAB === 'map')
+        ? agvMonthStrip(byDay, todayK)
+        : agvTimeline(upcoming.slice(0, 30), todayK);
+      if (AR.Motion && AR.Motion.pose) { try { AR.Motion.pose(pane, 'contentIn'); } catch (e) { } }
+      pane.className = 'agv-pane agv-in';
+    }
+    paint();
+
+    openModal({ title: '日程总览', sub: todayK + ' · 共 ' + all.length + ' 条', body: body, wide: true, actions: [] });
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
+    }
+  }
   function modEvents() {
     var now = new Date();
     var todayK = U.dateKey(now);
@@ -1465,12 +1602,6 @@ var AR = window.AR || (window.AR = {});
       + ' · 共 ' + list.length + (starred.length ? ' · ★' + starred.length : '') + '</span></div>'));
     var bodyEl = el('<div class="hw-body"></div>');
 
-    var addBtn = el('<button class="chip-btn" type="button" style="margin:2px 2px 8px">＋ 添加日程</button>');
-    addBtn.addEventListener('click', function () {
-      AR.Bridge.haptic('light', addBtn);
-      openEventForm({ date: todayK, star: false, showOn: false });
-    });
-    bodyEl.appendChild(addBtn);
 
     if (typed) {
       var chips = el('<div class="cm-filters"></div>');
@@ -1508,7 +1639,7 @@ var AR = window.AR || (window.AR = {});
     if (!list.length && !archList.length) {
       bodyEl.appendChild(el('<div class="muted" style="padding:2px 4px 6px">'
         + (agendaFilter === 'all'
-          ? '还没有日程。点上面「＋ 添加日程」记一个考试或小目标。'
+          ? '还没有日程。点下面「＋ 添加日程」记一个考试或小目标。'
           : '这个筛选下没有日程。') + '</div>'));
     }
 
@@ -1538,6 +1669,20 @@ var AR = window.AR || (window.AR = {});
       bodyEl.appendChild(ag.wrap);
     }
     card.appendChild(bodyEl);
+
+    /* 卡底：日程总览 + 添加日程（与任务模块同一个位置） */
+    var foot = el('<div class="tk-foot"></div>');
+    var ovBtn = el('<button class="tk-fbtn" type="button">日程总览</button>');
+    ovBtn.addEventListener('click', function () {
+      AR.Bridge.haptic('light', ovBtn); openAgendaOverview();
+    });
+    var addBtn = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 添加日程</button>');
+    addBtn.addEventListener('click', function () {
+      AR.Bridge.haptic('light', addBtn);
+      openEventForm({ date: todayK, star: false, showOn: false });
+    });
+    foot.appendChild(ovBtn); foot.appendChild(addBtn);
+    card.appendChild(foot);
     return card;
   }
 
@@ -1631,6 +1776,38 @@ var AR = window.AR || (window.AR = {});
       + '</div>'
       + '</div>'));
     card.appendChild(bodyEl);
+    /* 最近的几个关键时间点（期中 / 期末 / DDL）—— 点一条直接编辑 */
+    var kds = AR.Store.semesterKeyDates ? AR.Store.semesterKeyDates() : [];
+    var upcoming = [];
+    for (var ki = 0; ki < kds.length && upcoming.length < 3; ki++) {
+      if (AR.Store.daysUntil(kds[ki].date) >= 0) { upcoming.push(kds[ki]); }
+    }
+    if (upcoming.length) {
+      var kdBox = el('<div class="cm-sem-kds"></div>');
+      for (var kj = 0; kj < upcoming.length; kj++) {
+        (function (kd) {
+          var n = AR.Store.daysUntil(kd.date);
+          var when = n === 0 ? '今天' : ('还有 ' + n + ' 天');
+          var row = el('<button class="cm-sem-kd" type="button">'
+            + '<span class="cm-sem-kdd">' + U.escapeHtml(kd.date.slice(5).replace('-', '/')) + '</span>'
+            + '<span class="cm-sem-kdn">' + U.escapeHtml(kd.title || '') + '</span>'
+            + '<span class="cm-sem-kdw">' + when + '</span></button>');
+          row.addEventListener('click', function () {
+            AR.Bridge.haptic('light', row);
+            if (AR.Panels && AR.Panels.openKeyDateEdit) { AR.Panels.openKeyDateEdit(kd); }
+          });
+          kdBox.appendChild(row);
+        })(upcoming[kj]);
+      }
+      bodyEl.appendChild(kdBox);
+    } else {
+      var kdAdd = el('<button class="cm-sem-kdadd" type="button">＋ 添加期中 / 期末时间点</button>');
+      kdAdd.addEventListener('click', function () {
+        AR.Bridge.haptic('light', kdAdd);
+        if (AR.Panels && AR.Panels.openKeyDateEdit) { AR.Panels.openKeyDateEdit(null); }
+      });
+      bodyEl.appendChild(kdAdd);
+    }
     return card;
   }
 
@@ -9530,6 +9707,7 @@ var AR = window.AR || (window.AR = {});
     openEventForm: openEventForm,
     openEventModal: openEventModal,
     openAgendaActions: openAgendaActions,
+  openAgendaOverview: openAgendaOverview,
     deleteCourse: deleteCourse,
     openTypeManage: openTypeManage,
     confirmDanger: confirmDanger,
@@ -9552,9 +9730,11 @@ var AR = window.AR || (window.AR = {});
     tkTaskLine: tkTaskLine,
     modTasks: modTasks,
     openTaskEdit: openTaskEdit,
+  openTaskDetail: openTaskDetail,
     openTaskStats: openTaskStats,
     tkRuleText: tkRuleText,
     tkPlanText: tkPlanText,
+    tkPeriodText: tkPeriodText, tkPeriodInfo: tkPeriodInfo,
     refreshTasks: function () {
       refreshHomework();
       if (AR.Panels && AR.Panels.renderTaskList) { AR.Panels.renderTaskList(); }
@@ -9596,6 +9776,38 @@ var AR = window.AR || (window.AR = {});
     }
     return '';
   }
+  /**
+   * 当前周期的标签与进度 —— 有计划的条目都靠它，保证四处口径一致。
+   *   daily / everyN(非那天) / weekdays → 今天 x/y 次
+   *   weekly / everyN                    → 本周 x/y 次
+   * 返回 null = 没设计划。
+   */
+  function tkPeriodInfo(t, p) {
+    var c = t && t.cadence;
+    if (!c || !c.type || c.type === 'unlimited') { return null; }
+    p = p || AR.Store.todoProgress(t, new Date());
+    if (c.type === 'weekly') { return { unit: '本周', done: p.periodDone, goal: c.times || 1 }; }
+    if (c.type === 'everyN') {
+      var wg = AR.Store.todoWeekGoal ? AR.Store.todoWeekGoal(t) : (c.times || 1);
+      if (!wg) { wg = c.times || 1; }
+      var wd = AR.Store.todoWeekDone ? AR.Store.todoWeekDone(t) : p.today;
+      return { unit: '本周', done: wd, goal: wg };
+    }
+    if (c.type === 'weekdays' || c.type === 'everyNDow') {
+      /* 不是指定的那几天 → 今天不用做 */
+      if (!p.required || p.required === Infinity) { return { unit: '今天', done: 0, goal: 0, rest: true }; }
+      return { unit: '今天', done: p.today, goal: p.required };
+    }
+    return { unit: '今天', done: p.today, goal: c.times || 1 };
+  }
+  /** 周期词文案（今天 x/y 次 · 本周 x/y 次 · 今天不用做） */
+  function tkPeriodText(t, p) {
+    var pi = tkPeriodInfo(t, p);
+    if (!pi) { return ''; }
+    if (pi.rest) { return '今天不用做'; }
+    return pi.unit + ' ' + pi.done + '/' + pi.goal + ' 次';
+  }
+
   function tkRuleText(t) {
     var parts = [];
     if (t.goal) { parts.push('目标 ' + t.goal.target + (t.goal.unit || '')); }
@@ -9735,17 +9947,16 @@ var AR = window.AR || (window.AR = {});
      *   没计划 → 累计进度（累计 a / 目标 b 单位），沿用旧「长期任务」的样子
      * 两者都没有（既不设计划也不设目标）→ 不画条，只报今天的次数。
      */
-    var l2 = '', pct = null, barTip = '';
-    if (tkHasPlan(t)) {
+    var pi = tkPeriodInfo(t, p);
+    var l2 = '', pct = null;
+    if (pi) {
       l2 = '<span class="tk-plan">' + tkPlanText(t) + '</span>'
-        + '<span class="tk-goal">今天 ' + p.today + '/' + need + ' 次</span>';
+        + '<span class="tk-goal">' + tkPeriodText(t, p) + '</span>';
       if (p.hasGoal) { l2 += '<span>累计 ' + p.total + '/' + p.target + U.escapeHtml(t.goal.unit || '') + '</span>'; }
-      pct = need > 0 ? Math.min(100, Math.round(p.periodDone / need * 100)) : 0;
-      barTip = '今天 ' + p.periodDone + '/' + need;
+      pct = pi.goal > 0 ? Math.min(100, Math.round(pi.done / pi.goal * 100)) : 0;
     } else if (p.hasGoal) {
       l2 = '<span class="tk-goal">累计 ' + p.total + ' / ' + p.target + U.escapeHtml(t.goal.unit || '') + '</span>';
       pct = p.percent;
-      barTip = p.total + '/' + p.target;
     } else {
       l2 = '<span>今天 ' + p.today + ' 次</span>';
     }
@@ -9814,7 +10025,7 @@ var AR = window.AR || (window.AR = {});
           var r = el('<div class="tk-done">'
             + '<span class="tk-bar" style="background:' + tkColor(t) + '"></span>'
             + '<span class="tk-dtext">' + U.escapeHtml(t.text) + '</span>'
-            + '<span class="tk-dmeta">' + p.periodUnit + ' ' + p.periodDone + '/' + p.periodGoal + ' 次</span>'
+            + '<span class="tk-dmeta">' + (tkPeriodText(t, p) || ('今天 ' + p.today + ' 次')) + '</span>'
             + '<span class="tk-dacts"><button class="tk-dbtn" data-a="undo">撤销</button>'
             + '<button class="tk-dbtn p" data-a="again">继续做</button></span></div>');
           r.querySelector('[data-a=undo]').addEventListener('click', function () { tkUndo(t); });
@@ -10020,6 +10231,7 @@ var AR = window.AR || (window.AR = {});
           + '<span class="tk-tsname">' + U.escapeHtml(t.text) + '</span>'
           + '<span class="tk-tspc">' + (pct != null ? pct + '%' : (r.hasPlan ? '' : '—')) + '</span></div>'
           + '<div class="tk-tsmeta">'
+          + (tkPeriodText(t, r.p) ? (tkPeriodText(t, r.p) + ' · ') : '')
           + (r.p.hasGoal ? ('累计 ' + r.p.total + ' / ' + r.p.target + ' ' + U.escapeHtml(t.goal.unit || ''))
             : ('累计 ' + r.p.total + ' 次'))
           + ' · 近 7 天 ' + r.last7 + ' 次 · 连续 ' + r.cur + ' 天</div>'
@@ -10174,6 +10386,101 @@ var AR = window.AR || (window.AR = {});
     }).join('') + (days.length > 3 ? '<div class="tk-rech-more">还有 ' + (days.length - 3) + ' 天有记录…</div>' : '');
   }
   /** 大卡里的一条任务：标题行（含编辑按钮）+ 今天/累计 + 大迷你格 + 展开区 */
+  /* ---- 任务详情弹窗（点条目的「展开」） ---- */
+  function openTaskDetail(t) {
+    var d = new Date();
+    var cur = (AR.Store.todoById ? AR.Store.todoById(t.id) : null) || t;
+    var p = AR.Store.todoProgress(cur, d);
+    var body = el('<div class="tkd"></div>');
+    tkAnimateExpand(body);
+
+    /* 概况：周期 + 累计 */
+    var pi = tkPeriodInfo(cur, p);
+    if (pi) {
+      var dn = pi.done, gl = pi.goal;
+      var total2 = Math.min(Math.max(gl, dn), 6), dots = '';
+      for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < dn ? '' : ' off') + '"></i>'; }
+      body.appendChild(el('<div class="tk-t2row"><span class="tk-t2lab">' + pi.unit + '</span>'
+        + '<span class="tk-t2dots">' + dots + (dn > 6 ? '<b class="tk-t2num">' + dn + '</b>' : '') + '</span>'
+        + '<span class="tk-t2val"><b>' + pi.unit + ' ' + dn + '</b> / ' + gl + ' 次</span></div>'));
+    } else {
+      body.appendChild(el('<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
+        + '<span class="tk-t2dots"><b class="tk-t2num">' + p.today + '</b></span>'
+        + '<span class="tk-t2val">未设计划</span></div>'));
+    }
+    if (p.hasGoal) {
+      body.appendChild(el('<div class="tk-t2row"><span class="tk-t2lab">累计</span>'
+        + '<span class="tk-t2track"><span class="tk-t2fill" style="width:' + p.percent
+        + '%;background:' + tkColor(cur) + '"></span></span>'
+        + '<span class="tk-t2val"><b>' + p.total + '</b> / ' + p.target + ' '
+        + U.escapeHtml(cur.goal.unit || '') + '</span></div>'));
+    }
+    var plan = tkPlanText(cur);
+    body.appendChild(el('<div class="tkd-line">' + (plan ? ('计划：' + U.escapeHtml(plan)) : '没有计划，随时可记')
+      + (p.hasGoal ? '' : '（未设目标）') + '</div>'));
+
+    /* 贡献图 */
+    body.appendChild(el('<div class="tk-shead">最近 12 周</div>'));
+    body.appendChild(el(tkGhGrid(cur)));
+
+    /* 最近记录（可逐笔撤销） */
+    body.appendChild(el('<div class="tk-shead">最近记录</div>'));
+    var recBox = el('<div class="tkd-recs"></div>');
+    function paintRecs() {
+      var live = (AR.Store.todoById ? AR.Store.todoById(cur.id) : null) || cur;
+      recBox.innerHTML = tkRecList(live);
+      recBox.querySelectorAll('[data-reck]').forEach(function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var day = b.getAttribute('data-reck');
+          var ents = (live.entries || []).filter(function (e) {
+            return !e.deletedAt && AR.Store.todoEntryDay(e) === day;
+          });
+          if (!ents.length) { return; }
+          if (AR.Store.todoRemoveEntry(live.id, ents[ents.length - 1].id)) {
+            AR.UI.toast('已撤销 ' + tkRelDay(day) + ' 的一笔');
+            paintRecs();
+            if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+          }
+        });
+      });
+    }
+    paintRecs();
+    body.appendChild(recBox);
+
+    /* 底部：＋1 就地刷新，不关弹窗 */
+    var foot = el('<div class="tk-foot"></div>');
+    var plus = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋1 记一次</button>');
+    plus.addEventListener('click', function () {
+      tkPunch(cur);
+      paintRecs();
+    });
+    foot.appendChild(plus);
+    body.appendChild(foot);
+
+    openModal({
+      title: '任务详情', sub: U.escapeHtml(cur.text || ''), body: body, wide: true,
+      actions: [
+        { label: '编辑', onClick: function (close) { close(); openTaskEdit(cur); } },
+        {
+          label: '删除', kind: 'danger',
+          onClick: function (close) {
+            close();
+            confirmDanger({
+              title: '删除这条任务？', sub: U.escapeHtml(cur.text || ''),
+              text: '任务会进回收站（可恢复），记录也一并保留。',
+              okLabel: '删除',
+              onOk: function () {
+                AR.Store.todoRemove(cur.id);
+                if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+                AR.UI.toast('已删除：' + (cur.text || ''));
+              }
+            });
+          }
+        }
+      ]
+    });
+  }
   function tkTaskLine(t, d) {
     d = d || new Date();
     var p = AR.Store.todoProgress(t, d);
@@ -10193,13 +10500,16 @@ var AR = window.AR || (window.AR = {});
       + '<i>▸</i><em>' + (open ? '收起' : '展开') + '</em></button></span></div>';
 
     /* 今天：有计划 → 进度点；没计划 → 只报次数（沿用旧长期任务的样子） */
-    if (need > 0) {
-      var total2 = Math.min(Math.max(need, p.today), 6);
+    /* 周期词：有计划按 今天/本周 显示，没计划只报今天的次数 */
+    var pi2 = tkPeriodInfo(t, p);
+    if (pi2) {
+      var dn = pi2.done, gl = pi2.goal;
+      var total2 = Math.min(Math.max(gl, dn), 6);
       var dots = '';
-      for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < p.today ? '' : ' off') + '"></i>'; }
-      html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
-        + '<span class="tk-t2dots">' + dots + (p.today > 6 ? '<b class="tk-t2num">' + p.today + '</b>' : '') + '</span>'
-        + '<span class="tk-t2val"><b>' + p.today + '</b> / ' + need + ' 次</span></div>';
+      for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < dn ? '' : ' off') + '"></i>'; }
+      html += '<div class="tk-t2row"><span class="tk-t2lab">' + pi2.unit + '</span>'
+        + '<span class="tk-t2dots">' + dots + (dn > 6 ? '<b class="tk-t2num">' + dn + '</b>' : '') + '</span>'
+        + '<span class="tk-t2val"><b>' + pi2.unit + ' ' + dn + '</b> / ' + gl + ' 次</span></div>';
     } else {
       html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
         + '<span class="tk-t2dots"><b class="tk-t2num">' + p.today + '</b></span>'
@@ -10213,54 +10523,22 @@ var AR = window.AR || (window.AR = {});
     }
     /* 大迷你格：常驻 */
     html += tkMiniGrid(t);
-    /* 展开区（卡内、缩进） */
-    html += '<div class="tk-t2body" data-body hidden></div></div>';
+    html += '</div>';   /* 收尾 .tk-line（不再内联展开，改用详情弹窗） */
 
     var line = el(html);
 
-    var body = line.querySelector('[data-body]');
-    if (open) {
-      body.hidden = false;
-      /* 展开动画：内容重建后浮入（CSS 兜底 + 统一接口） */
-      tkAnimateExpand(body);
-      body.innerHTML = tkGhGrid(t)
-        + '<div class="tk-t2recs"><button class="tk-t2rech' + (TK_REC_OPEN[t.id] ? ' open' : '') + '" type="button">'
-        + '<span>最近记录</span><span class="tk-chev">▸</span></button>'
-        + '<div class="tk-t2reclist" data-recl' + (TK_REC_OPEN[t.id] ? '' : ' hidden') + '>'
-        + tkRecList(t) + '</div></div>';
-      body.querySelector('.tk-t2rech').addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        TK_REC_OPEN[t.id] = !TK_REC_OPEN[t.id];
-        if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
-      });
-      body.querySelectorAll('[data-reck]').forEach(function (b) {
-        b.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          tkUndoOn(t, b.getAttribute('data-reck'));
-        });
-      });
-    }
-    /* 点标题行展开/收起 */
+    /* 点标题行 / 点「展开」按钮 → 详细信息弹窗 */
     line.querySelector('.tk-t2head').addEventListener('click', function (ev) {
       if (ev.target.closest && ev.target.closest('.tk-edit-btn')) { return; }
-      TK_MINE_OPEN[t.id] = !TK_MINE_OPEN[t.id];
-      if (!TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = false; }
-      /* 展开时「最近记录」默认一起展开（收起时才折叠） */
-      if (TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = true; }
-      if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
+      AR.Bridge.haptic('light', ev.currentTarget);
+      openTaskDetail(t);
     });
-    /* [编辑] 按钮 → 直接进该任务编辑页 */
-    /* [展开/收起] 按钮：与点标题行同效 */
     var expBtn = line.querySelector('.tk-exp-btn');
     if (expBtn) {
       expBtn.addEventListener('click', function (ev) {
         ev.stopPropagation();
         AR.Bridge.haptic('light', expBtn);
-        TK_MINE_OPEN[t.id] = !TK_MINE_OPEN[t.id];
-        if (!TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = false; }
-        /* 展开时「最近记录」默认一起展开 */
-        if (TK_MINE_OPEN[t.id]) { TK_REC_OPEN[t.id] = true; }
-        if (AR.UI.renderCustom) { AR.UI.renderCustom(); }
+        openTaskDetail(t);
       });
     }
     line.querySelector('.tk-edit-btn').addEventListener('click', function (ev) {
@@ -10325,17 +10603,30 @@ var AR = window.AR || (window.AR = {});
       wrap.appendChild(el('<div class="field-label">颜色</div>'));
       wrap.appendChild(sw);
       /* ① 目标（默认让用户设） */
-      /* 目标：**直接展开**，不用先点按钮；不要目标就点右边那个按钮把它去掉 */
-      wrap.appendChild(el('<div class="field-label" style="margin-top:12px">目标（攒到多少）'
-        + (draft.goal ? '' : '<span class="muted" style="font-weight:400"> — 暂不设目标，只做打卡</span>')
-        + '</div>'));
-      wrap.appendChild(el('<div class="row gap" style="margin-top:6px;align-items:center">'
-        + '<input class="input" type="number" id="tkTarget" min="1" style="width:96px" value="' + (draft.goal ? (draft.goal.target || 1) : 100) + '"'
-        + (draft.goal ? '' : ' disabled') + '>'
-        + '<input class="input" id="tkUnit" placeholder="单位：页 / 小时 / 公里" value="' + U.escapeHtml(draft.goal ? (draft.goal.unit || '') : '页') + '"'
-        + (draft.goal ? '' : ' disabled') + '>'
-        + '<button class="chip-btn' + (draft.goal ? '' : ' active') + '" type="button" id="tkGoalToggle">'
-        + (draft.goal ? '不用目标' : '用目标') + '</button></div>'));
+      /* 目标：两档滑块 —— 不做目标 / 设置总目标（选后者才展开输入框） */
+      wrap.appendChild(el('<div class="field-label" style="margin-top:12px">目标</div>'));
+      var gseg = el('<div class="segmented" data-segkey="tk-edit-goal" style="margin-top:6px"></div>');
+      [{ k: 'off', t: '不做目标' }, { k: 'on', t: '设置总目标' }].forEach(function (o) {
+        var gOn = (o.k === 'on') === !!draft.goal;
+        var gb = el('<button class="seg' + (gOn ? ' active' : '') + '" type="button">' + o.t + '</button>');
+        gb.addEventListener('click', function () {
+          tkSegAnimate = true;
+          draft.goal = (o.k === 'on') ? (draft.goal || { target: 100, unit: '页' }) : null;
+          paint();
+        });
+        gseg.appendChild(gb);
+      });
+      wrap.appendChild(gseg);
+      tkSyncSegPills(tkSegAnimate); tkSegAnimate = false;
+
+      if (draft.goal) {
+        wrap.appendChild(el('<div class="row gap" style="margin-top:8px">'
+          + '<input class="input" type="number" id="tkTarget" min="1" style="width:96px" value="' + (draft.goal.target || 1) + '">'
+          + '<input class="input" id="tkUnit" placeholder="单位：页 / 小时 / 公里" value="' + U.escapeHtml(draft.goal.unit || '') + '">'
+          + '</div>'));
+      } else {
+        wrap.appendChild(el('<p class="muted" style="margin:8px 0 0;font-size:12px">不做目标：只打卡，不显示累计进度。</p>'));
+      }
       /* ② 计划（可选；直接给选项，不要开关） */
       wrap.appendChild(el('<div class="field-label" style="margin-top:14px">计划（可选）'
         + '<span class="muted" style="font-weight:400"> — 设了就显示今天进度，做满折进「已完成」</span></div>'));
@@ -10393,13 +10684,6 @@ var AR = window.AR || (window.AR = {});
       }
       var ti = wrap.querySelector('#tkText');
       ti.addEventListener('input', function () { draft.text = ti.value; });
-      var goalToggle = wrap.querySelector('#tkGoalToggle');
-      if (goalToggle) {
-        goalToggle.addEventListener('click', function () {
-          draft.goal = draft.goal ? null : { target: 100, unit: '页' };
-          paint();
-        });
-      }
       var gt = wrap.querySelector('#tkTarget');
       if (gt) { gt.addEventListener('change', function () { if (draft.goal) { draft.goal.target = Math.max(1, Number(gt.value) || 1); } }); }
       var gu = wrap.querySelector('#tkUnit');
