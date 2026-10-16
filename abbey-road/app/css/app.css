@@ -3097,6 +3097,10 @@ body[data-perf="min"] .blob { display: none; }
 }
 .trash-back { flex: none; }
 .toast-undo { display: flex; align-items: center; gap: 10px; }
+/* 带按钮的那条 toast 必须能点：容器是 pointer-events:none（免得挡住页面），
+   不显式打开的话「撤销」按钮物理上点不到 —— 这就是「点了没反应」的原因。 */
+.toast-undo { pointer-events: auto; }
+
 .toast-undo .t-msg { flex: 1; min-width: 0; }
 .toast-undo .t-act {
   flex: none; border: 0; background: transparent; cursor: pointer;
@@ -3833,3 +3837,26 @@ body[data-perf] .agv-pane.agv-in { animation: none !important; }
   border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent);
   cursor: pointer; margin-bottom: 10px; font-weight: 600;
 }
+
+
+/* ══════════ 「记几次」输入（编辑页 / 详情弹窗共用）══════════ */
+.tk-count {
+  margin: 13px 0 4px; padding: 11px 12px;
+  border: 1px dashed var(--glass-stroke); border-radius: 12px;
+}
+.tk-count-h { font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 8px; }
+.tk-count-row { display: flex; align-items: center; gap: 8px; }
+.tk-count-in {
+  width: 88px !important; flex: 0 0 auto; text-align: center;
+  font-size: calc(14px * var(--fs-scale)) !important;
+}
+.tk-count-go {
+  font: inherit; font-size: 12.5px; font-weight: 650; padding: 9px 15px;
+  border-radius: 10px; border: 1px solid var(--accent);
+  background: var(--accent-soft); color: var(--accent); cursor: pointer;
+  flex: 0 0 auto;
+}
+.tk-count-go:hover { background: var(--accent); color: var(--accent-contrast); }
+.tk-count-go:active { transform: scale(.97); }
+.tk-count-tip { font-size: 11px; color: var(--text-tertiary); margin: 9px 0 0; line-height: 1.5; }
+.tk-count-tip b { color: var(--text-secondary); font-weight: 650; }

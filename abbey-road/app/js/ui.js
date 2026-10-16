@@ -2118,91 +2118,180 @@ var AR = window.AR || (window.AR = {});
     return out;
   }
 
-  function modTodo() {
-    var list = todoLiveList();
-    var openN = 0;
-    for (var c = 0; c < list.length; c++) { if (!list[c].done) { openN++; } }
+  /* ══════════ 待办速记（照「作业」的做法）══════════
+     右滑划掉（flyOut + 「划掉」提示）、「已完成 · N」折叠分组（长按找回）、
+     卡底两个按钮；点条目打开弹窗改文字。样式直接复用作业的 .hw-row/.hw-done-head。
+     ══════════════════════════════════════════════════ */
+  var QT_DONE_OPEN = false;
+
+  /** 待办速记要不要出现在今日日程（设置 → 作业与日程 的开关，默认关） */
+  function qtInToday() {
+    var sc = S.settings && S.settings.schedule;
+    return !!(sc && sc.quickTodo && sc.quickTodo.inToday === true);
+  }
+
+  /** 一条未完成的速记：右滑划掉；点一下改文字 */
+  function qtRow(item) {
+    var node = el('<div class="hw-row" data-id="' + item.id + '">'
+      + '<span class="hw-text">' + U.escapeHtml(item.text) + '</span>'
+      + '<span class="hw-swipe-hint">划掉</span></div>');
+    bindSwipeRow(node, {
+      flyOut: true,
+      onCommit: function () {
+        AR.Store.quickTodoToggle(item.id, true);
+        AR.Bridge.haptic('medium', node);
+        toast('已完成 · 可在「已完成」里找回');
+        refreshHomework();
+      }
+    });
+    node.addEventListener('click', function () {
+      if (node.__swiped) { node.__swiped = false; return; }
+      openQuickTodoEdit(item);
+    });
+    return node;
+  }
+
+  /** 一条已完成的速记：长按找回（与作业一致） */
+  function qtDoneRow(item) {
+    var when = item.doneAt ? U.dateKey(new Date(item.doneAt)) : '';
+    var node = el('<div class="hw-row done" data-id="' + item.id + '">'
+      + '<span class="hw-tick">✓</span>'
+      + '<span class="hw-text">' + U.escapeHtml(item.text) + '</span>'
+      + (when ? '<span class="hw-when">' + hwShortDate(when) + '</span>' : '')
+      + '<span class="hw-hold">长按找回</span></div>');
+    bindLongPress(node, function () {
+      AR.Store.quickTodoToggle(item.id, false);
+      AR.Bridge.haptic('medium', node);
+      toast('已找回：' + item.text);
+      refreshHomework();
+    }, 600);
+    node.addEventListener('click', function () {
+      if (node.__lpFired) { node.__lpFired = false; return; }
+      openQuickTodoEdit(item);
+    });
+    return node;
+  }
+
+  /** 速记卡片（「我的」模块与今日日程共用；opts.key 决定 data-hwnode，用于局部刷新） */
+  function qtCard(opts) {
+    opts = opts || {};
+    var all = AR.Store.quickTodoList ? AR.Store.quickTodoList() : [];
+    var op = [], dn2 = [];
+    for (var i = 0; i < all.length; i++) { (all[i].done ? dn2 : op).push(all[i]); }
+    op.reverse(); dn2.reverse();   /* 新记的排前面 */
+
     var card = el('<div class="hw-card"></div>');
-    card.setAttribute('data-hwnode', 'mod-todo');
-    card.__rebuild = modTodo;
+    card.setAttribute('data-hwnode', opts.key || 'mod-todo');
+    card.__rebuild = function () { return qtCard(opts); };
     card.appendChild(el('<div class="hw-head"><span class="lt-ico">☑</span>'
       + '<span class="hw-t">待办速记</span>'
-      + '<span class="hw-n">' + (list.length ? openN + ' 条没做 / 共 ' + list.length : '空的') + '</span></div>'));
-    var bodyEl = el('<div class="hw-body"></div>');
-    var inputRow = el('<div class="cm-todo-add">'
-      + '<input class="input" id="qtText" placeholder="随手记一条…">'
-      + '<button class="chip-btn" id="qtAdd" type="button">＋</button></div>');
-    bodyEl.appendChild(inputRow);
-    var doAdd = function () {
-      var input = inputRow.querySelector('#qtText');
-      var txt = (input.value || '').trim();
-      if (!txt) { toast('先写点什么'); return; }
-      todoList().push({ id: U.uid(), text: txt, done: false, at: new Date().toISOString() });
-      AR.Store.save(true);
-      AR.Bridge.haptic('light', inputRow);
-      toast('已记下：' + txt);
-      refreshHomework();
-    };
-    inputRow.querySelector('#qtAdd').addEventListener('click', doAdd);
-    inputRow.querySelector('#qtText').addEventListener('keydown', function (ev) {
-      if (ev.key === 'Enter') { ev.preventDefault(); doAdd(); }
-    });
-    for (var i = 0; i < list.length; i++) {
-      (function (t) {
-        var row = el('<div class="cm-todo-row' + (t.done ? ' done' : '') + '">'
-          + '<button class="cm-todo-check" type="button" aria-label="切换完成">✓</button>'
-          + '<span class="cm-todo-text">' + U.escapeHtml(t.text) + '</span>'
-          + '<button class="lt-del" type="button" title="删掉">✕</button></div>');
-        row.querySelector('.cm-todo-check').addEventListener('click', function () {
-          t.done = !t.done;
-          AR.Store.save(true);
-          AR.Bridge.haptic('light', row);
+      + '<span class="hw-n">' + (all.length ? (op.length + ' 条没做 / 共 ' + all.length) : '空的') + '</span></div>'));
+
+    var bodyEl = el('<div class="hw-body"><div class="hw-list"></div></div>');
+    var listBox = bodyEl.querySelector('.hw-list');
+    if (op.length) {
+      for (var o = 0; o < op.length; o++) { listBox.appendChild(qtRow(op[o])); }
+    } else {
+      listBox.appendChild(el('<div class="hw-empty muted">都划完了 ✓</div>'));
+    }
+    if (dn2.length) {
+      var head = el('<button class="hw-done-head' + (QT_DONE_OPEN ? ' open' : '') + '" type="button">已完成 ' + dn2.length
+        + '<span class="hw-done-hint">点开可找回</span><span class="hw-chev">▸</span></button>');
+      var dnBox = el('<div class="hw-done"></div>');
+      dnBox.hidden = !QT_DONE_OPEN;
+      for (var q = 0; q < dn2.length; q++) { dnBox.appendChild(qtDoneRow(dn2[q])); }
+      head.addEventListener('click', function () {
+        QT_DONE_OPEN = !QT_DONE_OPEN;
+        dnBox.hidden = !QT_DONE_OPEN;
+        head.classList.toggle('open', QT_DONE_OPEN);
+        AR.Bridge.haptic('light', head);
+      });
+      listBox.appendChild(head);
+      listBox.appendChild(dnBox);
+    }
+    card.appendChild(bodyEl);
+
+    /* 卡底：清掉已完成 + 新建速记 */
+    var foot = el('<div class="tk-foot"></div>');
+    var clr = el('<button class="tk-fbtn" type="button">清掉已完成</button>');
+    clr.addEventListener('click', function () {
+      if (!dn2.length) { toast('还没有做完的'); return; }
+      confirmDanger({
+        title: '清掉 ' + dn2.length + ' 条已完成？', sub: '',
+        text: '清掉的会进回收站，之后去「设置 → 数据与同步 → 回收站」也能找回。',
+        okLabel: '清掉',
+        onOk: function () {
+          var arr = AR.Store.quickTodoList();
+          for (var k = 0; k < arr.length; k++) { if (arr[k].done) { AR.Store.quickTodoRemove(arr[k].id); } }
           refreshHomework();
-        });
-        row.querySelector('.lt-del').addEventListener('click', function () {
-          // v0.4.0 二次确认；v0.4.1 删除改为软删除（可撤销 / 回收站找回）
+          toast('已清掉做完的');
+        }
+      });
+    });
+    var add = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 新建速记</button>');
+    add.addEventListener('click', function () {
+      AR.Bridge.haptic('light', add);
+      openQuickTodoEdit(null);
+    });
+    foot.appendChild(clr);
+    foot.appendChild(add);
+    card.appendChild(foot);
+    return card;
+  }
+
+  /** 「我的」模块入口 */
+  function modTodo() { return qtCard({ key: 'mod-todo' }); }
+
+  /** 今日日程里的速记卡（同一个渲染，换个 data-hwnode 以便分别刷新） */
+  function qtTodayCard() { return qtCard({ key: 'qt-today' }); }
+
+  /** 新建 / 编辑一条速记（文字 + 删除） */
+  function openQuickTodoEdit(item) {
+    var isNew = !item;
+    var cur = item || { text: '' };
+    var body = el('<div class="lt-edit"><div class="field">'
+      + '<label class="field-label">内容</label>'
+      + '<input class="input" id="qtEditText" placeholder="随手记一条…" value="'
+      + U.escapeHtml(cur.text || '') + '"></div></div>');
+    var acts = [{
+      label: isNew ? '添加' : '保存', kind: 'primary',
+      onClick: function (close) {
+        var el2 = body.querySelector('#qtEditText');
+        var txt = ((el2 && el2.value) || '').trim();
+        if (!txt) { toast('先写点什么'); return; }
+        AR.Store.quickTodoUpsert({ id: isNew ? null : cur.id, text: txt });
+        close();
+        refreshHomework();
+        toast(isNew ? ('已记下：' + txt) : '已保存');
+      }
+    }];
+    if (!isNew) {
+      acts.unshift({
+        label: '删除', kind: 'danger',
+        onClick: function (close) {
+          close();
           confirmDanger({
-            title: '删除这条速记？', sub: t.text || '',
-            text: '删了会进回收站，5 秒内可以撤销，之后去「设置 → 数据与同步 → 回收站」也能找回。',
+            title: '删除这条速记？', sub: U.escapeHtml(cur.text || ''),
+            text: '删了会进回收站，5 秒内可以撤销，之后也能在回收站找回。',
             okLabel: '确认删除',
             onOk: function () {
-              if (AR.Store.quickTodoRemove) { AR.Store.quickTodoRemove(t.id); }
-              else {
-                var arr = todoList();
-                for (var k = 0; k < arr.length; k++) { if (arr[k].id === t.id) { arr.splice(k, 1); break; } }
-                AR.Store.save(true);
-              }
-              AR.Bridge.haptic('warn', $('modalCard'));
+              AR.Store.quickTodoRemove(cur.id);
               refreshHomework();
-              toastUndo('已删除速记：' + (t.text || ''), '撤销', function () {
-                AR.Store.restore('quickTodos', t.id);
+              toastUndo('已删除速记：' + (cur.text || ''), '撤销', function () {
+                AR.Store.restore('quickTodos', cur.id);
                 refreshHomework();
               });
             }
           });
-        });
-        bodyEl.appendChild(row);
-      })(list[i]);
-    }
-    if (!list.length) {
-      bodyEl.appendChild(el('<div class="muted" style="padding:2px 4px 6px">随手记点小事，点左边圆圈勾掉。</div>'));
-    }
-    var hasDone = false;
-    for (var h = 0; h < list.length; h++) { if (list[h].done) { hasDone = true; break; } }
-    if (hasDone) {
-      var clearBtn = el('<button class="btn" type="button" style="margin-top:8px">清掉已完成</button>');
-      clearBtn.addEventListener('click', function () {
-        var arr = todoList();
-        for (var k = arr.length - 1; k >= 0; k--) { if (arr[k].done) { arr.splice(k, 1); } }
-        AR.Store.save(true);
-        AR.Bridge.haptic('light', clearBtn);
-        toast('已清掉做完的');
-        refreshHomework();
+        }
       });
-      bodyEl.appendChild(clearBtn);
     }
-    card.appendChild(bodyEl);
-    return card;
+    openModal({ title: isNew ? '新建速记' : '编辑速记', body: body, actions: acts });
+    /* 速记本来就是要打字，这里聚焦输入框是期望行为（与任务编辑不同） */
+    setTimeout(function () {
+      var el3 = body.querySelector('#qtEditText');
+      if (el3 && el3.focus) { el3.focus(); }
+    }, 60);
   }
 
   var CUSTOM_MODULE_BUILDERS = {
@@ -2400,6 +2489,7 @@ var AR = window.AR || (window.AR = {});
      */
     if (hwZoneVisible()) { body.appendChild(homeworkNode('today')); }
     try { body.appendChild(tkTaskCard()); } catch (e) { console.error('任务卡渲染失败', e); }
+    if (qtInToday()) { try { body.appendChild(qtTodayCard()); } catch (e) { } }
 
     /* 左侧：本周概览 */
     renderWeekRail(weekNo, sem, ex === 'week', weekCompact);
@@ -3050,6 +3140,7 @@ var AR = window.AR || (window.AR = {});
       // 没有下一节课时，作业 / 长期任务照样要出现在这张卡片里
       if (hwZoneVisible()) { body.appendChild(homeworkNode('next')); }
       try { body.appendChild(tkTaskCard()); } catch (e) { console.error('任务卡渲染失败', e); }
+    if (qtInToday()) { try { body.appendChild(qtTodayCard()); } catch (e) { } }
       return;
     }
     var item = target.item;
@@ -3170,6 +3261,7 @@ var AR = window.AR || (window.AR = {});
       body.appendChild(homeworkNode('next'));
     }
     try { body.appendChild(tkTaskCard()); } catch (e) { }
+    if (qtInToday()) { try { body.appendChild(qtTodayCard()); } catch (e) { } }
   }
 
   function moduleBtn(k, v, onClick) {
@@ -4604,19 +4696,45 @@ var AR = window.AR || (window.AR = {});
       + U.escapeHtml(rec ? rec.label : '') + '"></div>'
       + '<div class="field"><label class="field-label">颜色</label><div class="swatches" id="tyColors"></div></div></div>');
     var cb = body.querySelector('#tyColors');
+    var tyCustom = el('<button type="button" class="swatch custom" title="自定义"></button>');
+    var tyCpBtn = el('<button class="btn color-open" type="button" style="margin-top:10px">'
+      + '<span class="co-dot"></span>打开色盘</button>');
+    function syncTyColors() {
+      var isHex = /^#[0-9a-fA-F]{6}$/.test(String(picked));
+      var all = cb.querySelectorAll('.swatch');
+      for (var k = 0; k < all.length; k++) {
+        var sw2 = all[k];
+        if (sw2 === tyCustom) { continue; }
+        sw2.classList.toggle('active', sw2.getAttribute('data-hex') === picked);
+      }
+      tyCustom.classList.toggle('active', isHex);
+      if (isHex) { tyCustom.style.background = picked; }
+      var d = tyCpBtn.querySelector('.co-dot');
+      if (d) { d.style.background = picked; }
+    }
     for (var i = 0; i < U.PALETTE.length; i++) {
       (function (p) {
-        var sw = el('<button type="button" class="swatch' + (p.hex === picked ? ' active' : '')
-          + '" title="' + U.escapeHtml(p.name) + '" style="background:' + p.hex + '"></button>');
+        var sw = el('<button type="button" class="swatch" data-hex="' + p.hex + '"'
+          + ' title="' + U.escapeHtml(p.name) + '" style="background:' + p.hex + '"></button>');
         sw.addEventListener('click', function () {
           picked = p.hex;
-          var all = cb.querySelectorAll('.swatch');
-          for (var k = 0; k < all.length; k++) { all[k].classList.toggle('active', all[k] === sw); }
+          syncTyColors();
           AR.Bridge.haptic('light', sw);
         });
         cb.appendChild(sw);
       })(U.PALETTE[i]);
     }
+    tyCustom.addEventListener('click', function () {
+      openColorPicker(/^#[0-9a-fA-F]{6}$/.test(String(picked)) ? picked : U.PALETTE[1].hex,
+        function (hex) { picked = hex; syncTyColors(); });
+    });
+    cb.appendChild(tyCustom);
+    body.querySelector('#tyColors').parentNode.appendChild(tyCpBtn);
+    tyCpBtn.addEventListener('click', function () {
+      openColorPicker(/^#[0-9a-fA-F]{6}$/.test(String(picked)) ? picked : U.PALETTE[1].hex,
+        function (hex) { picked = hex; syncTyColors(); });
+    });
+    syncTyColors();
     openModal({
       title: isEdit ? '编辑类型' : '新建类型', body: body,
       actions: [
@@ -9796,12 +9914,14 @@ var AR = window.AR || (window.AR = {});
     tkTaskRow: tkTaskRow,
     tkTaskLine: tkTaskLine,
     modTasks: modTasks,
+  qtTodayCard: qtTodayCard, openQuickTodoEdit: openQuickTodoEdit,
     openTaskEdit: openTaskEdit,
   openTaskDetail: openTaskDetail,
     openTaskStats: openTaskStats,
     tkRuleText: tkRuleText,
     tkPlanText: tkPlanText,
     tkPeriodText: tkPeriodText, tkPeriodInfo: tkPeriodInfo,
+  tkCountInput: tkCountInput,
     refreshTasks: function () {
       refreshHomework();
       if (AR.Panels && AR.Panels.renderTaskList) { AR.Panels.renderTaskList(); }
@@ -10439,18 +10559,69 @@ var AR = window.AR || (window.AR = {});
   }
 
   /** 最近记录（按天倒序，最多 3 条，每行可单独撤销） */
+  /**
+   * 「记几次」输入 —— 编辑页与详情弹窗共用。
+   *   · 一次提交 = 一条记录：输入的数字进累计（按目标单位），计划进度按条数 +1
+   *   · 支持小数（单位是小时/页时常见，如 1.6）
+   *   · 有目标单位时标签跟着单位走（记多少（小时）／记 1.6 小时）
+   *   · 不聚焦输入框 —— 打开弹窗不弹输入法（部分 WebView 会自动聚焦第一个 input）
+   */
+  function tkCountInput(cur, onDone) {
+    var hasUnit = !!(cur.goal && cur.goal.unit);
+    var unit = hasUnit ? String(cur.goal.unit) : '';
+    var word = hasUnit ? unit : '次';
+    var box = el('<div class="tk-count"></div>');
+    box.appendChild(el('<div class="tk-count-h">' + (hasUnit ? ('记多少（' + U.escapeHtml(unit) + '）') : '记几次') + '</div>'));
+    var row = el('<div class="tk-count-row"></div>');
+    var input = el('<input class="input tk-count-in" type="number" inputmode="decimal" step="0.1" min="0" value="1">');
+    var btn = el('<button class="tk-count-go" type="button">记 1 ' + U.escapeHtml(word) + '</button>');
+    function label() {
+      var v = Number(input.value);
+      var txt = (isFinite(v) && v) ? String(Math.round(v * 100) / 100) : '1';
+      btn.textContent = '记 ' + txt + ' ' + word;
+    }
+    input.addEventListener('input', label);
+    btn.addEventListener('click', function () {
+      var v = Number(input.value);
+      if (!isFinite(v) || !v) { toast('先填个数量'); return; }
+      v = Math.round(v * 100) / 100;
+      AR.Store.todoAddEntry(cur.id, v, '', { src: 'count' });
+      AR.Bridge.haptic('medium', btn);
+      var p2 = AR.Store.todoProgress(cur, new Date());
+      toast('已记 +' + v + ' ' + word
+        + (p2.hasGoal ? (' · 累计 ' + p2.total + '/' + p2.target + unit) : ''));
+      if (typeof onDone === 'function') { onDone(); }
+    });
+    row.appendChild(input);
+    row.appendChild(btn);
+    box.appendChild(row);
+    box.appendChild(el('<p class="tk-count-tip">小提示：把任务条<b>往右滑一下就是 +1</b>'
+      + (hasUnit ? ('；这里可以填小数，比如 1.5 ' + U.escapeHtml(unit)) : '') + '。</p>'));
+    return box;
+  }
+
   function tkRecList(t) {
+    /* 按天聚合：同时记条数与金额 —— 有目标单位的任务要显示 +1.6 小时，而不是 +1 次 */
+    var hasUnit = !!(t && t.goal && t.goal.unit);
+    var unit = hasUnit ? String(t.goal.unit) : '';
     var byDay = {};
     (t.entries || []).forEach(function (e) {
       if (e.deletedAt) { return; }
       var k = AR.Store.todoEntryDay(e);
       if (!k) { return; }
-      byDay[k] = (byDay[k] || 0) + 1;
+      if (!byDay[k]) { byDay[k] = { n: 0, amt: 0 }; }
+      byDay[k].n += 1;
+      byDay[k].amt += Number(e.amount) || 0;
     });
     var days = Object.keys(byDay).sort().reverse();
     if (!days.length) { return '<div class="tk-rec"><span class="tk-rn" style="color:var(--text-tertiary)">还没有记录</span></div>'; }
+    function amtText(d) {
+      var a = Math.round(d.amt * 100) / 100;
+      if (!hasUnit) { return '+' + d.n + ' 次'; }
+      return '+' + a + ' ' + U.escapeHtml(unit);
+    }
     return days.slice(0, 3).map(function (k) {
-      return '<div class="tk-rec"><span class="tk-rn">' + tkRelDay(k) + ' · +' + byDay[k] + ' 次</span>'
+      return '<div class="tk-rec"><span class="tk-rn">' + tkRelDay(k) + ' · ' + amtText(byDay[k]) + '</span>'
         + '<button class="tk-rx undo" data-reck="' + k + '">撤销</button></div>';
     }).join('') + (days.length > 3 ? '<div class="tk-rech-more">还有 ' + (days.length - 3) + ' 天有记录…</div>' : '');
   }
@@ -10493,6 +10664,11 @@ var AR = window.AR || (window.AR = {});
     body.appendChild(el(tkGhGrid(cur)));
 
     /* 最近记录（可逐笔撤销） */
+    /* 「记几次」放在最近记录上面 */
+    body.appendChild(tkCountInput(cur, function () {
+      paintRecs();
+      if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+    }));
     body.appendChild(el('<div class="tk-shead">最近记录</div>'));
     var recBox = el('<div class="tkd-recs"></div>');
     function paintRecs() {
@@ -10517,15 +10693,6 @@ var AR = window.AR || (window.AR = {});
     paintRecs();
     body.appendChild(recBox);
 
-    /* 底部：＋1 就地刷新，不关弹窗 */
-    var foot = el('<div class="tk-foot"></div>');
-    var plus = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋1 记一次</button>');
-    plus.addEventListener('click', function () {
-      tkPunch(cur);
-      paintRecs();
-    });
-    foot.appendChild(plus);
-    body.appendChild(foot);
 
     openModal({
       title: '任务详情', sub: U.escapeHtml(cur.text || ''), body: body, wide: true,
@@ -10662,6 +10829,9 @@ var AR = window.AR || (window.AR = {});
       wrap.appendChild(el('<div class="field"><label class="field-label">做什么</label>'
         + '<input class="input" id="tkText" placeholder="例如：背 50 个单词" value="'
         + U.escapeHtml(draft.text) + '"></div>'));
+      var curHex = U.colorHex(draft.colorKey || '#5B8DEF');
+      var isCustomHex = /^#[0-9a-fA-F]{6}$/.test(String(draft.colorKey || ''));
+      wrap.appendChild(el('<div class="field-label">颜色</div>'));
       var sw = el('<div class="row gap" style="flex-wrap:wrap;margin:2px 0 6px"></div>');
       (U.PALETTE || []).forEach(function (c) {
         var b = el('<button type="button" class="swatch' + (c.key === draft.colorKey ? ' active' : '')
@@ -10669,8 +10839,20 @@ var AR = window.AR || (window.AR = {});
         b.addEventListener('click', function () { draft.colorKey = c.key; paint(); });
         sw.appendChild(b);
       });
-      wrap.appendChild(el('<div class="field-label">颜色</div>'));
+      /* 自定义颜色（色盘）：存 #RRGGBB，和调色板走同一套 colorKey */
+      var tkCustom = el('<button type="button" class="swatch custom' + (isCustomHex ? ' active' : '')
+        + '" title="自定义" style="background:' + curHex + '"></button>');
+      tkCustom.addEventListener('click', function () {
+        openColorPicker(curHex, function (hex) { draft.colorKey = hex; paint(); });
+      });
+      sw.appendChild(tkCustom);
       wrap.appendChild(sw);
+      var tkCp = el('<button class="btn color-open" type="button" style="margin-top:4px">'
+        + '<span class="co-dot" style="background:' + curHex + '"></span>打开色盘</button>');
+      tkCp.addEventListener('click', function () {
+        openColorPicker(curHex, function (hex) { draft.colorKey = hex; paint(); });
+      });
+      wrap.appendChild(tkCp);
       /* ① 目标（默认让用户设） */
       /* 目标：两档滑块 —— 不做目标 / 设置总目标（选后者才展开输入框） */
       wrap.appendChild(el('<div class="field-label" style="margin-top:12px">目标</div>'));
@@ -10763,6 +10945,11 @@ var AR = window.AR || (window.AR = {});
     body.appendChild(wrap);
     /* 编辑页也看最近记录（仅已有任务；可逐笔撤销） */
     if (!isNew) {
+      /* 「记几次」放在最近记录上面：输入与结果紧挨着 */
+      body.appendChild(tkCountInput(src, function () {
+        paintRecs();
+        if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
+      }));
       var recBox = el('<div class="tk-edit-recs"></div>');
       function paintRecs() {
         var cur = AR.Store.todoById(src.id) || src;

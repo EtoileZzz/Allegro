@@ -332,5 +332,69 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     ui6.indexOf('AGV_DAY') >= 0 && ui6.indexOf('data-clear') >= 0 && ui6.indexOf('agv-chip') >= 0);
 }
 
+
+/* ═══════════ 20. 撤回可用 / 记几次 / 色盘 / 速记重构 ═══════════ */
+{
+  const core7 = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  const ui7 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panels7 = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+  const css8 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+
+  /* 撤回按钮：toast-host 是 pointer-events:none，带按钮的那条必须开回来 */
+  ok('C85 带「撤销」的气泡能点（pointer-events 开回来）',
+    /\.toast-host \{[^}]*pointer-events: none/.test(css8) &&
+    /\.toast-undo \{ pointer-events: auto; \}/.test(css8));
+
+  /* 记几次：只留自定义输入、支持小数、在最近记录之前 */
+  ok('C86 只有自定义次数输入（快捷 +1/+2 按钮已去掉）',
+    ui7.indexOf('function tkCountInput') >= 0 &&
+    ui7.indexOf("inputmode=\"decimal\"") >= 0 &&
+    ui7.indexOf("data-add") < 0);
+  ok('C87 次数标签跟单位走（有单位显示单位，无单位显示次）',
+    ui7.indexOf("hasUnit ? unit : '次'") >= 0 &&
+    /记多少（/.test(ui7));
+  ok('C88 次数输入在最近记录之前（编辑页与详情弹窗都插在记录标题前）',
+    ui7.indexOf('tkCountInput(src,') >= 0 && ui7.indexOf('tkCountInput(cur,') >= 0);
+  ok('C89 底部有小字提示右滑 +1',
+    /\.tk-count-tip/.test(css8) && ui7.indexOf('往右滑一下就是 +1') >= 0);
+  ok('C90 最近记录按单位显示（+1.6 小时 / +1 次）',
+    ui7.indexOf('function amtText') >= 0 && ui7.indexOf('amtText(byDay[k])') >= 0);
+
+  /* 色盘三处 */
+  ok('C91 任务编辑 / 日程类型 / 主题色 都能打开色盘',
+    (ui7.match(/openColorPicker\(/g) || []).length >= 6 &&
+    panels7.indexOf('AR.UI.openColorPicker') >= 0 &&
+    ui7.indexOf('打开色盘') >= 0 && panels7.indexOf('打开色盘') >= 0);
+
+  /* 速记重构：照作业 */
+  ok('C92 速记右滑划掉（作业同款 .hw-row + 划掉提示）',
+    ui7.indexOf('function qtRow') >= 0 &&
+    /class=\"hw-row\" data-id/.test(ui7) && ui7.indexOf('hw-swipe-hint') >= 0);
+  ok('C93 速记有「已完成」折叠分组（长按找回）',
+    ui7.indexOf('function qtDoneRow') >= 0 && ui7.indexOf('hw-done-head') >= 0 &&
+    ui7.indexOf('长按找回') >= 0);
+  ok('C94 速记卡底两个按钮（清掉已完成 / 新建速记）',
+    /＋ 新建速记/.test(ui7) && /清掉已完成/.test(ui7));
+  ok('C95 速记不再用圆圈/✕ 那套老写法',
+    ui7.indexOf('cm-todo-check') < 0 && ui7.indexOf('cm-todo-row') < 0);
+
+  /* 设置开关 + 数据同步 */
+  ok('C96 设置里有「在今日日程显示待办速记」开关，且读取同一个键',
+    panels7.indexOf('showQuickTodoInToday') < 0 &&
+    panels7.indexOf('quickTodo') >= 0 && panels7.indexOf('inToday') >= 0 &&
+    /sc\.quickTodo && sc\.quickTodo\.inToday === true/.test(ui7));
+  ok('C97 今日日程会在开关打开时挂速记卡',
+    (ui7.match(/appendChild\(qtTodayCard\(\)\)/g) || []).length >= 3 &&
+    ui7.indexOf('function qtInToday') >= 0);
+  ok('C98 速记纳入合并表（否则导入配置会丢）',
+    /MERGE_TABLES = \[[^\]]*'quickTodos'/.test(core7) &&
+    /table === 'quickTodos'/.test(core7));
+
+  /* 新 API 已导出 */
+  ok('C99 core 导出速记的增改与勾选',
+    core7.indexOf('quickTodoUpsert: quickTodoUpsert') >= 0 &&
+    core7.indexOf('quickTodoToggle: quickTodoToggle') >= 0);
+}
+
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exitCode = fail ? 1 : 0;

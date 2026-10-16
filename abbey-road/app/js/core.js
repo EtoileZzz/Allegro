@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.3';
+var APP_VERSION = '0.4.4';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -459,6 +459,42 @@ var APP_VERSION = '0.4.3';
   /* ── 待办速记（v0.4.1：删除改为软删除，可恢复）───────────── */
   function quickTodoRaw() { return (state.quickTodos || (state.quickTodos = [])); }
   function quickTodoList() { return liveOnly(quickTodoRaw()); }
+  /** 按 id 拿一条活着的速记 */
+  function quickTodoById(id) {
+    var all = quickTodoRaw();
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].id === id && !all[i].deletedAt) { return all[i]; }
+    }
+    return null;
+  }
+  /** 新建 / 修改一条速记（只传要改的字段；id 为空即新建） */
+  function quickTodoUpsert(patch) {
+    patch = patch || {};
+    var rec = patch.id ? quickTodoById(patch.id) : null;
+    if (!rec) {
+      rec = { id: uid(), text: '', done: false, at: new Date().toISOString() };
+      quickTodoRaw().push(rec);
+    }
+    if (patch.text != null) { rec.text = String(patch.text).slice(0, 200); }
+    if (patch.done != null) {
+      rec.done = !!patch.done;
+      rec.doneAt = rec.done ? new Date().toISOString() : null;
+    }
+    rec.updatedAt = new Date().toISOString();
+    save(true);
+    return rec;
+  }
+  /** 勾掉 / 找回一条速记（done 不传就取反） */
+  function quickTodoToggle(id, done) {
+    var rec = quickTodoById(id);
+    if (!rec) { return null; }
+    rec.done = (done == null) ? !rec.done : !!done;
+    rec.doneAt = rec.done ? new Date().toISOString() : null;
+    rec.updatedAt = new Date().toISOString();
+    save(true);
+    return rec;
+  }
+
   function quickTodoRemove(id) {
     var all = quickTodoRaw();
     for (var i = 0; i < all.length; i++) {
@@ -2689,7 +2725,7 @@ function todoLongList() { return todoDailyList(); }
    * 采用「字段级新者胜 + 冲突清单」策略。
    */
   var MERGE_TABLES = ['semesters', 'teachers', 'locations', 'courses', 'blocks', 'overrides', 'events',
-    'tasks', 'tasks2', 'longTasks', 'reminders'];
+    'tasks', 'tasks2', 'longTasks', 'reminders', 'quickTodos'];
   var REF_MAP_NAME = {
     semesters: 'semester', teachers: 'teacher', locations: 'location',
     courses: 'course', blocks: 'block', overrides: 'override'
@@ -2737,6 +2773,10 @@ function todoLongList() { return todoDailyList(); }
     }
       /* 统一任务：按「文字 + 创建日」配对 —— 跨设备不会把两条同名任务并成一条，
          同一条任务也不会因为本地改了颜色/计划而重复导入。 */
+      /* 速记：按文字配对（跨设备不会重复导入同一条） */
+      if (table === 'quickTodos') {
+        return ['q', normTaskText(rec.text)].join('|');
+      }
       if (table === 'tasks2') {
         var t2day = '';
         if (rec.createdAt) { t2day = String(rec.createdAt).slice(0, 10); }
@@ -3249,6 +3289,7 @@ function todoLongList() { return todoDailyList(); }
     emptyTrash: emptyTrash, liveOnly: liveOnly, courseList: courseList, stampOf: stampOf,
     pruneTrash: pruneTrash,
     quickTodoList: quickTodoList, quickTodoRemove: quickTodoRemove, quickTodoRaw: quickTodoRaw,
+  quickTodoById: quickTodoById, quickTodoUpsert: quickTodoUpsert, quickTodoToggle: quickTodoToggle,
     defaultPeriodTimes: defaultPeriodTimes, makePeriods: makePeriods
   };
 

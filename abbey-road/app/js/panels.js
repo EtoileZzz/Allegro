@@ -738,7 +738,7 @@ var AR = window.AR || (window.AR = {});
         panels: [panelWidgets] },
       { key: 'course', icon: '📚', label: '课程与课表', desc: '学期、关键时间点、作息、提醒',
         panels: [panelSchedule, panelKeyDates, panelNotify] },
-      { key: 'work', icon: '📝', label: '作业与日程', desc: '作业开关、任务、日程类型',
+      { key: 'work', icon: '📝', label: '作业与日程', desc: '作业开关、任务、速记、日程类型',
         quick: quickWork, panels: [panelWork, panelTasks] },
       { key: 'mine', icon: '🧩', label: '我的页面', desc: '模块自由组合',
         quick: quickMine, panels: [panelMine] },
@@ -1352,6 +1352,18 @@ var AR = window.AR || (window.AR = {});
       })(U.PALETTE[i]);
     }
     box.appendChild(sw);
+    /* 主题色也可以用色盘自由选（和课表编辑同一个取色器） */
+    var acCp = el('<button class="btn color-open" type="button" style="margin-top:10px">'
+      + '<span class="co-dot" style="background:' + (ap.accent || '#5B8DEF') + '"></span>打开色盘</button>');
+    acCp.addEventListener('click', function () {
+      AR.UI.openColorPicker(ap.accent || '#5B8DEF', function (hex) {
+        ap.accent = hex; AR.Store.save(true); AR.UI.applyTheme();
+        var d = acCp.querySelector('.co-dot'); if (d) { d.style.background = hex; }
+        for (var k3 = 0; k3 < sw.children.length; k3++) { sw.children[k3].classList.remove('active'); }
+        AR.UI.toast('主题色已设为 ' + hex);
+      });
+    });
+    box.appendChild(acCp);
     box.appendChild(el('<div class="field-label" style="margin-top:14px">质感模糊效果</div>'));
     box.appendChild(segmented([
       { label: '关闭', value: 'off' }, { label: '低', value: 'low' },
@@ -2269,6 +2281,18 @@ var AR = window.AR || (window.AR = {});
         AR.Store.save(true);
         AR.Bridge.haptic('light', $('settingsGrid'));
         refreshAll();
+      }));
+    /* ── 待办速记是否进今日日程（默认关，不动现有用户的今日页）── */
+    box.appendChild(el('<h3 class="set-sub">待办速记</h3>'));
+    var qt = (S.settings.schedule.quickTodo = S.settings.schedule.quickTodo || { inToday: false });
+    box.appendChild(rowSwitch('在今日日程显示待办速记',
+      '打开后「今日日程」底部会多一张速记卡，随手记的事不用切到「我的」',
+      qt.inToday === true, function (v) {
+        qt.inToday = v;
+        AR.Store.save(true);
+        AR.Bridge.haptic('light', $('settingsGrid'));
+        refreshAll();
+        AR.UI.toast(v ? '速记会显示在今日日程' : '今日日程不再显示速记');
       }));
     var modeSeg = el('<div class="segmented" id="hwMode" style="margin-top:6px"></div>');
     var modes = [
