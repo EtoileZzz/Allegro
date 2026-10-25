@@ -2,9 +2,9 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace AbbeyRoad
+namespace Allegro
 {
-    /// <summary>极简日志：写到 %LOCALAPPDATA%\Abbey Road\app.log，出问题时方便定位。</summary>
+    /// <summary>极简日志：写到 %LOCALAPPDATA%\Allegro\app.log，出问题时方便定位。</summary>
     internal static class Log
     {
         private static readonly object Gate = new object();

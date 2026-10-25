@@ -1,4 +1,4 @@
-package com.ganxing.abbeyroad;
+package com.etoilezzz.allegro;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -51,6 +51,15 @@ final class WidgetData {
     String nextPlace = "";
     String weekTotalText = "";
     int todayIdx = 0;            // 今天是一周里的第几天（1-7，0 = 不在本周）
+    /**
+     * v0.4.5（可选字段，网页还没传时都是 0 / 空）：
+     * 下一节课的起止时间戳（毫秒）与快照生成当天（"yyyy-MM-dd"）。
+     * 有了时间戳，卡片就能用 System.currentTimeMillis() 现算倒计时，
+     * 而不是永远显示网页 syncWidget 那一刻算好的「23 分钟后」。
+     */
+    long nextStartMs = 0L;
+    long nextEndMs = 0L;
+    String dayKey = "";
     final List<String> dates = new ArrayList<String>();
     final List<Row> today = new ArrayList<Row>();
     final List<Cell> week = new ArrayList<Cell>();
@@ -86,6 +95,12 @@ final class WidgetData {
         nextPlace = o.optString("nextPlace", "");
         weekTotalText = o.optString("weekTotalText", "");
         todayIdx = o.optInt("todayIdx", 0);
+        // 可选：网页以后会传；取不到就是 0 / 空，卡片退回静态文案（向后兼容）
+        nextStartMs = o.optLong("nextStartMs", 0L);
+        nextEndMs = o.optLong("nextEndMs", 0L);
+        dayKey = o.optString("dayKey", "");
+        // JSON null 在 org.json 里会变成字符串 "null"，按「没有」处理
+        if (dayKey == null || "null".equals(dayKey)) { dayKey = ""; }
 
         JSONArray ds = o.optJSONArray("dates");
         if (ds != null) {

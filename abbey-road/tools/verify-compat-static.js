@@ -152,8 +152,17 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C37 面板已导出给保存后局部刷新用', panels.indexOf('renderTaskList: renderTaskList') >= 0);
 
   /* 划动效果与「划掉」提示对齐作业 */
-  ok('C38 任务条目划动用 flyOut（与作业同款手感）',
-    /bindSwipeRow\(row, \{ flyOut: true, onCommit: function \(\) \{ tkPunch\(t\); \} \}\)/.test(ui));
+  /**
+   * v0.5 改：任务条目**不再 flyOut**。
+   * 已达标后再划会弹「再记一次」确认框（openModal 会过滤掉「取消」），
+   * 若先把行飞出去（opacity 0）再弹框，用户点 ✕/遮罩取消后没有任何 refresh，
+   * 这一行会永久停在不可见状态（仍占布局位）。所以改成先滑回原位再处置。
+   * 作业 / 速记条目没有这个二次确认，保持 flyOut 不变。
+   */
+  ok('C38 任务条目划动不 flyOut（二次确认前必须滑回原位）',
+    /bindSwipeRow\(row, \{ flyOut: false, onCommit: function \(\) \{ tkPunch\(t\); \} \}\)/.test(ui));
+  ok('C38b 作业与速记条目仍然 flyOut（划掉手感不变）',
+    (ui.match(/bindSwipeRow\(\w+, \{\s*flyOut: true,/g) || []).length >= 2);
   const tkHint = /(?:^|\n)\s*\.tk-hint \{[^}]*\}/.exec(css);
   const hwHint = /\.hw-swipe-hint \{[^}]*\}/.exec(css);
   ok('C39 「划掉」提示与作业同款（绝对定位右侧 + 主题色 + 平时透明）',
@@ -454,5 +463,111 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     panels9.indexOf('手动添加') >= 0);
 }
 
+/* ── C114+：v0.5 这一轮的契约（课前提醒真实现 / 宽屏设置 / 一批修复）──
+   这些断言的目的不是"代码长什么样"，而是钉住"功能真的接上了"，
+   因为上一轮的假功能就是"开关有、实现没有"，静态断言能防它复发。 */
+{
+  const root5 = path.join(__dirname, '..');
+  const idx5 = fs.readFileSync(path.join(appDir, 'index.html'), 'utf8');
+  const ui5 = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panels5 = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+  const bridge5 = fs.readFileSync(path.join(appDir, 'js/bridge.js'), 'utf8');
+  const css5 = fs.readFileSync(path.join(appDir, 'css/app.css'), 'utf8');
+  const remindJs = fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8');
+
+  /* 网页侧：提醒模块存在、在 ui.js 之前加载、桥已暴露 */
+  ok('C114 reminders.js 存在且在 ui.js 之前加载',
+    idx5.indexOf('js/reminders.js') >= 0 && idx5.indexOf('js/reminders.js') < idx5.indexOf('js/ui.js'));
+  ok('C115 桥暴露了 scheduleReminders / cancelReminders / requestNotificationPermission',
+    bridge5.indexOf('scheduleReminders: scheduleReminders') >= 0 &&
+    bridge5.indexOf('cancelReminders: cancelReminders') >= 0 &&
+    bridge5.indexOf('requestNotificationPermission: requestNotificationPermission') >= 0);
+  ok('C116 AR.Reminders 会算出提醒并整批下发（含 7 天范围与去抖）',
+    remindJs.indexOf('AR.Reminders') >= 0 && remindJs.indexOf('scheduleReminders') >= 0 &&
+    /DAYS_AHEAD\s*=\s*7/.test(remindJs) && remindJs.indexOf('setTimeout') >= 0);
+  ok('C117 设置页开关真的排/取消提醒（不再是只写布尔）',
+    panels5.indexOf('AR.Reminders.enable()') >= 0 && panels5.indexOf('AR.Reminders.cancel()') >= 0);
+  ok('C118 「修改提醒」与回前台都会重排',
+    ui5.indexOf('AR.Reminders.enable()') >= 0 && ui5.indexOf('AR.Reminders.sync()') >= 0);
+  /* Android 侧：通知渠道/闹钟/权限请求必须真的存在。
+     分工：渠道与发通知在 ReminderReceiver，AlarmManager 排程在 ReminderScheduler。 */
+  const schedPath = path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderScheduler.java');
+  const recvPath = path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderReceiver.java');
+  const hasSched = fs.existsSync(schedPath);
+  const hasRecv = fs.existsSync(recvPath);
+  const schedSrc = hasSched ? fs.readFileSync(schedPath, 'utf8') : '';
+  const recvSrc = hasRecv ? fs.readFileSync(recvPath, 'utf8') : '';
+  const bothAndroid = schedSrc + recvSrc;
+  ok('C119 Android 侧真的有通知实现（渠道 + AlarmManager + receiver）',
+    hasSched && hasRecv &&
+    bothAndroid.indexOf('NotificationChannel') >= 0 &&
+    bothAndroid.indexOf('class_reminders') >= 0 &&
+    bothAndroid.indexOf('AlarmManager') >= 0 &&
+    recvSrc.indexOf('BroadcastReceiver') >= 0 &&
+    schedSrc.indexOf('setExactAndAllowWhileIdle') >= 0);
+
+  /* 宽屏设置页：不再被多列网格拆成左右两半 */
+  ok('C120 设置页根栅格改成单列（不再 auto-fill 拆栏）',
+    /\.settings-body \.settings-grid \{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(css5));
+  ok('C121 宽屏断点存在且放宽了设置页宽度',
+    /@media \(min-width: 900px\)/.test(css5) && /\.settings-body \{[^}]*max-width:\s*11\d\dpx/.test(css5));
+  ok('C122 .settings-nav 死规则已清掉（只在注释里）',
+    !/(?:^|\n)\s*\.settings-nav\s*\{/.test(css5));
+
+  /* 其余本轮修复的静态契约 */
+  ok('C123 :focus-visible 不再改元素圆角',
+    !/:focus-visible \{[^}]*border-radius/.test(css5));
+  ok('C124 搜索命中行用专用 .hit-go（不再复用 .set-cat-go）',
+    css5.indexOf('.hit-go') >= 0 && panels5.indexOf('class="set-cat-go"') < 0 ||
+    (css5.indexOf('.hit-go') >= 0 && panels5.indexOf('hit-go') >= 0));
+  ok('C125 暗色 + 流畅模式下贡献图不再被 !important 刷成亮色',
+    !/body\[data-perf\] \.tk-gh-cell[^{]*\{[^}]*!important/.test(css5));
+
+  /* ── 云同步（v0.4.6）───────────────────────────────────────── */
+  const syncSrc = fs.readFileSync(path.join(appDir, 'js/sync.js'), 'utf8');
+  const coreSync = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  const htmlSync = fs.readFileSync(path.join(appDir, 'index.html'), 'utf8');
+  const uiSync = fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8');
+  const panelsSync = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+  const workerSrc = fs.readFileSync(path.join(root5, 'tools/cloudflare/worker.js'), 'utf8');
+
+  ok('C130 sync.js 在 ui.js 之前加载', htmlSync.indexOf('js/sync.js') > 0
+    && htmlSync.indexOf('js/sync.js') < htmlSync.indexOf('js/ui.js'));
+  ok('C131 设置页注册了「云同步」面板', panelsSync.indexOf('panelSync, panelCloudSync, panelIntegration') >= 0);
+  ok('C132 本地存盘后会通知同步（core.save 挂钩）', coreSync.indexOf('AR.Sync.onLocalSave') >= 0);
+  ok('C133 回到前台会按频率自动同步', uiSync.indexOf('AR.Sync.maybeAuto') >= 0);
+  ok('C134 合并过程有防递归闸门（applying）', syncSrc.indexOf('if (applying) { return; }') >= 0);
+  ok('C135 用 AES-256-GCM + PBKDF2 310k，且 AAD 绑版本号',
+    syncSrc.indexOf("name: 'AES-GCM'") >= 0
+    && syncSrc.indexOf('310000') >= 0
+    && syncSrc.indexOf("AAD_PREFIX + rev") >= 0);
+  ok('C136 服务端 CORS 白名单与 App 的 origin 一致（abbeyroad.local）',
+    workerSrc.indexOf("const ALLOWED_ORIGIN = 'https://abbeyroad.local'") >= 0
+    && fs.readFileSync(path.join(root5, 'windows/src/AppPaths.cs'), 'utf8').indexOf('abbeyroad.local') >= 0);
+  ok('C137 planMerge 已导出（同步要精确计数）', coreSync.indexOf('planMerge: planMerge') >= 0);
+  ok('C138 仓库地址正确（没有 Allegro----ScheduleApp 这种改名残留）',
+    panelsSync.indexOf('EtoileZzz/Allegro') >= 0 && panelsSync.indexOf('----ScheduleApp') < 0);
+  ok('C139 未连接时也能看到「自动同步」（两种状态都渲染）',
+    (panelsSync.match(/appendAutoSync\(\);/g) || []).length >= 2);
+  ok('C141 「数据与同步」的显式面板清单里包含云同步（否则永远不显示）',
+    panelsSync.indexOf('SYNC_PANELS = [panelSync, panelCloudSync') >= 0);
+  ok('C140 还没发过 Release（404）时不报「检查更新失败」',
+    panelsSync.indexOf('r.status === 404') >= 0 && panelsSync.indexOf('还没有发布过版本') >= 0);
+  /* 回收站必须收「统一任务」：删除任务走 softDelete('tasks2')，界面上承诺过可恢复 */
+  const core5 = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  ok('C126 回收站清单包含统一任务（tasks2）',
+    core5.indexOf("collect('tasks2', '任务'") >= 0);
+  const entsArrays = (core5.match(/var ents = \['events'[^\]]*\]/g) || []);
+  ok('C127 清空/按期限清理两张名单都含 tasks2',
+    entsArrays.length >= 2 && entsArrays.every((a) => a.indexOf("'tasks2'") >= 0),
+    '实际 ' + entsArrays.length + ' 处：' + entsArrays.join(' | ').slice(0, 120));
+  ok('C128 打卡记录能单独恢复（restore 支持 taskEntries）',
+    core5.indexOf("entity === 'taskEntries'") >= 0);
+  ok('C129 大资源走流式（不再把每个资源整读进内存）',
+    fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/MainActivity.java'), 'utf8')
+      .indexOf('getAssets().openFd') >= 0);
+}
+
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exitCode = fail ? 1 : 0;
+

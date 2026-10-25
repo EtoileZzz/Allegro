@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.ganxing.abbeyroad"
-    android:versionCode="60"
-    android:versionName="0.4.4">
+    package="com.etoilezzz.allegro"
+    android:versionCode="64"
+    android:versionName="0.4.8">
 
     <!-- 震动反馈：重要操作触发 -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -12,6 +12,8 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- Android 13+ 通知权限（提醒功能） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 课前提醒：允许排「精确闹钟」。Android 12+ 没有这个授权时退化为非精确（不崩、不静默不排） -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <uses-sdk
         android:minSdkVersion="26"
@@ -94,6 +96,11 @@
                 <data android:scheme="content" android:mimeType="application/octet-stream" android:pathPattern=".*\\.json" />
             </intent-filter>
         </activity>
+
+        <!-- ── 课前提醒：AlarmManager 到点后由这里发通知 ─────────── -->
+        <receiver
+            android:name=".ReminderReceiver"
+            android:exported="false" />
 
         <!-- ── 桌面卡片（5 种样式）─────────────────────────────── -->
         <receiver

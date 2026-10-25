@@ -1,4 +1,4 @@
-Abbey Road · 课表与日程  v0.4.1b
+Allegro · 课表与日程  v0.4.8
 ====================================
 
 这是什么
@@ -7,7 +7,7 @@ Abbey Road · 课表与日程  v0.4.1b
   在另一台设备导入」来同步。
 
 怎么用
-  1. 双击 AbbeyRoad.exe 启动。
+  1. 双击 Allegro.exe 启动。
   2. 首次启动有 6 步引导，跟着走一遍即可。
   3. 想导入课表：打开「导入」页 →「复制提示词」→ 粘贴到 DeepSeek / 豆包
      并附上课表截图 → 把 AI 的回复粘回「粘贴 AI 结果」→ 应用。
@@ -15,14 +15,19 @@ Abbey Road · 课表与日程  v0.4.1b
      在手机的「导入 → JSON 同步」里选择该文件。
 
 文件说明
-  AbbeyRoad.exe               主程序（界面资源已打包在里面）
+  Allegro.exe               主程序（界面资源已打包在里面）
   WebView2Loader.dll          WebView2 加载器（系统自带 WebView2 运行时）
   Microsoft.Web.WebView2.*.dll WebView2 托管库
   abbeyroad.ico               图标
   README.txt                  本文件
 
 数据位置
-  %LOCALAPPDATA%\Abbey Road\      （浏览器数据与解压出来的界面资源）
+  %LOCALAPPDATA%\Allegro\      （浏览器数据与解压出来的界面资源）
+
+  以前用过旧名字版本（Abbey Road）的话，数据在
+  %LOCALAPPDATA%\Abbey Road\ 里，全新安装的 Allegro 不会自动读它。
+  迁移办法：先用旧版「设置 → 数据与同步 → 导出备份」存一个 JSON，
+  再在 Allegro 里「设置 → 数据与同步 → 导入」选那个文件即可。
 
 卸载
   从「设置 → 应用」里卸载，或再次运行安装器点「卸载」。

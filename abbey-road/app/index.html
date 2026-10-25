@@ -6,9 +6,9 @@
      双指捏合仍然会让整个界面被放大，这里再从 viewport 上关掉一次。 -->
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>Abbey Road · 课表与日程</title>
-<link rel="stylesheet" href="css/tokens.css?v=0.4.4">
-<link rel="stylesheet" href="css/app.css?v=0.4.4">
+<title>Allegro · 课表与日程</title>
+<link rel="stylesheet" href="css/tokens.css?v=0.4.8">
+<link rel="stylesheet" href="css/app.css?v=0.4.8">
 </head>
 <body data-theme="light" data-platform="web" data-preset="dual-horizontal" data-focus="off">
 
@@ -24,8 +24,8 @@
   <!-- ── 左侧 Rail（Windows / 宽屏） ───────────────────────────── -->
   <aside class="rail glass" id="rail">
     <div class="brand">
-      <span class="brand-mark" aria-label="Abbey Road"></span>
-      <span class="brand-text">Abbey Road</span>
+      <span class="brand-mark" aria-label="Allegro"></span>
+      <span class="brand-text">Allegro</span>
     </div>
     <nav class="rail-nav" id="railNav">
       <button class="nav-btn" data-nav="today" type="button"><i class="ico ico-today"></i><span>今日</span></button>
@@ -380,17 +380,20 @@
 
 <div class="toast-host" id="toastHost"></div>
 
-<script src="js/core.js?v=0.4.4"></script>
-<script src="js/mdparse.js?v=0.4.4"></script>
-  <script src="js/bridge.js?v=0.4.4"></script>
+<script src="js/core.js?v=0.4.8"></script>
+<script src="js/mdparse.js?v=0.4.8"></script>
+  <script src="js/bridge.js?v=0.4.8"></script>
   <!-- 过渡动画注册表：ui.js 里的所有动效都从这里取参数（开发者模式可换样式） -->
-  <script src="js/motion.js?v=0.4.4"></script>
+  <script src="js/motion.js?v=0.4.8"></script>
   <!-- 课程配色：按文理/公共/体育/水课分色系（设置里可一键应用） -->
-  <script src="js/palette.js?v=0.4.4"></script>
-  <script src="js/ui.js?v=0.4.4"></script>
-<script src="js/widgetdata.js?v=0.4.4"></script>
-<script src="js/configio.js?v=0.4.4"></script>
-<script src="js/panels.js?v=0.4.4"></script>
-<script src="js/boot.js?v=0.4.4"></script>
+  <script src="js/palette.js?v=0.4.8"></script>
+  <!-- 课前提醒：算出要排的提醒并整批交给原生（只有 Android 会真的响） -->
+  <script src="js/reminders.js?v=0.4.8"></script>
+<script src="js/sync.js?v=0.4.8"></script>
+  <script src="js/ui.js?v=0.4.8"></script>
+<script src="js/widgetdata.js?v=0.4.8"></script>
+<script src="js/configio.js?v=0.4.8"></script>
+<script src="js/panels.js?v=0.4.8"></script>
+<script src="js/boot.js?v=0.4.8"></script>
 </body>
 </html>

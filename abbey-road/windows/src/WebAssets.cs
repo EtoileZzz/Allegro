@@ -3,7 +3,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 
-namespace AbbeyRoad
+namespace Allegro
 {
     /// <summary>
     /// 界面资源打包在 EXE 里（web.zip 资源），首次运行解压到本机目录，

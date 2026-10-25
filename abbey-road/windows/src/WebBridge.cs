@@ -8,7 +8,7 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 
-namespace AbbeyRoad
+namespace Allegro
 {
     /// <summary>
     /// 网页 ↔ 原生 的桥。协议与 android/MainActivity.java 完全一致：
@@ -19,6 +19,12 @@ namespace AbbeyRoad
         private readonly MainForm _form;
         private readonly CoreWebView2 _core;
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
+
+        /// <summary>
+        /// 导入文本的大小上限。ImportText 是同步整读，用户误选 2GB 的 txt
+        /// 会直接把内存吃光、界面卡死，所以先看文件大小再决定读不读。
+        /// </summary>
+        private const long MaxImportBytes = 8L * 1024 * 1024;
 
         public WebBridge(MainForm form, CoreWebView2 core)
         {
@@ -156,7 +162,7 @@ namespace AbbeyRoad
             StringBuilder sb = new StringBuilder();
             sb.Append("BEGIN:VCALENDAR\r\n");
             sb.Append("VERSION:2.0\r\n");
-            sb.Append("PRODID:-//Abbey Road//Schedule//CN\r\n");
+            sb.Append("PRODID:-//Allegro//Schedule//CN\r\n");
             sb.Append("CALSCALE:GREGORIAN\r\n");
             sb.Append("BEGIN:VEVENT\r\n");
             sb.Append("UID:").Append(Guid.NewGuid().ToString("N")).Append("@abbeyroad\r\n");
@@ -171,7 +177,7 @@ namespace AbbeyRoad
             sb.Append("END:VEVENT\r\nEND:VCALENDAR\r\n");
 
             string path = Path.Combine(Path.GetTempPath(),
-                "AbbeyRoad-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".ics");
+                "Allegro-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".ics");
             File.WriteAllText(path, sb.ToString(), new UTF8Encoding(false));
             Shell(path);
             return "ics";
@@ -181,8 +187,8 @@ namespace AbbeyRoad
         {
             using (SaveFileDialog dlg = new SaveFileDialog())
             {
-                dlg.Title = "导出 Abbey Road 数据";
-                dlg.FileName = string.IsNullOrEmpty(fileName) ? "AbbeyRoad-backup.json" : fileName;
+                dlg.Title = "导出 Allegro 数据";
+                dlg.FileName = SafeFileName(fileName);
                 dlg.Filter = (mime != null && mime.IndexOf("json", StringComparison.OrdinalIgnoreCase) >= 0)
                     ? "JSON 配置 (*.json)|*.json|所有文件 (*.*)|*.*"
                     : "文本文件 (*.md;*.txt)|*.md;*.txt|所有文件 (*.*)|*.*";
@@ -200,16 +206,34 @@ namespace AbbeyRoad
         {
             using (OpenFileDialog dlg = new OpenFileDialog())
             {
-                dlg.Title = "导入 Abbey Road 数据";
+                dlg.Title = "导入 Allegro 数据";
                 dlg.Filter = "课表与配置 (*.json;*.md;*.txt)|*.json;*.md;*.txt|所有文件 (*.*)|*.*";
                 if (dlg.ShowDialog(_form) != DialogResult.OK) { return "cancelled"; }
-                string text = File.ReadAllText(dlg.FileName, Encoding.UTF8);
-                Dictionary<string, object> payload = new Dictionary<string, object>();
-                payload["event"] = "fileText";
-                payload["text"] = text;
-                payload["name"] = Path.GetFileName(dlg.FileName);
-                Post(payload);
-                return dlg.FileName;
+                try
+                {
+                    // 先预检大小再读：File.ReadAllText 会把整个文件读进内存，
+                    // 用户误选一个几百 MB / 2GB 的 txt 就会 OOM 或长时间卡住界面。
+                    FileInfo fi = new FileInfo(dlg.FileName);
+                    if (!fi.Exists) { return "文件不存在：" + dlg.FileName; }
+                    if (fi.Length > MaxImportBytes)
+                    {
+                        return "文件太大（" + (fi.Length / 1048576.0).ToString("0.#")
+                            + " MB），最多支持 8 MB；请先精简后再导入。";
+                    }
+                    string text = File.ReadAllText(dlg.FileName, Encoding.UTF8);
+                    Dictionary<string, object> payload = new Dictionary<string, object>();
+                    payload["event"] = "fileText";
+                    payload["text"] = text;
+                    payload["name"] = Path.GetFileName(dlg.FileName);
+                    Post(payload);
+                    return dlg.FileName;
+                }
+                catch (Exception ex)
+                {
+                    // 读失败（文件被占用、权限不足等）也只回一个错误串，
+                    // 不往上抛：Dispatch 的 catch 会转成 error 回包，网页侧没人接就是静默失败。
+                    return "读取失败：" + ex.Message;
+                }
             }
         }
 
@@ -220,14 +244,23 @@ namespace AbbeyRoad
         /// </summary>
         private string ShareFile(string fileName, string content, string title)
         {
-            string name = string.IsNullOrEmpty(fileName) ? "AbbeyRoad-backup.json" : fileName;
+            string name = SafeFileName(fileName);
             string savedPath = null;
             try
             {
                 string dir = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
                 Directory.CreateDirectory(dir);
-                savedPath = Path.Combine(dir, name);
+                string dirFull = Path.GetFullPath(dir);
+                string full = Path.GetFullPath(Path.Combine(dirFull, name));
+                // 双保险：SafeFileName 已经去掉分隔符和 ..，这里再确认落点确实在「下载」之内，
+                // 绝不允许 JS 传来的名字把文件写到 Downloads 之外。
+                if (!full.StartsWith(dirFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    name = "Allegro-backup.json";
+                    full = Path.Combine(dirFull, name);
+                }
+                savedPath = full;
                 File.WriteAllText(savedPath, content, new UTF8Encoding(false));
             }
             catch (Exception)
@@ -243,7 +276,51 @@ namespace AbbeyRoad
         }
 
         /// <summary>
-        /// 列出「下载」目录里 App 导出的配置文件（AbbeyRoad*.json），
+        /// 把网页传来的文件名变成安全的「单段文件名」：
+        ///   1) 只取最后一段（去掉 \ / 与 .. 构成的路径穿越）；
+        ///   2) 去掉 Path.GetInvalidFileNameChars() 与控制字符；
+        ///   3) 去掉残留的 ".." 和 Windows 不接受的结尾点 / 空格；
+        ///   4) 限长 120 字符（尽量保留扩展名）；
+        ///   5) 洗空了就退回备份文件名。
+        /// </summary>
+        private static string SafeFileName(string name)
+        {
+            const string fallback = "Allegro-backup.json";
+            if (string.IsNullOrEmpty(name)) { return fallback; }
+
+            // 统一分隔符后只保留最后一段："..\..\Windows\x.json" → "x.json"
+            string s = name.Trim().Replace('\\', '/');
+            int slash = s.LastIndexOf('/');
+            if (slash >= 0) { s = s.Substring(slash + 1); }
+
+            char[] invalid = Path.GetInvalidFileNameChars();
+            StringBuilder sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c < ' ') { continue; }
+                if (Array.IndexOf(invalid, c) >= 0) { continue; }
+                sb.Append(c);
+            }
+            s = sb.ToString().Replace("..", "").Trim().Trim('.', ' ');
+
+            if (s.Length > 120)
+            {
+                string ext = Path.GetExtension(s);
+                if (ext.Length > 0 && ext.Length < 20)
+                {
+                    s = s.Substring(0, 120 - ext.Length).TrimEnd('.', ' ') + ext;
+                }
+                else
+                {
+                    s = s.Substring(0, 120).TrimEnd('.', ' ');
+                }
+            }
+            return s.Length == 0 ? fallback : s;
+        }
+
+        /// <summary>
+        /// 列出「下载」目录里 App 导出的配置文件（Allegro*.json），
         /// 给网页一份可以直接点的清单，省得每次都在文件对话框里翻。
         /// 返回 JSON 数组：[{name, uri(这里就是完整路径), size, modified}]
         /// </summary>
@@ -256,7 +333,15 @@ namespace AbbeyRoad
                     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
                 if (Directory.Exists(dir))
                 {
-                    string[] files = Directory.GetFiles(dir, "AbbeyRoad*.json");
+                    /**
+                     * 两套前缀都收：新版导出的是 Allegro-backup-*.json，
+                     * 但改名之前用户导出的老备份叫 AbbeyRoad-backup-*.json ——
+                     * 换名字以后还得能把它们列出来一键导入，否则迁移就断了。
+                     */
+                    List<string> all = new List<string>();
+                    all.AddRange(Directory.GetFiles(dir, "Allegro*.json"));
+                    all.AddRange(Directory.GetFiles(dir, "AbbeyRoad*.json"));
+                    string[] files = all.ToArray();
                     Array.Sort(files);
                     Array.Reverse(files);   // 名字里带时间戳，倒序就是最新的在前
                     for (int i = 0; i < files.Length && i < 30; i++)
@@ -281,6 +366,10 @@ namespace AbbeyRoad
             try
             {
                 if (string.IsNullOrEmpty(path) || !File.Exists(path)) { return ""; }
+                // 和 ImportText 同一个上限：这条是「从导出目录再导入」的路径，
+                // 也是整读进内存，同样会 OOM。抽出去和 ImportText 共用一份常量。
+                FileInfo fi = new FileInfo(path);
+                if (fi.Length > MaxImportBytes) { return ""; }
                 return File.ReadAllText(path, Encoding.UTF8);
             }
             catch (Exception) { return ""; }

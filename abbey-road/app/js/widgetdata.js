@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 桌面卡片数据
+   Allegro · 桌面卡片数据
 
    网页是唯一真源：这里把「今天 / 本周 / 下一节课」渲染成一份快照，
    交给原生外壳（Android 桌面小组件读它；Windows 端可以忽略）。
@@ -73,6 +73,20 @@
     var a = plain(item.start), b = plain(item.end);
     if (a && b) { return a + ' – ' + b; }
     return item.periodLabel || '时间待定';
+  }
+
+  /**
+   * 'HH:MM' + 某天 → epoch 毫秒。
+   * 小组件那边要拿它自己算「N 分钟后 / 进行中」，不能只吃网页算好的静态字符串
+   * （否则 30 分钟才刷新一次的小组件会一直显示「23 分钟后」）。
+   * 解析不出来返回 0，原生侧见到 0 会退回旧的静态文案。
+   */
+  function msOf(day, hm) {
+    if (!day || !hm) { return 0; }
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(hm));
+    if (!m) { return 0; }
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate(),
+      Number(m[1]), Number(m[2]), 0, 0).getTime();
   }
 
   function buildPayload() {
@@ -159,6 +173,10 @@
         payload.nextName = item.course.name;
         payload.nextTime = rangeText(item) + (item.periodLabel ? ' · ' + item.periodLabel : '');
         payload.nextPlace = item.location ? item.location.raw : '';
+        // 给小组件自己算倒计时用（0 = 解析不出来，原生侧会退回上面的静态文案）
+        payload.nextStartMs = msOf(target.day, item.start);
+        payload.nextEndMs = msOf(target.day, item.end);
+        payload.dayKey = U.dateKey(now);
         if (target.ongoing) {
           payload.nextIn = item.end ? ('到 ' + plain(item.end)) : '';
         } else if (target.offsetDays === 0) {

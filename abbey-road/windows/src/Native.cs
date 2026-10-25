@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace AbbeyRoad
+namespace Allegro
 {
     /// <summary>
     /// 原生窗口外观：Win11 用 Mica/Acrylic 系统背景，Win10 用亚克力模糊，

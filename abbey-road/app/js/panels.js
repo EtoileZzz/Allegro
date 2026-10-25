@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 面板
+   Allegro · 面板
    导入页（提示词 / Markdown 解析与修正 / JSON 同步）、
    设置页（8 个分类，含布局滑块实时预览）、首次启动引导
    ────────────────────────────────────────────────────────────── */
@@ -163,7 +163,7 @@ var AR = window.AR || (window.AR = {});
     var end = $('manPeriodEnd').value || start;
     if (Number(end) < Number(start)) { var tmp = start; start = end; end = tmp; }
     var sem = AR.Store.currentSemester();
-    var lines = ['AbbeyRoad 课表 v1', '开学日期：' + ((sem && sem.startDate) || '?')];
+    var lines = ['Allegro 课表 v1', '开学日期：' + ((sem && sem.startDate) || '?')];
     lines.push([name, $('manWeekday').value || '周一', start + '-' + end,
       ($('manWeeks').value || '全周'), ($('manPlace').value || ''), ($('manTeacher').value || ''),
       ($('manNote').value || ''), ($('manColor').value || '')].join('｜'));
@@ -223,7 +223,7 @@ var AR = window.AR || (window.AR = {});
     var sem = AR.Store.currentSemester();
     var p1 = Math.max(1, Number(f.p1) || 1);
     var p2 = Math.max(p1, Number(f.p2) || p1);
-    var lines = ['AbbeyRoad 课表 v1', '开学日期：' + ((sem && sem.startDate) || '?')];
+    var lines = ['Allegro 课表 v1', '开学日期：' + ((sem && sem.startDate) || '?')];
     lines.push([String(f.name || '').trim(), U.WEEKDAY_NAMES[f.weekday] || '周一', p1 + '-' + p2,
       (f.weeks || '全周'), f.place || '', f.teacher || '', f.note || '', f.color || ''].join('｜'));
     var parsed = AR.MdParse.parse(lines.join('\n'), importOptions());
@@ -264,7 +264,7 @@ var AR = window.AR || (window.AR = {});
     });
     $('btnSharePrompt').addEventListener('click', function () {
       AR.Bridge.haptic('medium', $('btnSharePrompt'));
-      AR.Bridge.share('Abbey Road 课表整理提示词', AR.Prompt.text);
+      AR.Bridge.share('Allegro 课表整理提示词', AR.Prompt.text);
     });
 
     var mdInput = $('mdInput');
@@ -526,7 +526,7 @@ var AR = window.AR || (window.AR = {});
 
   /** 把解析结果重新序列化成 MD-1 文本（修正字段后回写用） */
   function serializeParsed(p) {
-    var lines = ['# Abbey Road 课表导入', '', '<!-- abbeyroad-import: v1 -->', ''];
+    var lines = ['# Allegro 课表导入', '', '<!-- abbeyroad-import: v1 -->', ''];
     lines.push('## 学期');
     lines.push('| 学期名称 | 开始日期 | 总周数 |');
     lines.push('| --- | --- | --- |');
@@ -598,23 +598,49 @@ var AR = window.AR || (window.AR = {});
 
     refreshAll();
 
-    // 规划文档 Q4：导入后要求用户设置学期与节次
-    var sem = AR.Store.currentSemester();
+    /**
+     * 规划文档 Q4：导入后要求用户设置学期与节次。
+     *
+     * 注意 AR.UI.openModal 是**单卡槽**（ui.js 里先 card.innerHTML='' 再
+     * modalStack.length=0），不是弹窗栈：连续 openModal 两次，第二张会瞬间
+     * 顶掉第一张，第一张的「保存」回调永远不执行 —— 开学日期 / 节次存不进去，
+     * 「现在是第几周」从此全错。
+     * openModal 也**没有 onClose 回调**可挂（只有 actions 的 onClick），
+     * 所以这里不走"先开 A、关掉再开 B"的串行化，而是把连堂建议
+     * **并入同一个弹窗作为第二部分**：一次只开一张卡，两个提示都看得到，
+     * 保存回调也一定活着。没有学期要设置时，才单独弹建议。
+     */
     var needSetup = !p.semester || !p.semester.startDate || !p.periods.length;
-    if (needSetup) { openSemesterSetup(); }
-
-    // 连堂建议（部分匹配）
-    if (entities.suggestions && entities.suggestions.length) {
-      var body = '<p class="panel-sub">下面是「相邻节次但周次不同」的组合，确认后可合并为连堂课。</p>';
-      for (var i = 0; i < entities.suggestions.length; i++) {
-        body += '<div class="list-item"><span class="msg">' + esc(entities.suggestions[i].message) + '</span></div>';
-      }
-      AR.UI.openModal({ title: '连堂课建议', sub: '共 ' + entities.suggestions.length + ' 组', body: body, actions: [{ label: '知道了', kind: 'primary', onClick: function (c) { c(); } }] });
-    }
+    var tips = (entities.suggestions && entities.suggestions.length) ? entities.suggestions : null;
+    if (needSetup) { openSemesterSetup(tips); }
+    else if (tips) { openConsecutiveTips(tips); }
   }
 
-  /** 学期与节次设置（导入后弹出；对应 Q4 的决定） */
-  function openSemesterSetup() {
+  /** 连堂建议（部分匹配）—— 独立弹窗：只在"不需要补学期/节次"时单独出现 */
+  function openConsecutiveTips(list) {
+    AR.UI.openModal({
+      title: '连堂课建议',
+      sub: '共 ' + list.length + ' 组',
+      body: consecutiveTipsHtml(list),
+      actions: [{ label: '知道了', kind: 'primary', onClick: function (c) { c(); } }]
+    });
+  }
+
+  /** 连堂建议的正文（并入学期弹窗时也复用这一份） */
+  function consecutiveTipsHtml(list) {
+    var html = '<p class="panel-sub">下面是「相邻节次但周次不同」的组合，确认后可合并为连堂课。</p>';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="list-item"><span class="msg">' + esc(list[i].message) + '</span></div>';
+    }
+    return html;
+  }
+
+  /**
+   * 学期与节次设置（导入后弹出；对应 Q4 的决定）。
+   * tips 有值时，把「连堂课建议」作为同一张卡的第二部分附在下方 —— 见 applyMd
+   * 上方关于单卡槽弹窗的说明（不能连开两个 modal）。
+   */
+  function openSemesterSetup(tips) {
     ensure();
     var sem = AR.Store.currentSemester();
     var periods = AR.Store.periodsOf(sem.id);
@@ -639,9 +665,16 @@ var AR = window.AR || (window.AR = {});
         + '<input class="input input-sm" data-f="end" value="' + esc(p.end) + '">'
         + '<div></div></div>'));
     }
+    // 连堂建议并入同一张卡（不能另开弹窗：openModal 是单卡槽，会顶掉本弹窗）
+    if (tips && tips.length) {
+      body.appendChild(el('<div class="set-tips" style="margin-top:16px">'
+        + '<label class="field-label">连堂课建议（' + tips.length + ' 组，确认后可合并）</label>'
+        + consecutiveTipsHtml(tips) + '</div>'));
+    }
     AR.UI.openModal({
       title: '学期与节次设置',
-      sub: '导入完成，确认这两项后「当前第几周」和上课时间才准确',
+      sub: '导入完成，确认这两项后「当前第几周」和上课时间才准确'
+        + (tips && tips.length ? ' · 下方另附 ' + tips.length + ' 组连堂课建议' : ''),
       body: body,
       actions: [
         { label: '稍后设置', onClick: function (c) { c(); } },
@@ -728,6 +761,7 @@ var AR = window.AR || (window.AR = {});
   var syncTab = 'sync';        // 「数据与同步」二级页的页内标签
   var settingsSearchQ = '';
   var pendingHighlight = '';
+  var searchTimer = null;      // 设置搜索的 200ms 防抖（见 settingsSearchBox）
 
   /** 分类列表：固定的 7 个 + 开发者模式开启时追加 1 个独立分类（无高频项） */
   function settingsCats() {
@@ -743,7 +777,7 @@ var AR = window.AR || (window.AR = {});
       { key: 'mine', icon: '🧩', label: '我的页面', desc: '模块自由组合',
         quick: quickMine, panels: [panelMine] },
       { key: 'syncdata', icon: '💾', label: '数据与同步', desc: '导入、系统集成、备份与清空',
-        quick: quickData, panels: [panelSync, panelIntegration, panelData] },
+        quick: quickData, panels: [panelSync, panelCloudSync, panelIntegration, panelData] },
       { key: 'about', icon: 'ℹ️', label: '关于与帮助', desc: '版本、引导、反馈',
         quick: quickAbout, panels: [panelAbout] }
     ];
@@ -857,7 +891,16 @@ var AR = window.AR || (window.AR = {});
     var n = S.settings.notifications;
     var row = el('<div class="q-row"></div>');
     row.appendChild(qItem('课前提醒', qSwitch(n.enabled, function (v) {
-      n.enabled = v; AR.Store.save(true);
+      n.enabled = v;
+      AR.Store.save(true);
+      /**
+       * v0.5：以前这里只存了个布尔 —— Android 侧没有任何通知代码，
+       * 开关打开也不会响（假功能）。现在真的排 / 取消系统闹钟，
+       * 打开时顺便（首次）请求通知权限。
+       */
+      try {
+        if (AR.Reminders) { v ? AR.Reminders.enable() : AR.Reminders.cancel(); }
+      } catch (e) { }
     })));
     var val = n.defaultOffset || 15;
     var step = el('<div class="q-step"></div>');
@@ -869,6 +912,8 @@ var AR = window.AR || (window.AR = {});
       valEl.querySelector('b').textContent = val;
       n.defaultOffset = val;
       AR.Store.save();
+      // 提前量变了要重排（reminders.js 内部有 600ms 去抖，连点只排一次）
+      try { if (AR.Reminders) { AR.Reminders.sync(); } } catch (e) { }
     };
     minus.addEventListener('click', function () { bump(-5); AR.Bridge.haptic('light', minus); });
     plus.addEventListener('click', function () { bump(5); AR.Bridge.haptic('light', plus); });
@@ -905,7 +950,10 @@ var AR = window.AR || (window.AR = {});
      默认**不自动检查**；打开后可以选每周 / 每月一次（启动时静默查）。
      网络不通时给一句提示 + 「打开下载页」兜底。 */
 
-  var REPO_API_LATEST = 'https://api.github.com/repos/EtoileZzz/AbbeyRoad----ScheduleApp/releases/latest';
+  /** 仓库地址：改名时被脚本连带改坏过一次（仓库名多了后缀，接口直接 404），这里固定在模块作用域，
+   *  checkUpdate 和「关于」面板共用，避免再出现「面板里 var 了、外面引用不到」的问题。 */
+  var REPO_URL = 'https://github.com/EtoileZzz/Allegro';
+  var REPO_API_LATEST = 'https://api.github.com/repos/EtoileZzz/Allegro/releases/latest';
 
   /** 版本号拆成 数字三段 + 尾字母（0.4.1a / 0.4.1beta 都认） */
   function verParts(v) {
@@ -961,9 +1009,16 @@ var AR = window.AR || (window.AR = {});
       cache: 'no-store',
       signal: ctrl ? ctrl.signal : undefined
     }).then(function (r) {
+      if (r.status === 404) {
+        // 新仓库还没发布过 Release：这不是故障，只是还没有版本
+        clearTimeout(timer);
+        if (manual) { AR.UI.toast('还没有发布过版本'); }
+        return null;
+      }
       if (!r.ok) { throw new Error('HTTP ' + r.status); }
       return r.json();
     }).then(function (j) {
+      if (j === null) { return; }
       clearTimeout(timer);
       st.lastAt = new Date().toISOString();
       AR.Store.save();
@@ -1008,7 +1063,20 @@ var AR = window.AR || (window.AR = {});
     var hits = el('<div class="set-hits" id="setHits"></div>');
     input.addEventListener('input', function (ev) {
       settingsSearchQ = ev.currentTarget.value;
-      paintSettingsHits(hits, settingsSearchQ);
+      if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+      /**
+       * 200ms 防抖：每敲一个字都会把 7 个分类的全部面板各构建一遍
+       * （只为读 textContent 找命中），不防抖在 WebView 里会明显掉帧。
+       * 清空输入要**立刻**出结果（回到空清单），不能让用户等 200ms。
+       */
+      if (!String(settingsSearchQ || '').trim()) {
+        paintSettingsHits(hits, '');
+        return;
+      }
+      searchTimer = setTimeout(function () {
+        searchTimer = null;
+        paintSettingsHits(hits, settingsSearchQ);
+      }, 200);
     });
     wrap.appendChild(input);
     wrap.appendChild(hits);
@@ -1047,15 +1115,21 @@ var AR = window.AR || (window.AR = {});
         var b = el('<button class="set-hit" type="button">'
           + '<span class="hit-cat">' + esc(hit.cat.icon + ' ' + hit.cat.label) + '</span>'
           + '<span class="hit-item">' + esc(hit.item) + '</span>'
-          + '<span class="set-cat-go">›</span></button>');
+          + '<span class="hit-go">›</span></button>');
         b.addEventListener('click', function () {
           pendingHighlight = hit.mode === 'item' ? hit.item : '';
           settingsSearchQ = '';
           settingsCat = hit.cat.key;
           AR.Bridge.haptic('light', b);
+          /**
+           * 先把旧页面的滚动位置清零，再渲染 —— 顺序不能反。
+           * 以前是「渲染（含 scrollIntoView）→ body.scrollTop = 0」，
+           * 等于把刚滚到视野中央的命中项又滚回顶部（搜索框在顶部，通常是 0），
+           * 用户看到的就是「点了搜索没反应」。见 renderSettings 里的 restoreScroll。
+           */
+          var bdOld = $('settingsBody');
+          if (bdOld) { bdOld.scrollTop = 0; }
           renderSettings();
-          var bd = $('settingsBody');
-          if (bd) { bd.scrollTop = 0; }
           playSettingsEnter();
         });
         host.appendChild(b);
@@ -1146,15 +1220,30 @@ var AR = window.AR || (window.AR = {});
     });
     grid.appendChild(bar);
     /**
-     * v0.4.1：「数据与同步」不再用顶部滑块切页内标签 ——
-     * 四个面板和别处一样从上到下平铺（导入与同步 / 系统集成 / 数据与备份 / 回收站）。
+     * v0.4.1：「数据与同步」不再用顶部滑块切页内标签 —— 各面板从上到下平铺。
+     * v0.4.6：这里以前是**硬编码**四个面板，导致新加的「云同步」怎么注册都不显示；
+     * 现在改成显式清单，加面板只改这一行（比 cat.panels 多一个「回收站」）。
      */
     if (cat.key === 'syncdata') {
       var host0 = el('<div class="set-detail" id="set-' + cat.key + '"></div>');
-      host0.appendChild(panelSync());
-      host0.appendChild(panelIntegration());
-      host0.appendChild(panelData());
-      host0.appendChild(panelTrash());
+      /**
+       * 诊断行（v0.4.8）：把「这份界面资源内部的版本号 + 面板数量」直接印在页面上。
+       * 换包排查时不用猜「装没装上」——这行文字就是运行时代码的指纹。
+       */
+      try {
+        host0.appendChild(el('<p class="muted" id="syncBuildMark">数据与同步 · 资源版本 v'
+          + esc(String(AR.Const.APP_VERSION)) + ' · 面板 ' + 5 + ' 个（含云同步）</p>'));
+      } catch (e) { }
+      var SYNC_PANELS = [panelSync, panelCloudSync, panelIntegration, panelData, panelTrash];
+      for (var q = 0; q < SYNC_PANELS.length; q++) {
+        try {
+          host0.appendChild(SYNC_PANELS[q]());
+        } catch (e) {
+          // 单个面板炸了不能让整页空白：写一行提示，把错误也带出来（便于用户回报）
+          host0.appendChild(el('<p class="muted" style="color:var(--danger)">面板 ' + q + ' 渲染失败：'
+            + esc(String(e && e.message ? e.message : e)) + '</p>'));
+        }
+      }
       grid.appendChild(host0);
     } else {
       var host = el('<div class="set-detail" id="set-' + cat.key + '"></div>');
@@ -1180,30 +1269,33 @@ var AR = window.AR || (window.AR = {});
     ensure();
     var grid = $('settingsGrid');
     if (!grid) { return; }
+    // 重渲染前把还挂着的搜索防抖收掉，别让它去画已经脱离文档的命中清单
+    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
     var body = $('settingsBody');
-    var keepScroll = (body && !settingsSearchQ) ? body.scrollTop : 0;
+    /**
+     * 搜索点进来时 pendingHighlight 非空：renderSettingsDetail 会把命中项
+     * scrollIntoView 到视野中央。这里必须**跳过滚动还原**，否则
+     * body.scrollTop = keepScroll（搜索框在顶部，通常≈0）会把命中项又滚出视野 ——
+     * 用户看到的就是「点了搜索没反应」。
+     */
+    var restoreScroll = !settingsSearchQ && !pendingHighlight;
+    var keepScroll = (body && restoreScroll) ? body.scrollTop : 0;
     grid.innerHTML = '';
     if (settingsCat) { renderSettingsDetail(grid); }
     else { renderSettingsHome(grid); }
     // 面板全部插进 DOM 之后再对齐分段控件的滑块
     if (AR.UI.enhanceSegmented) { AR.UI.enhanceSegmented(grid); }
     else if (AR.UI.syncSegments) { AR.UI.syncSegments(grid); }
-    // 局部重渲染也要保住滚动位置（不然拨个开关就跳回顶部）
-    if (body) { body.scrollTop = keepScroll; }
+    // 局部重渲染也要保住滚动位置（不然拨个开关就跳回顶部）；
+    // 但搜索跳转要保留 scrollIntoView 的结果，不能还原。
+    if (body && restoreScroll) { body.scrollTop = keepScroll; }
   }
 
-  var SETTINGS_SECTIONS = [
-    { key: 'prefs', label: '外观与布局', icon: '🎨' },
-    { key: 'widgets', label: '桌面卡片', icon: '▦' },
-    { key: 'course', label: '课程与课表', icon: '📚' },
-    { key: 'work', label: '作业与日程', icon: '📝' },
-    { key: 'mine', label: '我的页面', icon: '🧩' },
-    { key: 'syncdata', label: '数据与同步', icon: '💾' },
-    { key: 'about', label: '关于与帮助', icon: 'ℹ️' }
-  ];
-
-  /** v0.4.0：左侧分类栏去掉了 —— 设置只剩「首页分类列表 → 二级页 → 返回」这一条路 */
-  function renderSettingsNav() { /* 保留空实现，避免老调用点报错 */ }
+  /**
+   * v0.4.0：左侧分类栏已经删掉了 —— 设置只剩「分类首页 → 二级页 → 返回」这一条路。
+   * 原来的 SETTINGS_SECTIONS 常量（分类导航的数据源）和 renderSettingsNav()
+   * 空实现都一并删除：全仓库 grep 过，零调用点（index.html 里也没有 .settings-nav 节点）。
+   */
 
   /**
    * 开发者模式的总开关（**唯一入口**：长按底部导航的「设置」，800ms）。
@@ -1869,9 +1961,9 @@ var AR = window.AR || (window.AR = {});
     var tips = el('<div class="widget-tips">'
       + '<b>怎么加到桌面</b>'
       + '<ol class="steps"><li>回到手机桌面，长按空白处 → 选择「卡片 / 小组件」。</li>'
-      + '<li>在列表里找到 <b>Abbey Road</b>，就能看到上面这 5 种样式。</li>'
+      + '<li>在列表里找到 <b>Allegro</b>，就能看到上面这 5 种样式。</li>'
       + '<li>拖到桌面上即可；长按卡片还能调整大小（2×2 / 4×2 / 4×3 都支持）。</li></ol>'
-      + '<p class="muted">ColorOS / 一加：长按桌面空白处 → 左上角「+ 卡片」→ 找到 Abbey Road。'
+      + '<p class="muted">ColorOS / 一加：长按桌面空白处 → 左上角「+ 卡片」→ 找到 Allegro。'
       + '如果找不到，先随便打开一次 App（卡片数据会在打开时刷新）。</p></div>');
     box.appendChild(tips);
 
@@ -2857,6 +2949,214 @@ function renderLongTaskList(host) {
     return panel('导入与同步', box, 'sync');
   }
 
+  /* 5b · 云同步（端到端加密：服务端只见密文） */
+  function panelCloudSync() {
+    var box = el('<div></div>');
+    var synced = !!(AR.Sync && AR.Sync.isConfigured && AR.Sync.isConfigured());
+    var cfg = (AR.Sync && AR.Sync.config) ? AR.Sync.config() : { baseUrl: '', token: '', hasPass: false, autoMode: 'open', autoMin: 5, rememberPass: true };
+    var st = (AR.Sync && AR.Sync.status) ? AR.Sync.status() : {};
+
+    function fmtTime(ms) {
+      if (!ms) { return '还没同步过'; }
+      var d = new Date(ms);
+      function p2(n) { return n < 10 ? '0' + n : String(n); }
+      return (d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    }
+    function fmtSize(n) {
+      if (!n) { return '0 B'; }
+      return n > 1024 ? (Math.round(n / 1024) + ' KB') : (n + ' B');
+    }
+    /** 统一处理一次同步的返回/异常 */
+    function runSync(btn, kind) {
+      if (!AR.Sync) { AR.UI.toast('同步模块没加载'); return; }
+      var label = btn ? btn.textContent : '';
+      if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
+      var p = kind === 'pull' ? AR.Sync.pullOnly() : (kind === 'force' ? AR.Sync.overwriteCloud() : AR.Sync.syncNow());
+      p.then(function (r) {
+        var s = AR.Sync.status();
+        var msg = kind === 'pull' ? '已合并云端内容'
+          : ('同步完成 · 云端 rev ' + (r && r.rev ? r.rev : s.lastRev));
+        if (s.lastConflicts) { msg += ' · 冲突 ' + s.lastConflicts + ' 条（已存为本机副本）'; }
+        AR.UI.toast(msg);
+        renderSettings();
+      }).catch(function (e) {
+        if (btn) { btn.disabled = false; btn.textContent = label; }
+        var code = e && e.code;
+        if (code === 'BAD_PASSPHRASE') {
+          AR.UI.confirmDanger({
+            title: '口令对不上',
+            text: '要么口令输错了，要么云端那份数据不是用这个口令加密的。'
+              + '如果你确定口令没错（比如云端是别的设备用旧口令传的），可以用本机数据覆盖云端，云端旧数据会被替换。',
+            okLabel: '用本机覆盖云端',
+            onOk: function () { runSync(null, 'force'); }
+          });
+          return;
+        }
+        if (code === 'UNAUTHORIZED') { AR.UI.toast('令牌不对或已失效，请回去检查'); }
+        else if (code === 'TOO_LARGE') { AR.UI.toast('数据太大，服务器拒收'); }
+        else if (code === 'NETWORK') { AR.UI.toast('网络不通，稍后再试（本地数据不受影响）'); }
+        else { AR.UI.toast((e && e.message) ? e.message : '同步失败'); }
+      });
+    }
+
+    /** 自动同步（未连接时也能先选，连接后生效） */
+    function appendAutoSync() {
+      box.appendChild(el('<div class="field"><label class="field-label">自动同步</label></div>'));
+      var autoSel = el('<select class="input" id="syAuto">'
+        + '<option value="off"' + (cfg.autoMode === 'off' ? ' selected' : '') + '>关闭（只手动）</option>'
+        + '<option value="open"' + (cfg.autoMode !== 'off' && cfg.autoMode !== 'min' ? ' selected' : '') + '>每次打开 App 同步</option>'
+        + '<option value="min"' + (cfg.autoMode === 'min' ? ' selected' : '') + '>每隔几分钟同步</option>'
+        + '</select>');
+      box.appendChild(autoSel);
+      autoSel.addEventListener('change', function () {
+        AR.Sync.setConfig({ autoMode: autoSel.value });
+        renderSettings();
+      });
+      if (cfg.autoMode === 'min') {
+        var minSel = el('<select class="input" id="syMin">'
+          + [5, 10, 15, 30].map(function (m) {
+            return '<option value="' + m + '"' + (Number(cfg.autoMin) === m ? ' selected' : '') + '>每 ' + m + ' 分钟</option>';
+          }).join('') + '</select>');
+        box.appendChild(minSel);
+        minSel.addEventListener('change', function () {
+          AR.Sync.setConfig({ autoMin: Number(minSel.value) });
+          renderSettings();
+        });
+      }
+    }
+
+    if (!synced) {
+      /* ── 未配置：引导表单 ── */
+      box.appendChild(el('<p class="muted">填好这三项就能同步。数据在设备上加密（AES-256-GCM，PBKDF2 310k 轮），'
+        + '服务器只存密文 —— 连 Cloudflare 也看不到你的课程名。口令只有你知道，忘了无法找回，'
+        + '但本机数据不受影响。</p>'));
+      box.appendChild(el('<div class="field"><label class="field-label">服务地址</label>'
+        + '<input class="input" id="syUrl" spellcheck="false" autocomplete="off" value="'
+        + esc(cfg.baseUrl || 'https://abbeyroad-sync.pages.dev') + '" placeholder="https://…pages.dev"></div>'));
+      box.appendChild(el('<div class="field"><label class="field-label">同步令牌</label>'
+        + '<input class="input" id="syToken" spellcheck="false" autocomplete="off" value="'
+        + esc(cfg.token || '') + '" placeholder="部署时生成的那串 64 位"></div>'));
+      box.appendChild(el('<div class="field"><label class="field-label">加密口令</label>'
+        + '<input class="input" id="syPass" type="password" autocomplete="off" placeholder="自己定，不限长度"></div>'));
+      box.appendChild(rowSwitch('记住口令', '关掉后每次同步都要重新输入（更安全，但更麻烦）',
+        cfg.rememberPass !== false, function (v) { AR.Sync.setConfig({ rememberPass: v }); }));
+
+      var connectBtn = el('<button class="btn primary" type="button">连接并同步</button>');
+      var bar = el('<div class="row gap"></div>');
+      bar.appendChild(connectBtn);
+      box.appendChild(bar);
+      connectBtn.addEventListener('click', function () {
+        var url = (box.querySelector('#syUrl').value || '').trim();
+        var tok = (box.querySelector('#syToken').value || '').trim();
+        var pass = box.querySelector('#syPass').value || '';
+        if (!url || !tok || !pass) { AR.UI.toast('三项都要填'); return; }
+        connectBtn.disabled = true;
+        connectBtn.textContent = '连接中…';
+        AR.Sync.setConfig({ baseUrl: url, token: tok, passphrase: pass });
+        AR.Sync.ping(url).then(function () {
+          connectBtn.textContent = '同步中…';
+          return AR.Sync.syncNow();
+        }).then(function (r) {
+          AR.UI.toast('已连接 · 云端 rev ' + (r && r.rev ? r.rev : '?'));
+          renderSettings();
+        }).catch(function (e) {
+          connectBtn.disabled = false;
+          connectBtn.textContent = '连接并同步';
+          AR.UI.toast((e && e.message) ? e.message : '连接失败');
+        });
+      });
+      appendAutoSync();
+      box.appendChild(el('<p class="muted">口令请自己存进密码管理器。它默认只保存在本机（上面那个开关可以关掉）。</p>'));
+      return panel('云同步', box, 'cloud');
+    }
+
+    /* ── 已配置：状态 + 动作 ── */
+    box.appendChild(el('<p class="muted">' + esc(cfg.baseUrl) + '</p>'));
+    var stateRow = el('<div class="row gap wrap"></div>');
+    stateRow.appendChild(el('<span class="tag">云端 rev ' + esc(String(st.lastRev || 0)) + '</span>'));
+    stateRow.appendChild(el('<span class="tag">上次同步 ' + esc(fmtTime(st.lastSyncAt)) + '</span>'));
+    if (st.dirty) { stateRow.appendChild(el('<span class="tag danger">有改动待上传</span>')); }
+    if (st.lastConflicts) { stateRow.appendChild(el('<span class="tag danger">上次冲突 ' + esc(String(st.lastConflicts)) + ' 条</span>')); }
+    box.appendChild(stateRow);
+
+    appendAutoSync();
+
+    /* 动作按钮 */
+    var row = el('<div class="row gap"></div>');
+    var bNow = el('<button class="btn primary" type="button">立即同步</button>');
+    var bPull = el('<button class="btn" type="button">从云端拉取并合并</button>');
+    var bHis = el('<button class="btn" type="button">回滚…</button>');
+    row.appendChild(bNow); row.appendChild(bPull); row.appendChild(bHis);
+    box.appendChild(row);
+    bNow.addEventListener('click', function () { runSync(bNow, 'up'); });
+    bPull.addEventListener('click', function () { runSync(bPull, 'pull'); });
+
+    /* 回滚：就地列出最近版本 */
+    var hisBox = el('<div></div>');
+    box.appendChild(hisBox);
+    bHis.addEventListener('click', function () {
+      bHis.disabled = true;
+      hisBox.innerHTML = '';
+      AR.Sync.listHistory(5).then(function (items) {
+        bHis.disabled = false;
+        if (!items || !items.length) { hisBox.appendChild(el('<p class="muted">云端还没有历史版本</p>')); return; }
+        hisBox.appendChild(el('<p class="muted">选一个版本恢复到本机。恢复前会自动把当前数据备份到本地。</p>'));
+        items.forEach(function (it) {
+          var line = el('<div class="row gap" style="align-items:center;justify-content:space-between">'
+            + '<span>rev ' + esc(String(it.rev)) + ' · ' + esc(fmtSize(it.size)) + '</span></div>');
+          var b = el('<button class="btn sm" type="button">恢复</button>');
+          line.appendChild(b);
+          hisBox.appendChild(line);
+          b.addEventListener('click', function () {
+            AR.UI.confirmDanger({
+              title: '恢复到 rev ' + it.rev + '？',
+              text: '会把该版本的内容合并回本机。本机独有的记录不会被删除，但同 id 的记录会用该版本的字段覆盖。',
+              okLabel: '恢复这个版本',
+              onOk: function () {
+                var backup = null;
+                try {
+                  backup = 'allegro.sync.backup.' + Date.now();
+                  localStorage.setItem(backup, JSON.stringify(AR.Store.exportPayload()));
+                } catch (e) { backup = null; }
+                AR.Sync.restoreRev(it.rev).then(function (r) {
+                  AR.UI.toast('已恢复 rev ' + it.rev + (r && r.conflicts ? ' · 冲突 ' + r.conflicts + ' 条' : '')
+                    + (backup ? ' · 本机已备份' : ''));
+                  renderSettings();
+                }).catch(function (e) {
+                  AR.UI.toast((e && e.message) ? e.message : '恢复失败');
+                });
+              }
+            });
+          });
+        });
+      }).catch(function (e) {
+        bHis.disabled = false;
+        AR.UI.toast((e && e.message) ? e.message : '读不到历史版本');
+      });
+    });
+
+    /* 断开 */
+    var offRow = el('<div class="row gap"></div>');
+    var bOff = el('<button class="btn" type="button">断开云同步</button>');
+    offRow.appendChild(bOff);
+    box.appendChild(offRow);
+    bOff.addEventListener('click', function () {
+      AR.UI.confirmDanger({
+        title: '断开云同步？',
+        text: '只清除本机保存的服务地址、令牌和口令，云端数据不动，本地课表也不动。下次要用需要重新填。',
+        okLabel: '断开',
+        onOk: function () {
+          AR.Sync.clearConfig();
+          AR.UI.toast('已断开');
+          renderSettings();
+        }
+      });
+    });
+    box.appendChild(el('<p class="muted">同步是「本地优先」：没网、口令错、服务器出错都只影响这次同步，'
+      + '本地保存永远照常。加密后服务器只看到密文。</p>'));
+    return panel('云同步', box, 'cloud');
+  }
+
   /* 6 · 系统集成 */
   function panelIntegration() {
     var box = el('<div></div>');
@@ -3114,7 +3414,7 @@ function renderLongTaskList(host) {
   function panelAbout() {
     var box = el('<div></div>');
     var plat = AR.Bridge.platform();
-    box.appendChild(el('<p class="muted">Abbey Road v' + AR.Const.APP_VERSION + ' · '
+    box.appendChild(el('<p class="muted">Allegro v' + AR.Const.APP_VERSION + ' · '
       + (plat === 'android' ? 'Android' : (plat === 'windows' ? 'Windows' : '浏览器预览'))
       + (AR.Bridge.deviceName() ? ' · ' + esc(AR.Bridge.deviceName()) : '')
       + (AR.Bridge.sdkInt() ? ' · API ' + AR.Bridge.sdkInt() : '') + '</p>'));
@@ -3134,7 +3434,6 @@ function renderLongTaskList(host) {
      * 开源地址：项目已发布在 GitHub，这里给一个可点的入口
      * （Android 交给系统浏览器，Windows 交给默认浏览器）。
      */
-    var REPO_URL = 'https://github.com/EtoileZzz/AbbeyRoad----ScheduleApp';
     var repoBox = el('<div class="repo-box">'
       + '<div class="repo-title">项目已开源</div>'
       + '<div class="repo-url">' + esc(REPO_URL) + '</div>'
@@ -3230,7 +3529,7 @@ function renderLongTaskList(host) {
   /** 每一步的正文：说清楚"是什么、怎么用"，一句话一件事 */
   function obStepHtml(step) {
     if (step === 0) {
-      return '<h2 class="ob-step-title">欢迎使用 Abbey Road</h2>'
+      return '<h2 class="ob-step-title">欢迎使用 Allegro</h2>'
         + '<p class="ob-step-sub">本地优先的课表与日程管理。数据只保存在你自己的设备上：'
         + '没有账号、也没有云同步，换设备时导出一份配置文件带过去就行。</p>'
         + '<div class="ob-features">'
@@ -3439,7 +3738,7 @@ function renderLongTaskList(host) {
     AR.UI.applyTheme();
     AR.UI.applyLayout(true);
     AR.UI.renderToday();
-    if (!skipped) { AR.UI.toast('欢迎使用 Abbey Road'); }
+    if (!skipped) { AR.UI.toast('欢迎使用 Allegro'); }
   }
 
   /* ── 通用刷新 ─────────────────────────────────────────────── */

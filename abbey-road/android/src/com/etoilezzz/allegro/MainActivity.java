@@ -1,5 +1,6 @@
-package com.ganxing.abbeyroad;
+package com.etoilezzz.allegro;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -8,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
@@ -36,6 +39,8 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +50,7 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 /**
- * Abbey Road · Android 外壳
+ * Allegro · Android 外壳
  *
  * 职责很窄：用一个 WebView 承载 app/ 里的界面（两端共用同一套代码），
  * 再把「震动、剪贴板、文件读写、日历/闹钟/地图跳转、系统栏配色」这些
@@ -61,6 +66,14 @@ public class MainActivity extends Activity {
     private static final String ORIGIN = "https://" + HOST + "/";
     private static final int REQ_EXPORT = 1001;
     private static final int REQ_IMPORT = 1002;
+    /** Android 13+ 通知权限（课前提醒） */
+    private static final int REQ_NOTIF = 1003;
+
+    /** 外部文件导入上限：5MB。超出就中止，绝不整读进内存。 */
+    private static final long MAX_IMPORT_BYTES = 5L * 1024 * 1024;
+
+    private static final String PREF_NOTIF_ASKED = "notif_perm_asked";
+    private static final String PREF_NOTIF_ASKED_AT = "notif_perm_asked_at";
 
     /** 桌面卡片点进来的目标视图：today / week / import / settings */
     static final String EXTRA_VIEW = "ar_view";
@@ -69,7 +82,7 @@ public class MainActivity extends Activity {
     private String pendingExportContent = null;
     private String pendingExportMime = "application/json";
     private String pendingView = null;
-    /** 「用 Abbey Road 打开」进来的文件（微信里点配置文件 → 用其他应用打开） */
+    /** 「用 Allegro 打开」进来的文件（微信里点配置文件 → 用其他应用打开） */
     private Uri pendingOpenUri = null;
     private String pendingOpenName = null;
 
@@ -137,10 +150,16 @@ public class MainActivity extends Activity {
                 if (u != null && HOST.equals(u.getHost())) {
                     return false;
                 }
+                // A5：页面里的外链同样只放行白名单 scheme（远程 JSON 也可能被塞进 a[href]）
+                String url = u == null ? "" : u.toString();
+                if (!isAllowedScheme(url)) {
+                    toast("不支持打开该链接");
+                    return true;
+                }
                 try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, u));
+                    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url.trim())));
                 } catch (Exception e) {
-                    Log.w(TAG, "外部链接无法打开: " + u, e);
+                    Log.w(TAG, "外部链接无法打开: " + url, e);
                 }
                 return true;
             }
@@ -160,6 +179,12 @@ public class MainActivity extends Activity {
         }
 
         clearWebCacheIfUpgraded();
+        // 课前提醒：通知渠道必须先建好，否则（targetSdk 34）通知会被系统静静丢掉
+        try {
+            ReminderReceiver.ensureChannel(this);
+        } catch (Throwable t) {
+            Log.w(TAG, "创建通知渠道失败（忽略）", t);
+        }
         registerBackGesture();
         web.loadUrl(ORIGIN + "index.html");
         pendingView = viewFromIntent(getIntent());
@@ -169,7 +194,7 @@ public class MainActivity extends Activity {
     /**
      * 记下启动/切回前台时由系统丢过来的配置文件。
      * 微信收到的文件在自己的私有目录里，系统文件选择器看不到，
-     * 所以「用其他应用打开 → Abbey Road」是手机上最靠谱的导入路径。
+     * 所以「用其他应用打开 → Allegro」是手机上最靠谱的导入路径。
      */
     private void captureOpenIntent(Intent intent) {
         if (intent == null) { return; }
@@ -220,19 +245,69 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    InputStream in = getContentResolver().openInputStream(uri);
-                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                    byte[] buf = new byte[16384];
-                    int n;
-                    while ((n = in.read(buf)) > 0) { bos.write(buf, 0, n); }
-                    in.close();
-                    final String text = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+                    String text = readTextWithLimit(uri);
                     callJs("window.AR && AR.onFileText && AR.onFileText(" + q(text) + "," + q(name) + ")");
+                } catch (FileTooLargeException e) {
+                    toast("文件太大（>5MB），无法导入");
                 } catch (Exception e) {
                     toast("读取文件失败");
                 }
             }
         }).start();
+    }
+
+    /**
+     * 统一的「把外部文件读成文本」入口（三处导入路径共用，不再各写一份）。
+     *
+     * 以前是把整份文件读进 ByteArrayOutputStream 再转 String：没有上限，
+     * 大文件会抛 OutOfMemoryError —— 它不是 Exception，catch 不住，进程直接被系统杀掉。
+     * 现在：先用 openAssetFileDescriptor 的长度做预检，再在循环里累加，超限立刻 abort。
+     */
+    private String readTextWithLimit(Uri uri) throws Exception {
+        if (uri == null) { throw new IllegalArgumentException("uri is null"); }
+
+        long declared = -1L;
+        try {
+            AssetFileDescriptor fd = getContentResolver().openAssetFileDescriptor(uri, "r");
+            if (fd != null) {
+                try {
+                    declared = fd.getLength();
+                } finally {
+                    fd.close();
+                }
+            }
+        } catch (Exception ignored) {
+            // 很多 provider 不支持查长度（返回 UNKNOWN_LENGTH / 抛异常）——还有循环里的累加兜底
+        }
+        if (declared > MAX_IMPORT_BYTES) { throw new FileTooLargeException(); }
+
+        InputStream in = null;
+        try {
+            in = getContentResolver().openInputStream(uri);
+            if (in == null) { throw new FileNotFoundException("openInputStream returned null"); }
+            int hint = declared > 0 ? (int) Math.min(declared, 65536L) : 16384;
+            ByteArrayOutputStream bos = new ByteArrayOutputStream(hint);
+            byte[] buf = new byte[16384];
+            long total = 0L;
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                total += n;
+                if (total > MAX_IMPORT_BYTES) { throw new FileTooLargeException(); }
+                bos.write(buf, 0, n);
+            }
+            return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+        } finally {
+            if (in != null) {
+                try {
+                    in.close();
+                } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    /** 导入文件超限（5MB）——单独一个类型，方便三处调用点给同一句提示。 */
+    private static final class FileTooLargeException extends Exception {
+        FileTooLargeException() { super("file larger than 5MB"); }
     }
 
     /** 桌面卡片可能带着「直接打开哪一屏」进来 */
@@ -303,13 +378,34 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** 从 assets/web/ 读取被拦截的请求；找不到就返回 404，避免整页白屏。 */
+    /** 从 assets/web/ 读取被拦截的请求；找不到就返回真正的 404，避免整页白屏。 */
     private WebResourceResponse serveAsset(String path) {
         String rel = (path == null || path.isEmpty() || "/".equals(path)) ? "index.html" : path.substring(1);
         if (rel.endsWith("/")) {
             rel = rel + "index.html";
         }
         String mime = mimeOf(rel);
+        // 同一份响应头：命中和 404 都复用（404 也别让 WebView 缓存）
+        java.util.Map<String, String> headers = new java.util.HashMap<String, String>();
+        headers.put("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        headers.put("Pragma", "no-cache");
+        headers.put("Expires", "0");
+        /**
+         * 大资源（图片 / 字体 / 媒体）走流式，不再整读进内存 —— 现在的界面只有
+         * 十来个文本文件还不明显，一旦加进图片/字体，每个请求两份拷贝会拖慢首屏
+         * 并抬高峰值内存。文本类仍走下面的缓冲分支（本来就要 no-store，体积也小）。
+         * 注意：assets 被压缩时 openFd 会失败，这时必须回退，不能报错。
+         */
+        if (!isTextAsset(rel)) {
+            try {
+                AssetFileDescriptor fd = getAssets().openFd("web/" + rel);
+                WebResourceResponse rs = new WebResourceResponse(mime, null, fd.createInputStream());
+                rs.setResponseHeaders(headers);
+                return rs;
+            } catch (Exception ignore) {
+                // 压缩存储 / 不存在 → 落到下面的缓冲读取（或 404）
+            }
+        }
         try {
             InputStream in = getAssets().open("web/" + rel);
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
@@ -321,20 +417,23 @@ public class MainActivity extends Activity {
             in.close();
             WebResourceResponse r = new WebResourceResponse(mime, "UTF-8",
                     new ByteArrayInputStream(bos.toByteArray()));
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                java.util.Map<String, String> headers = new java.util.HashMap<String, String>();
-                // 只有 no-cache 还不够 —— 加上 no-store，别让 WebView 留旧 JS
-                headers.put("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-                headers.put("Pragma", "no-cache");
-                headers.put("Expires", "0");
-                r.setResponseHeaders(headers);
-            }
+            r.setResponseHeaders(headers);
             return r;
         } catch (Exception e) {
             Log.w(TAG, "资源缺失: " + rel);
-            return new WebResourceResponse("text/plain", "UTF-8",
-                    new ByteArrayInputStream("404".getBytes(StandardCharsets.UTF_8)));
+            // 3 参构造默认是 HTTP 200 + 文本 "404"：缺 JS 时会被当脚本执行（SyntaxError），
+            // 缺 index.html 会直接显示「404」字样。这里用 6 参构造给出真正的 404。
+            return new WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", headers,
+                    new ByteArrayInputStream("404 Not Found".getBytes(StandardCharsets.UTF_8)));
         }
+    }
+
+    /** 文本类资源（走缓冲 + no-store）；其余按「大资源」流式处理 */
+    private static boolean isTextAsset(String rel) {
+        String p = rel.toLowerCase(Locale.US);
+        return p.endsWith(".html") || p.endsWith(".htm") || p.endsWith(".css")
+                || p.endsWith(".js") || p.endsWith(".json")
+                || p.endsWith(".txt") || p.endsWith(".md");
     }
 
     private static String mimeOf(String rel) {
@@ -408,7 +507,7 @@ public class MainActivity extends Activity {
                 public void run() {
                     try {
                         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                        cm.setPrimaryClip(ClipData.newPlainText("Abbey Road", text));
+                        cm.setPrimaryClip(ClipData.newPlainText("Allegro", text));
                         toast("已复制");
                     } catch (Exception e) {
                         toast("复制失败");
@@ -454,7 +553,7 @@ public class MainActivity extends Activity {
         }
 
         /**
-         * 「导出到微信」：先把配置文件写进系统「下载 / Abbey Road」目录，
+         * 「导出到微信」：先把配置文件写进系统「下载 / Allegro」目录，
          * 再用 ACTION_SEND 拉起系统分享面板 —— 选微信就是发文件，选别的 App 也一样能用。
          *
          * 为什么先落盘：分享面板拿 content:// 地址才能把文件真发出去；
@@ -463,56 +562,85 @@ public class MainActivity extends Activity {
          */
         @JavascriptInterface
         public void shareFile(final String fileName, final String content, final String mime, final String title) {
-            runOnUiThread(new Runnable() {
+            final String type = (mime == null || mime.length() == 0) ? "application/json" : mime;
+            // A6：写盘（MediaStore insert + 全量写）以前在 runOnUiThread 里做，
+            // 配置大时掉帧甚至 ANR；现在整段挪到后台线程，写完再回主线程拉分享面板。
+            new Thread(new Runnable() {
                 public void run() {
-                    String type = (mime == null || mime.length() == 0) ? "application/json" : mime;
-                    Uri uri = writeToDownloads(fileName, content, type);
-                    try {
-                        Intent i = new Intent(Intent.ACTION_SEND);
-                        i.putExtra(Intent.EXTRA_SUBJECT, title == null ? "Abbey Road 课表配置" : title);
-                        if (uri != null) {
-                            i.setType("*/*");                                  // 微信等 App 只认通用类型
-                            i.putExtra(Intent.EXTRA_STREAM, uri);
-                            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        } else {
-                            i.setType("text/plain");
-                            i.putExtra(Intent.EXTRA_TEXT, content);
+                    final Uri uri = writeToDownloads(fileName, content, type);
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            try {
+                                Intent i = new Intent(Intent.ACTION_SEND);
+                                i.putExtra(Intent.EXTRA_SUBJECT, title == null ? "Allegro 课表配置" : title);
+                                if (uri != null) {
+                                    i.setType("*/*");                          // 微信等 App 只认通用类型
+                                    i.putExtra(Intent.EXTRA_STREAM, uri);
+                                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                } else {
+                                    i.setType("text/plain");
+                                    i.putExtra(Intent.EXTRA_TEXT, content == null ? "" : content);
+                                }
+                                startActivity(Intent.createChooser(i, "导出到微信 / 分享"));
+                            } catch (Exception e) {
+                                toast("没有可用的分享目标");
+                            }
                         }
-                        startActivity(Intent.createChooser(i, "导出到微信 / 分享"));
-                    } catch (Exception e) {
-                        toast("没有可用的分享目标");
-                    }
+                    });
                 }
-            });
+            }).start();
         }
 
-        /** Android 10+：写进「下载/Abbey Road」，返回可分享的 content:// 地址；失败返回 null */
+        /** Android 10+：写进「下载/Allegro」，返回可分享的 content:// 地址；失败返回 null */
         private Uri writeToDownloads(String fileName, String content, String mime) {
             if (Build.VERSION.SDK_INT < 29 || content == null) { return null; }
+            Uri uri = null;
+            OutputStream os = null;
+            boolean ok = false;
             try {
                 ContentValues cv = new ContentValues();
                 cv.put(MediaStore.MediaColumns.DISPLAY_NAME,
-                        (fileName == null || fileName.length() == 0) ? "AbbeyRoad-backup.json" : fileName);
+                        (fileName == null || fileName.length() == 0) ? "Allegro-backup.json" : fileName);
                 cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
-                cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Abbey Road");
-                Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Allegro");
+                uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
                 if (uri == null) { return null; }
-                OutputStream os = getContentResolver().openOutputStream(uri);
+                os = getContentResolver().openOutputStream(uri);
+                if (os == null) { return null; }
                 os.write(content.getBytes(StandardCharsets.UTF_8));
                 os.flush();
-                os.close();
+                ok = true;
                 return uri;
             } catch (Exception e) {
+                Log.w(TAG, "写入下载目录失败", e);
                 return null;
+            } finally {
+                if (os != null) {
+                    try {
+                        os.close();
+                    } catch (Exception ignored) { }
+                }
+                // 写失败时别在用户目录里留一个 0 字节文件
+                if (!ok && uri != null) {
+                    try {
+                        getContentResolver().delete(uri, null, null);
+                    } catch (Exception ignored) { }
+                }
             }
         }
 
         @JavascriptInterface
         public void openUrl(final String url) {
+            // A5：调用方传的是远程 GitHub API JSON 里的 url（没有证书固定），
+            // 不加白名单的话 MITM 就能用它拉起任意组件。
+            if (!isAllowedScheme(url)) {
+                toast("不支持打开该链接");
+                return;
+            }
             runOnUiThread(new Runnable() {
                 public void run() {
                     try {
-                        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                        Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url.trim()));
                         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         startActivity(i);
                     } catch (Exception e) {
@@ -520,6 +648,51 @@ public class MainActivity extends Activity {
                     }
                 }
             });
+        }
+
+        /* ── 课前提醒（A1）──────────────────────────────────────── */
+
+        /**
+         * 排程课前提醒：先取消上一轮全部提醒，再按 json 逐条 set。
+         * 同一 id 的 hashCode 就是 requestCode，所以重复下发会自动覆盖旧闹钟。
+         *
+         * @param json 形如 [{"id":"c1-block1-202610200800","atMs":1760918400000,
+         *                    "title":"高等数学","text":"08:00 · 信息楼 305"}]
+         * @return "ok" 或 "error: ..."（不抛异常，坏 JSON 只会返回 error）
+         */
+        @JavascriptInterface
+        public String scheduleReminders(final String json) {
+            try {
+                String res = ReminderScheduler.schedule(MainActivity.this, json);
+                // 排程不依赖通知权限；权限只影响「弹不弹」。第一次排提醒时顺便问一次。
+                ensureNotificationPermission(false);
+                return res;
+            } catch (Throwable t) {
+                Log.w(TAG, "排程课前提醒失败", t);
+                return "error: " + t.getClass().getSimpleName();
+            }
+        }
+
+        /** 取消全部课前提醒（关闭提醒开关 / 清空课表时调用）。 */
+        @JavascriptInterface
+        public String cancelReminders() {
+            try {
+                return ReminderScheduler.cancelAll(MainActivity.this);
+            } catch (Throwable t) {
+                Log.w(TAG, "取消课前提醒失败", t);
+                return "error: " + t.getClass().getSimpleName();
+            }
+        }
+
+        /**
+         * 用户在设置里「主动」打开课前提醒时调用：允许再弹一次通知权限框
+         * （自动流程最多只问一次，被拒绝后不会自己反复骚扰）。
+         */
+        @JavascriptInterface
+        public String requestNotificationPermission() {
+            if (Build.VERSION.SDK_INT < 33) { return "ok"; }
+            ensureNotificationPermission(true);
+            return "ok";
         }
 
         /**
@@ -685,7 +858,7 @@ public class MainActivity extends Activity {
                     i.addCategory(Intent.CATEGORY_OPENABLE);
                     i.setType(type);
                     i.putExtra(Intent.EXTRA_TITLE, fileName);
-                    // 选择器不可用（个别系统会这样）时不要静默失败：直接存到「下载 / Abbey Road」
+                    // 选择器不可用（个别系统会这样）时不要静默失败：直接存到「下载 / Allegro」
                     if (i.resolveActivity(getPackageManager()) == null) {
                         fallbackSave(fileName, content, type);
                         return;
@@ -701,14 +874,22 @@ public class MainActivity extends Activity {
             });
         }
 
-        /** 选择器用不了时的兜底：写进「下载 / Abbey Road」并告诉用户文件名 */
-        private void fallbackSave(String fileName, String content, String mime) {
-            Uri uri = writeToDownloads(fileName, content, mime);
-            if (uri != null) {
-                toast("已保存到「下载 / Abbey Road」：" + fileName);
-            } else {
-                toast("导出失败，请在「数据与备份」里再试一次");
-            }
+        /** 选择器用不了时的兜底：写进「下载 / Allegro」并告诉用户文件名（写盘在后台线程） */
+        private void fallbackSave(final String fileName, final String content, final String mime) {
+            new Thread(new Runnable() {
+                public void run() {
+                    final Uri uri = writeToDownloads(fileName, content, mime);
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (uri != null) {
+                                toast("已保存到「下载 / Allegro」：" + fileName);
+                            } else {
+                                toast("导出失败，请在「数据与备份」里再试一次");
+                            }
+                        }
+                    });
+                }
+            }).start();
         }
 
         /** 导入文本：调用系统「打开文件」选择器，读完后回调网页。 */
@@ -734,7 +915,7 @@ public class MainActivity extends Activity {
         }
 
         /**
-         * 列出 App 自己导出的配置文件（「下载 / Abbey Road」目录）。
+         * 列出 App 自己导出的配置文件（「下载 / Allegro」目录）。
          * 有些系统的文件选择器很难用（比如找不到刚导出的文件），
          * 这里给网页一份可直接导入的清单，完全绕开系统选择器。
          * 返回 JSON 数组字符串：[{name, uri, size, modified}]
@@ -749,8 +930,17 @@ public class MainActivity extends Activity {
                 String[] cols = {MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME,
                         MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.DATE_MODIFIED,
                         MediaStore.MediaColumns.RELATIVE_PATH};
-                String sel = MediaStore.MediaColumns.RELATIVE_PATH + " LIKE ?";
-                String[] args = new String[]{Environment.DIRECTORY_DOWNLOADS + "/Abbey Road%"};
+                /**
+                 * 两个目录都匹配：新版写「下载/Allegro」，但用户从**旧版**导出的备份
+                 * 在「下载/Abbey Road」里 —— 改名之后还要能列出并一键导入那些旧文件，
+                 * 否则「旧版导出 → 装新版 → 导入」这条迁移路径就断了。
+                 */
+                String sel = "(" + MediaStore.MediaColumns.RELATIVE_PATH + " LIKE ? OR "
+                        + MediaStore.MediaColumns.RELATIVE_PATH + " LIKE ?)";
+                String[] args = new String[]{
+                        Environment.DIRECTORY_DOWNLOADS + "/Allegro%",
+                        Environment.DIRECTORY_DOWNLOADS + "/Abbey Road%"
+                };
                 c = getContentResolver().query(collection, cols, sel, args,
                         MediaStore.MediaColumns.DATE_MODIFIED + " DESC");
                 boolean first = true;
@@ -781,14 +971,10 @@ public class MainActivity extends Activity {
         public String readTextUri(final String uriText) {
             if (uriText == null || uriText.length() == 0) { return ""; }
             try {
-                Uri uri = Uri.parse(uriText);
-                InputStream in = getContentResolver().openInputStream(uri);
-                ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                byte[] buf = new byte[16384];
-                int n;
-                while ((n = in.read(buf)) > 0) { bos.write(buf, 0, n); }
-                in.close();
-                return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+                return readTextWithLimit(Uri.parse(uriText));
+            } catch (FileTooLargeException e) {
+                toast("文件太大（>5MB），无法读取");
+                return "";
             } catch (Exception e) {
                 return "";
             }
@@ -883,6 +1069,28 @@ public class MainActivity extends Activity {
         return v < 10 ? "0" + v : String.valueOf(v);
     }
 
+    /**
+     * 只放行这几种 scheme：远程 JSON 里的 url 不可信，
+     * 白名单之外（intent:、file:、content:、javascript:…）一律不拉起。
+     */
+    private static boolean isAllowedScheme(String url) {
+        if (url == null) { return false; }
+        String u = url.trim();
+        if (u.length() == 0) { return false; }
+        for (int i = 0; i < u.length(); i++) {
+            char c = u.charAt(i);
+            if (c <= 0x20 || c == 0x7f) { return false; }   // 空白/控制字符：拒绝
+        }
+        int colon = u.indexOf(':');
+        if (colon <= 0) { return false; }
+        String scheme = u.substring(0, colon).toLowerCase(Locale.US);
+        return "http".equals(scheme)
+                || "https".equals(scheme)
+                || "mailto".equals(scheme)
+                || "tel".equals(scheme)
+                || "geo".equals(scheme);
+    }
+
     /** 直接按包名拉起 App（拿不到入口就返回 false，不抛异常）。 */
     private boolean launchPackage(String pkg) {
         try {
@@ -900,7 +1108,7 @@ public class MainActivity extends Activity {
     private void copyText(String text) {
         try {
             ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            cm.setPrimaryClip(ClipData.newPlainText("Abbey Road", text));
+            cm.setPrimaryClip(ClipData.newPlainText("Allegro", text));
         } catch (Exception ignored) { }
     }
 
@@ -911,6 +1119,67 @@ public class MainActivity extends Activity {
                 Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
             }
         });
+    }
+
+    /**
+     * Android 13+ 的通知权限（A1）。
+     *
+     * explicit = false（自动流程，例如网页下发提醒时）：只问一次，结果记进
+     * SharedPreferences；用户拒绝后不再自动弹第二次。
+     * explicit = true（用户在设置里主动打开「课前提醒」）：允许再问一次。
+     *
+     * 拒绝时什么都不做（提醒照常排程，只是到点不弹通知），绝不崩、不反复骚扰。
+     */
+    private void ensureNotificationPermission(final boolean explicit) {
+        if (Build.VERSION.SDK_INT < 33) { return; }
+        try {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    == PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            SharedPreferences sp = getSharedPreferences("ar_prefs", Context.MODE_PRIVATE);
+            boolean asked = sp.getBoolean(PREF_NOTIF_ASKED, false);
+            long lastAt = sp.getLong(PREF_NOTIF_ASKED_AT, 0L);
+            long now = System.currentTimeMillis();
+            if (explicit) {
+                // 连点两下开关时不要叠两个系统弹窗
+                if (now - lastAt < 1500L) { return; }
+            } else if (asked) {
+                return;
+            }
+            sp.edit().putBoolean(PREF_NOTIF_ASKED, true)
+                    .putLong(PREF_NOTIF_ASKED_AT, now).apply();
+            // requestPermissions 必须在主线程
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    try {
+                        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "请求通知权限失败", t);
+                        toast("通知权限未开启，请到系统设置里允许 Allegro 发送通知");
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            Log.w(TAG, "通知权限流程异常（忽略）", t);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQ_NOTIF) { return; }
+        boolean granted = grantResults != null && grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (granted) {
+            // 权限刚拿到：渠道再确认一次，随后到点的提醒才会真正弹出
+            try {
+                ReminderReceiver.ensureChannel(this);
+            } catch (Throwable ignored) { }
+            toast("已允许通知，课前提醒会准时送达");
+        } else {
+            toast("未允许通知：课前提醒不会弹出，可到系统设置里开启");
+        }
     }
 
     /** 统一的「回调网页」入口：把结果作为参数传给 window.AR 上的处理函数。 */
@@ -931,37 +1200,74 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_EXPORT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+
+        if (requestCode == REQ_EXPORT) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                // 用户取消 / 选择器没给地址：清掉待写内容，别留给下一次
+                pendingExportContent = null;
+                pendingExportMime = "application/json";
+                return;
+            }
             Uri uri = data.getData();
+            // 先取走内容再判空：进程被回收后重建时字段是 null，
+            // 此时绝不能 openOutputStream —— 那会先创建/清空文件，留下 0 字节备份。
+            String content = pendingExportContent;
+            pendingExportContent = null;
+            if (content == null) {
+                toast("导出内容已丢失，请重新导出");
+                // 选择器已经建过目标文件了，删掉它，别留空文件
+                try {
+                    getContentResolver().delete(uri, null, null);
+                } catch (Exception ignored) { }
+                return;
+            }
+            OutputStream os = null;
+            boolean ok = false;
             try {
-                java.io.OutputStream os = getContentResolver().openOutputStream(uri);
-                os.write(pendingExportContent.getBytes(StandardCharsets.UTF_8));
+                os = getContentResolver().openOutputStream(uri);
+                if (os == null) { throw new IOException("openOutputStream returned null"); }
+                os.write(content.getBytes(StandardCharsets.UTF_8));
                 os.flush();
-                os.close();
-                toast("已保存：" + uri.getLastPathSegment());
-                callJs("window.AR && AR.onExported && AR.onExported(" + q(uri.getLastPathSegment()) + ")");
+                ok = true;
             } catch (Exception e) {
+                Log.w(TAG, "导出写入失败", e);
                 toast("写入文件失败");
             } finally {
-                pendingExportContent = null;
-            }
-        } else if (requestCode == REQ_IMPORT && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            Uri uri = data.getData();
-            final String name = uri.getLastPathSegment();
-            try {
-                InputStream in = getContentResolver().openInputStream(uri);
-                ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                byte[] buf = new byte[16384];
-                int n;
-                while ((n = in.read(buf)) > 0) {
-                    bos.write(buf, 0, n);
+                // 任何路径都要关流（以前 os.close() 只在成功路径上）
+                if (os != null) {
+                    try {
+                        os.close();
+                    } catch (Exception ignored) { }
                 }
-                in.close();
-                final String text = new String(bos.toByteArray(), StandardCharsets.UTF_8);
-                callJs("window.AR && AR.onFileText && AR.onFileText(" + q(text) + "," + q(name) + ")");
-            } catch (Exception e) {
-                toast("读取文件失败");
             }
+            if (ok) {
+                toast("已保存：" + uri.getLastPathSegment());
+                callJs("window.AR && AR.onExported && AR.onExported(" + q(uri.getLastPathSegment()) + ")");
+            } else {
+                // 写失败：删掉刚被创建/清空的空文件
+                try {
+                    getContentResolver().delete(uri, null, null);
+                } catch (Exception ignored) { }
+            }
+            return;
+        }
+
+        if (requestCode == REQ_IMPORT && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            final Uri uri = data.getData();
+            final String name = uri.getLastPathSegment();
+            // 读文件（可能几 MB）不放主线程，读完再回调网页
+            new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        final String text = readTextWithLimit(uri);
+                        callJs("window.AR && AR.onFileText && AR.onFileText(" + q(text) + "," + q(name) + ")");
+                    } catch (FileTooLargeException e) {
+                        toast("文件太大（>5MB），无法导入");
+                    } catch (Exception e) {
+                        toast("读取文件失败");
+                    }
+                }
+            }).start();
         }
     }
 

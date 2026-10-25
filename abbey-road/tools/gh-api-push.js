@@ -21,7 +21,7 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
-const REPO = 'EtoileZzz/AbbeyRoad----ScheduleApp';
+const REPO = 'EtoileZzz/Allegro';
 const API = 'https://api.github.com';
 const TOKEN = process.env.GH_TOKEN;
 const projRoot = path.resolve(__dirname, '..');
@@ -118,7 +118,7 @@ async function push() {
   /*
    * ⚠ 上传资产请用 gh CLI，不要用本文件里的 uploadAsset：
    *
-   *   gh release upload <tag> <文件...> --repo EtoileZzz/AbbeyRoad----ScheduleApp --clobber
+   *   gh release upload <tag> <文件...> --repo EtoileZzz/Allegro --clobber
    *
    * 实测（2026-10，Node 24）：node 的 fetch / undici 在本机传 multipart 时，
    * GitHub 会把**整个 multipart body** 当成文件内容存下来：远端 APK 以

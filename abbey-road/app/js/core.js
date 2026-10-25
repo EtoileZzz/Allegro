@@ -1,7 +1,7 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 核心逻辑（无 UI 依赖，可单独测试）
+   Allegro · 核心逻辑（无 UI 依赖，可单独测试）
    包含：工具函数 / 数据仓库 / 课表计算 / 地点解析 / 固定提示词
-   规则与《Abbey Road 产品与架构规划 v0.2.0》一致。
+   规则与《Allegro 产品与架构规划 v0.2.0》一致。
    ────────────────────────────────────────────────────────────── */
 
 var AR = window.AR || (window.AR = {});
@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.4';
+var APP_VERSION = '0.4.8';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -107,6 +107,16 @@ var APP_VERSION = '0.4.4';
     if (typeof key === 'string' && key.charAt(0) === '#') { return key; }
     for (var i = 0; i < PALETTE.length; i++) { if (PALETTE[i].key === key) { return PALETTE[i].hex; } }
     return PALETTE[0].hex;
+  }
+
+  /**
+   * 把任意值安全地变成 CSS 颜色：合法的 #RGB/#RGBA/#RRGGBB/#RRGGBBAA 原样返回，
+   * 其他（色名 / 空值 / 脏数据）统一兜底成雾蓝 #5B8DEF。
+   * 签名与兜底色是 UI 的依赖，不可改。
+   */
+  function cssColor(v) {
+    var s = String(v == null ? '' : v);
+    return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : '#5B8DEF';
   }
 
   /* ── 特殊事件（考试 / 讲座 / 活动）：不属于课表节次，单独一张表 ── */
@@ -230,7 +240,7 @@ var APP_VERSION = '0.4.4';
      不依赖 Markdown 表格，复制粘贴时不会被对齐/换行搞坏。 */
   var PROMPT_VERSION = 'ar-txt-1.1.0';
   var FMT_SEP = '｜';
-  var FMT_HEADER = 'AbbeyRoad 课表 v1';
+  var FMT_HEADER = 'Allegro 课表 v1';
   var PROMPT_TEXT = [
     '把这张课表整理成下面的纯文本格式，直接输出文本，不要表格、不要解释。',
     '',
@@ -356,16 +366,29 @@ var APP_VERSION = '0.4.4';
 
   var state = null;
   var saveTimer = null;
+  /** 上一次写 localStorage 是否失败（配额满 / 隐私模式）；storeStatus() 给界面用 */
+  var saveFailed = false;
 
   function load() {
+    var raw = null;
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
+      raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         var parsed = JSON.parse(raw);
         if (parsed && parsed.kind === 'abbeyroad.sync') { state = migrate(parsed); }
       }
     } catch (e) {
+      /**
+       * v0.4.4：解析失败时不能直接换新数据 —— 下一次 save() 就会把原始存档覆盖掉，
+       * 用户的课表彻底没了。先把原始串另存一份（失败就算了，至少不阻断启动），
+       * 提示用户，再退回默认数据。
+       */
+      if (raw) {
+        try { localStorage.setItem(STORAGE_KEY + '.broken.' + new Date().toISOString(), raw); } catch (e1) { /* 备份失败就跳过 */ }
+        try { if (AR.UI && AR.UI.toast) { AR.UI.toast('存档损坏，已备份原始数据'); } } catch (e2) { /* UI 还没加载 */ }
+      }
       console.warn('读取本地数据失败，改用新数据', e);
+      state = defaultState();
     }
     if (!state) { state = defaultState(); }
     return state;
@@ -521,7 +544,12 @@ var APP_VERSION = '0.4.4';
    * 备注保存之后同步作业条目：按 (blockId, date, 文字) 复用旧记录，
    * 已经划掉的状态不会因为重新解析而丢失；备注里删掉的行才真的删掉。
    */
-  function syncTasksFor(blockId, courseId, dateK, text) {
+  /**
+   * quiet（v0.4.4，可选）：为 true 时这次同步不写 localStorage。
+   * rebuildTasks() 会连续调用几十上百次，每次 save(true) 都是一次全库 JSON 序列化；
+   * 批量调用方传 true，在循环结束后统一 save 一次。
+   */
+  function syncTasksFor(blockId, courseId, dateK, text, quiet) {
     var hw = homeworkSettings(state);
     /**
      * v0.4.1b 修复：这里必须写**原始数组**。
@@ -560,7 +588,7 @@ var APP_VERSION = '0.4.4';
         softDelete('tasks', t);
       }
     }
-    save(true);
+    if (!quiet) { save(true); }
     return out;
   }
 
@@ -578,8 +606,9 @@ var APP_VERSION = '0.4.4';
       var ov = ovs[i];
       if (ov.deletedAt || !ov.newNote) { continue; }
       scanned++;
-      syncTasksFor(ov.blockId, ov.courseId, ov.date, ov.newNote);
+      syncTasksFor(ov.blockId, ov.courseId, ov.date, ov.newNote, true);   // quiet：循环后再统一存
     }
+    save(true);
     var after = taskList().length;
     return { scanned: scanned, created: Math.max(0, after - before), total: after };
   }
@@ -745,8 +774,19 @@ function todoLongList() { return todoDailyList(); }
     var c = (t && t.cadence) || TASK_UNLIMITED;
     if (c.type === 'unlimited' || !c.type) { return Infinity; }
     var d0 = new Date(date || new Date()); d0.setHours(0, 0, 0, 0);
-    var anchor = new Date(); anchor.setHours(0, 0, 0, 0);
-    var diffDays = Math.floor((anchor - d0) / 86400000);
+    /**
+     * v0.4.4：锚点必须是**任务创建日**，不能是"今天"。
+     * 以前 anchor = new Date() → 每过一天锚点跟着平移，同一个日期算出来的
+     * req 天天变（"每 2 天"变成天天做）。createdAt 缺失（极老数据）才退回今天。
+     * diffDays 用 Math.round：按本地午夜相减，夏令时那两天差 23/25 小时也不会偏一天。
+     */
+    var anchor = null;
+    if (t && t.createdAt) {
+      var born = new Date(t.createdAt);
+      if (!isNaN(born.getTime())) { anchor = parseDateKey(dateKey(born)); }
+    }
+    if (!anchor) { anchor = parseDateKey(dateKey(new Date())); }
+    var diffDays = Math.round((anchor.getTime() - d0.getTime()) / 86400000);
     var interval = Math.max(1, Number(c.intervalDays) || 1);
     if (c.type === 'daily') { return c.times || 1; }
     if (c.type === 'weekly') { return c.times || 1; }
@@ -1276,7 +1316,8 @@ function todoLongList() { return todoDailyList(); }
   function migrateNow() {
     if (!state) { return 0; }
     var moved = migrateLongTasksIntoToDos(state);
-    state = migrate(state);
+    // 导入是合并，不是"用文件替换本机"：跳过孤儿清理（见 migrate 的说明）
+    state = migrate(state, { skipOrphanCleanup: true });
     if (moved) { save(true); }
     return moved;
   }
@@ -1302,7 +1343,16 @@ function todoLongList() { return todoDailyList(); }
     return changed;
   }
 
-  function migrate(s) {
+  /**
+   * 数据迁移。
+   * opts.skipOrphanCleanup（v0.4.4）：导入路径（migrateNow）跳过「孤儿时段 / 变动」清理。
+   * 理由：那份配置可能只是**缺了 courses 数组**（老导出/手工拼的），并不代表本机
+   * 那些有课的时段真的该被删；导入是合并操作，不该顺手物理删本机数据。
+   *   · load() 仍按原逻辑清理（本机存档里的真孤儿该清）；
+   *   · 导入后残留的孤儿留到下次启动的 load() 再清，期间界面本来就画不出来。
+   */
+  function migrate(s, opts) {
+    opts = opts || {};
     if (!s.settings) { s.settings = defaultSettings((s.semesters && s.semesters[0] && s.semesters[0].id) || uid()); }
     if (!s.settings.layout) { s.settings.layout = { preset: 'dual-horizontal', followDeviceSuggestion: true }; }
     // v0.1.8：布局只保留「左右 / 上中下」，旧的「自动」「左中右」统一折算成「左右」
@@ -1351,7 +1401,7 @@ function todoLongList() { return todoDailyList(); }
      * 这些记录界面上永远画不出来（找不到课程直接跳过），但会一直占着文件体积，
      * 大多是早期版本重复导入同一份课表留下的。
      */
-    if (Array.isArray(s.blocks) && Array.isArray(s.courses)) {
+    if (!opts.skipOrphanCleanup && Array.isArray(s.blocks) && Array.isArray(s.courses)) {
       var aliveIds = {};
       for (var ci = 0; ci < s.courses.length; ci++) { aliveIds[s.courses[ci].id] = true; }
       var keptBlocks = [];
@@ -1415,18 +1465,30 @@ function todoLongList() { return todoDailyList(); }
       }
       s.meta.customTabDefaultOn = APP_VERSION;
     }
-    if (!s.meta.countdownsMigrated) {
-      for (var ci = 0; ci < s.countdowns.length; ci++) {
-        var cd = s.countdowns[ci];
-        if (!cd || !cd.date) { continue; }
-        s.events.push({
-          id: 'cdm-' + (cd.id || uid()), title: String(cd.title || '未命名').trim(),
-          type: 'other', date: cd.date, start: '', end: '', place: '', note: '',
-          star: true, showOnTimetable: false, updatedAt: new Date().toISOString()
-        });
+    /**
+     * v0.4.4：去掉一次性闸门，改成按 id 判重的增量迁移（幂等）。
+     * 以前 meta.countdownsMigrated 写过一次就不再迁 —— 用户「清空后导入旧备份」时
+     * countdowns 又出现了，却永远不会变回日程，倒计时看起来全丢了。
+     * 现在每次 migrate 都扫一遍，已经迁过的（id 已存在）跳过，新出现的补进来。
+     * meta.countdownsMigrated 仍然写，留给会读它的旧版本做兼容标记。
+     */
+    for (var ci = 0; ci < s.countdowns.length; ci++) {
+      var cd = s.countdowns[ci];
+      if (!cd || !cd.date) { continue; }
+      // 没 id 的老倒计时用「日期 + 标题」生成确定性 id，避免每次 migrate 都加一条
+      var cdId = 'cdm-' + (cd.id || (String(cd.date) + '-' + String(cd.title || '').trim()));
+      var cdExists = false;
+      for (var ce = 0; ce < s.events.length; ce++) {
+        if (s.events[ce] && s.events[ce].id === cdId) { cdExists = true; break; }
       }
-      s.meta.countdownsMigrated = APP_VERSION;
+      if (cdExists) { continue; }
+      s.events.push({
+        id: cdId, title: String(cd.title || '未命名').trim(),
+        type: 'other', date: cd.date, start: '', end: '', place: '', note: '',
+        star: true, showOnTimetable: false, updatedAt: new Date().toISOString()
+      });
     }
+    s.meta.countdownsMigrated = APP_VERSION;
     /* v0.4.1：回收站 / 墓碑 的保留期限（默认 90 天自动清理；0 = 不自动，纯手动） */
     if (!s.settings.trash) { s.settings.trash = { keepDays: 90 }; }
     if (s.settings.trash.keepDays == null) { s.settings.trash.keepDays = 90; }
@@ -1470,12 +1532,25 @@ function todoLongList() { return todoDailyList(); }
       try {
         state.exportedAt = state.exportedAt; // 保持用户上次导出时间
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // v0.4.6：本地存盘成功后，通知云同步「有改动待推送」（没配置时是空操作）
+    if (AR.Sync && AR.Sync.onLocalSave) { try { AR.Sync.onLocalSave(); } catch (e) { } }
+        saveFailed = false;
       } catch (e) {
+        /**
+         * v0.4.4：写失败以前只打一条 console.error —— 配额满（导入大配置 / 隐私模式）
+         * 时界面看起来"保存成功"，用户下次打开才发现改动全没了。
+         * 现在记下标记并提示（UI 可能还没加载，所以整体兜在 try 里）。
+         */
+        saveFailed = true;
         console.error('保存失败', e);
+        try { if (AR.UI && AR.UI.toast) { AR.UI.toast('存储空间不足，本次改动可能没保存'); } } catch (e2) { /* 提示失败不影响主流程 */ }
       }
     };
     if (immediate) { write(); } else { saveTimer = setTimeout(write, 220); }
   }
+
+  /** 存储健康状态：saveFailed 为 true 表示最近一次写入 localStorage 失败 */
+  function storeStatus() { return { saveFailed: !!saveFailed }; }
 
   function get() { return state; }
 
@@ -2204,7 +2279,13 @@ function todoLongList() { return todoDailyList(); }
    * 把某个 block 在指定日期的实际发生（含调课/停课/换教室）算出来。
    * 返回 item 或 null。
    */
-  function blockOccurrence(block, date, semester, periods) {
+  /**
+   * ovIndex（可选，v0.4.4）：{ blockId: [override] } 预建索引。
+   * dayItems 一次组装一整天时要遍历每个 block，逐个 overridesOfBlock() 会变成
+   * O(block × overrides)；传索引后降为一次 O(overrides)。不传时退回原查找，
+   * 行为与之前完全一致。
+   */
+  function blockOccurrence(block, date, semester, periods, ovIndex) {
     var sem = semester || currentSemester();
     var week = weekNumber(date, sem);
     var wd = weekdayOf(date);
@@ -2214,7 +2295,9 @@ function todoLongList() { return todoDailyList(); }
     };
 
     // 1) 单次覆盖：停课 / 调课（改到别的日期）
-    var ovs = overridesOfBlock(block.id);
+    var ovs;
+    if (ovIndex) { ovs = ovIndex[block.id] || []; }
+    else { ovs = overridesOfBlock(block.id); }
     /**
      * "模板上这一天本来就该上课吗"（星期 + 周次）。
      *
@@ -2277,13 +2360,25 @@ function todoLongList() { return todoDailyList(); }
     var out = [];
     var i, item, block, course, pr;
 
+    /* v0.4.4：一次建好 blockId → overrides 索引（过滤/顺序与 overridesOfBlock 相同），
+       避免下面每个 block 都线性扫一遍全表。 */
+    var ovIndex = {};
+    if (Array.isArray(state.overrides)) {
+      for (i = 0; i < state.overrides.length; i++) {
+        var ov0 = state.overrides[i];
+        if (!ov0 || ov0.deletedAt) { continue; }
+        if (!ovIndex[ov0.blockId]) { ovIndex[ov0.blockId] = []; }
+        ovIndex[ov0.blockId].push(ov0);
+      }
+    }
+
     for (i = 0; i < state.blocks.length; i++) {
       if (state.blocks[i].deletedAt) { continue; }
       block = state.blocks[i];
       course = courseById(block.courseId);
       if (!course) { continue; }
       if (sem && course.semesterId && course.semesterId !== sem.id) { continue; }
-      item = blockOccurrence(block, date, sem, periods);
+      item = blockOccurrence(block, date, sem, periods, ovIndex);
       if (!item) { continue; }
       out.push(decorate(item, block, course, periods));
     }
@@ -2716,7 +2811,7 @@ function todoLongList() { return todoDailyList(); }
   function exportFileName() {
     var d = new Date();
     var name = (state.device && state.device.name) ? state.device.name.replace(/[\\/:*?"<>|\s]/g, '') : 'device';
-    return 'AbbeyRoad-backup-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate())
+    return 'Allegro-backup-' + d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate())
       + '-' + pad2(d.getHours()) + pad2(d.getMinutes()) + '-' + name + '.json';
   }
 
@@ -2746,6 +2841,17 @@ function todoLongList() { return todoDailyList(); }
    * 所以先按内容找同一条记录（学期看开学日期、老师看姓名、地点看原文、
    * 课程看课程名、时段看 课程+星期+节次+周次），找不到才算新增。
    */
+  /**
+   * v0.4.4：数组字段的防御性取值。
+   * 导入的配置是外部数据，(rec.weeks || []).join() 在 weeks 是字符串时会直接
+   * TypeError，让整份导入失败。所有「默认应该是数组」的字段都先过这一层：
+   * 是数组就 join，不是数组就按字符串用（空值 → ''）。
+   */
+  function arrayKey(v) {
+    if (Array.isArray(v)) { return v.join('.'); }
+    return String(v == null ? '' : v);
+  }
+
   function naturalKeyOf(table, rec, maps) {
     if (!rec) { return null; }
     var cid, sem, bid;
@@ -2759,7 +2865,7 @@ function todoLongList() { return todoDailyList(); }
     if (table === 'blocks') {
       cid = rec.courseId && maps.course ? (maps.course[rec.courseId] || rec.courseId) : rec.courseId;
       return ['b', cid, rec.weekday, rec.periodStart, rec.periodEnd,
-        rec.weekMode || 'all', (rec.weeks || []).join('.')].join('|');
+        rec.weekMode || 'all', arrayKey(rec.weeks)].join('|');
     }
     if (table === 'overrides') {
       bid = rec.blockId && maps.block ? (maps.block[rec.blockId] || rec.blockId) : rec.blockId;
@@ -2771,16 +2877,18 @@ function todoLongList() { return todoDailyList(); }
       bid = rec.blockId && maps.block ? (maps.block[rec.blockId] || rec.blockId) : rec.blockId;
       return ['t', bid || rec.courseId || '', rec.date || '', normTaskText(rec.text)].join('|');
     }
-      /* 统一任务：按「文字 + 创建日」配对 —— 跨设备不会把两条同名任务并成一条，
-         同一条任务也不会因为本地改了颜色/计划而重复导入。 */
       /* 速记：按文字配对（跨设备不会重复导入同一条） */
       if (table === 'quickTodos') {
         return ['q', normTaskText(rec.text)].join('|');
       }
       if (table === 'tasks2') {
-        var t2day = '';
-        if (rec.createdAt) { t2day = String(rec.createdAt).slice(0, 10); }
-        return ['t2', normTaskText(rec.text), t2day].join('|');
+        /**
+         * v0.4.4：加 id + 完整 createdAt。
+         * 以前只用「文字 + 创建日」——两台设备同一天各自建一条同名任务，
+         * 导入时会被并成一条（丢一条）。带上 id 后：同一条任务靠 id 配对，
+         * 独立创建的同名任务不再互相吞并；id 缺失的老记录用完整时间戳兜底。
+         */
+        return ['t2', String(rec.id || ''), String(rec.createdAt || ''), normTaskText(rec.text)].join('|');
       }
     return null;
   }
@@ -2808,23 +2916,180 @@ function todoLongList() { return todoDailyList(); }
     return out;
   }
 
-  /** 先算「要新增什么、要更新什么」，预览和真正合并共用同一份逻辑 */
-  function planMerge(incoming) {
-    var plan = { additions: [], updates: [], unknown: [], matched: 0, tombstones: [] };
-    /**
-     * 墓碑（删除记录）只统计「真的会删掉本机某条数据」的那些。
-     * 导入自己刚导出的文件时，墓碑对应的记录早就删掉了，
-     * 全算进来的话预览会写「删除 2」，看着像要误删东西。
-     */
-    var tombs = (incoming && incoming.tombstones) || [];
-    for (var ti = 0; ti < tombs.length; ti++) {
-      var tb = tombs[ti];
-      var live = tb && tb.entity && Array.isArray(state[tb.entity]) ? state[tb.entity] : [];
-      for (var li = 0; li < live.length; li++) {
-        // 已经软删除（在回收站里）的不算"还会删掉本机数据"
-        if (live[li].id === tb.id && !live[li].deletedAt) { plan.tombstones.push(tb); break; }
+  /** 本机某张表里按 id 找一条（含已软删除的） */
+  function recordById(table, id) {
+    var list = state[table];
+    if (!Array.isArray(list)) { return null; }
+    for (var i = 0; i < list.length; i++) { if (list[i] && list[i].id === id) { return list[i]; } }
+    return null;
+  }
+  /** 本机某张表里按 id 找一条**还活着的**（不在回收站里） */
+  function liveRecordById(table, id) {
+    var rec = recordById(table, id);
+    return (rec && !rec.deletedAt) ? rec : null;
+  }
+
+  /**
+   * v0.4.4：墓碑去重（entity + id 取较晚的 deletedAt）。
+   * 以前 applyMerge 是无条件 concat，同一份配置导入两次墓碑就翻倍。
+   */
+  function dedupeTombstones(raw) {
+    var byKey = {}, order = [], out = [];
+    if (!Array.isArray(raw)) { return out; }
+    for (var i = 0; i < raw.length; i++) {
+      var tb = raw[i];
+      if (!tb || !tb.entity || !tb.id) { continue; }
+      var k = tb.entity + ':' + tb.id;
+      if (!byKey[k]) { byKey[k] = tb; order.push(k); }
+      else if (String(tb.deletedAt || '') > String(byKey[k].deletedAt || '')) { byKey[k] = tb; }
+    }
+    for (var j = 0; j < order.length; j++) { out.push(byKey[order[j]]); }
+    return out;
+  }
+
+  /** 把一批墓碑并进 state.tombstones：同一个 entity+id 只留 deletedAt 较晚的那条 */
+  function mergeTombstones(tombs) {
+    state.tombstones = (state.tombstones || []).slice();
+    var idx = {};
+    var i;
+    for (i = 0; i < state.tombstones.length; i++) {
+      var cur = state.tombstones[i];
+      if (!cur || !cur.entity || !cur.id) { continue; }
+      idx[cur.entity + ':' + cur.id] = i;
+    }
+    for (i = 0; i < tombs.length; i++) {
+      var tb = tombs[i];
+      if (!tb || !tb.entity || !tb.id) { continue; }
+      var k = tb.entity + ':' + tb.id;
+      if (idx[k] == null) {
+        idx[k] = state.tombstones.length;
+        state.tombstones.push(tb);
+      } else if (String(tb.deletedAt || '') > String(state.tombstones[idx[k]].deletedAt || '')) {
+        state.tombstones[idx[k]] = tb;
       }
     }
+  }
+
+  /** 丢掉某个 entity+id 的墓碑（本机记录更晚 → 墓碑已过期） */
+  function dropTombstone(entity, id) {
+    state.tombstones = (state.tombstones || []).filter(function (tb) {
+      return !(tb && tb.entity === entity && tb.id === id);
+    });
+  }
+
+  function copyPlain(rec) {
+    var out = {}, k;
+    if (!rec) { return out; }
+    for (k in rec) { if (Object.prototype.hasOwnProperty.call(rec, k)) { out[k] = rec[k]; } }
+    return out;
+  }
+
+  /**
+   * v0.4.4：tasks2.entries 内嵌数组取并集（按 entry.id，同 id 用 stampOf 新者）。
+   * 以前整条记录覆盖更新，会把对面没有的打卡记录一起抹掉。
+   * 「带 deletedAt 的按删除处理」：软删除的 entry 仍留在并集里（只是标记删除），
+   * 这样两边对同一笔的删除/恢复也能靠时间戳分胜负。
+   */
+  function mergeTaskEntries(localEntries, incomingEntries) {
+    var out = [], byId = {}, i, e;
+    var les = Array.isArray(localEntries) ? localEntries : [];
+    var ies = Array.isArray(incomingEntries) ? incomingEntries : [];
+    for (i = 0; i < les.length; i++) {
+      e = les[i];
+      if (!e) { continue; }
+      if (e.id) { byId[e.id] = out.length; }
+      out.push(e);
+    }
+    for (i = 0; i < ies.length; i++) {
+      e = ies[i];
+      if (!e) { continue; }
+      if (!e.id) { out.push(deepCopy(e)); continue; }      // 没有 id 的旧记录：都保留
+      var at = byId[e.id];
+      if (at == null) {
+        byId[e.id] = out.length;
+        out.push(deepCopy(e));
+      } else if (stampOf(e) > stampOf(out[at])) {
+        out[at] = deepCopy(e);                             // 同 id 新者胜（含删除标记）
+      }
+    }
+    return out;
+  }
+
+  /** 合并一条统一任务：记录级 LWW，entries 永远取并集 */
+  function mergeTodoRecord(local, incoming, preferIncoming) {
+    var winner = (preferIncoming || stampOf(incoming) > stampOf(local)) ? incoming : local;
+    var out = copyPlain(winner);
+    out.entries = mergeTaskEntries(local && local.entries, incoming && incoming.entries);
+    return out;
+  }
+
+  /** 整条记录的签名（不含 id）：判断"这份内容是不是已经作为副本存在了" */
+  function recordSignature(rec) {
+    var out = {}, k;
+    if (!rec) { return ''; }
+    for (k in rec) {
+      if (!Object.prototype.hasOwnProperty.call(rec, k)) { continue; }
+      if (k === 'id') { continue; }
+      out[k] = rec[k];
+    }
+    return JSON.stringify(out);
+  }
+
+  /**
+   * 统一任务的「记录级字段」签名（不含 id / entries）：
+   * 冲突判断只看记录级元数据 —— 打卡记录本身永远走并集，不算冲突。
+   */
+  function todoMetaSignature(rec) {
+    var out = {}, k;
+    if (!rec) { return ''; }
+    for (k in rec) {
+      if (!Object.prototype.hasOwnProperty.call(rec, k)) { continue; }
+      if (k === 'id' || k === 'entries') { continue; }
+      out[k] = rec[k];
+    }
+    return JSON.stringify(out);
+  }
+
+  /**
+   * v0.4.4：同一 id、时间戳相同、内容不同 → 真冲突。
+   * 本机保留，对方以新 id 追加为副本。只认「本机确实有同一个 id」的记录；
+   * 按内容键配上的老记录（另一台设备的 id 不同）不做副本，避免无时间戳的老数据翻倍。
+   */
+  function appendConflictCopy(table, rec, maps) {
+    var draft = remapRecordRefs(table, rec, maps, null);   // 先按本地 id 重映射
+    var sig = recordSignature(draft);
+    var list = state[table] || [];
+    for (var i = 0; i < list.length; i++) {
+      // 副本已经被追加过（重复导入同一份文件）→ 不再加第二份
+      if (list[i] && list[i].id !== draft.id && recordSignature(list[i]) === sig) { return false; }
+    }
+    draft.id = uid();
+    state[table].push(draft);
+    return true;
+  }
+
+  function planTombstones(incoming, plan) {
+    var raw = (incoming && Array.isArray(incoming.tombstones)) ? incoming.tombstones : [];
+    var tombs = dedupeTombstones(raw);
+    for (var i = 0; i < tombs.length; i++) {
+      var tb = tombs[i];
+      var live = liveRecordById(tb.entity, tb.id);
+      // 本机记录更晚 → 保留本机、丢弃墓碑（不再"无条件删除"）
+      if (live && String(stampOf(live)) > String(tb.deletedAt || '')) { plan.tombstonesDropped++; continue; }
+      // 已经软删除的不算"还会删掉本机数据"，但墓碑仍要合并（防旧存档复活）
+      if (live) { plan.tombstones.push(tb); }
+    }
+  }
+
+  /** 先算「要新增什么、要更新什么」，预览和真正合并共用同一份逻辑 */
+  function planMerge(incoming, options) {
+    options = options || {};
+    var prefer = !!options.preferIncoming;
+    var plan = {
+      additions: [], updates: [], unknown: [], matched: 0,
+      conflicts: [], tombstones: [], tombstonesDropped: 0
+    };
+    planTombstones(incoming, plan);
     if (typeof incoming.schemaVersion === 'number' && incoming.schemaVersion > SCHEMA_VERSION) {
       plan.unknown.push('文件版本 ' + incoming.schemaVersion + ' 高于当前 App 支持的 ' + SCHEMA_VERSION + '，可能有字段被忽略');
     }
@@ -2842,23 +3107,49 @@ function todoLongList() { return todoDailyList(); }
       var mapName = REF_MAP_NAME[table];
       for (i = 0; i < theirs.length; i++) {
         var rec = theirs[i];
-        if (!rec || !rec.id) { continue; }
+        if (!rec) { continue; }
+        if (!rec.id) {
+          // 老配置 / 手拼配置里可能没有 id：先按内容键配对；配不上再用新 id 当新增
+          rec = copyPlain(rec);
+          rec.id = uid();
+        }
         var key = naturalKeyOf(table, rec, maps);
-        var local = byId[rec.id];
-        var target = local || ((!local && key && byKey[key]) ? byKey[key] : null);
-        if (target) {
-          if (mapName) { maps[mapName][rec.id] = target.id; }
-          if (!local) { plan.matched++; }
-          var lt = Date.parse(target.updatedAt || 0) || 0;
-          var rt = Date.parse(rec.updatedAt || 0) || 0;
-          if (rt > lt && JSON.stringify(rec) !== JSON.stringify(target)) {
-            plan.updates.push({ table: table, id: target.id, rec: rec });
-          }
-        } else {
+        var local = byId[rec.id];                              // ① 优先按记录 id 配对
+        var target = local || ((!local && key && byKey[key]) ? byKey[key] : null);  // ② 退回内容键
+        if (!target) {
           if (mapName) { maps[mapName][rec.id] = rec.id; }
           if (key) { byKey[key] = rec; }
           plan.additions.push({ table: table, rec: rec });
+          continue;
         }
+        if (mapName) { maps[mapName][rec.id] = target.id; }
+        if (!local) { plan.matched++; }
+        var ls = stampOf(target), rs = stampOf(rec);
+        var diff = JSON.stringify(rec) !== JSON.stringify(target);
+        if (table === 'tasks2') {
+          // 同一 id、同一时刻、记录级字段不同 → 冲突副本；entries 本身走并集
+          if (!prefer && local && rs && rs === ls && !target.deletedAt && !rec.deletedAt &&
+              todoMetaSignature(rec) !== todoMetaSignature(target)) {
+            plan.conflicts.push({ table: table, id: target.id, rec: rec });
+            continue;
+          }
+          // 时间更晚的一方决定记录级字段；entries 永远并集（即使对方更旧）
+          if (target.deletedAt && !rec.deletedAt && !prefer && String(target.deletedAt) >= rs) { continue; }
+          var mergedTodo = mergeTodoRecord(target, rec, prefer);
+          if (JSON.stringify(mergedTodo) !== JSON.stringify(target)) {
+            plan.updates.push({ table: table, id: target.id, rec: mergedTodo });
+          }
+          continue;
+        }
+        if (!diff) { continue; }                               // 内容相同：无视时间，什么都不做
+        if (prefer || rs > ls) {
+          // 本机在回收站里、对方只是旧副本 → 不要让旧副本把它复活
+          if (!prefer && target.deletedAt && !rec.deletedAt && String(target.deletedAt) >= rs) { continue; }
+          plan.updates.push({ table: table, id: target.id, rec: rec });
+        } else if (rs && rs === ls && local && !target.deletedAt && !rec.deletedAt) {
+          plan.conflicts.push({ table: table, id: target.id, rec: rec });   // 时间相同内容不同：真冲突
+        }
+        // 本机更晚 / 时间相同但没有本机同 id 记录 → 保留本机
       }
     }
     collectNewTemplates(incoming, plan);
@@ -2882,11 +3173,12 @@ function todoLongList() { return todoDailyList(); }
 
   function previewMerge(incoming) {
     if (!incoming || incoming.kind !== 'abbeyroad.sync') {
-      throw new Error('文件不是 Abbey Road 同步文件（缺少 kind=abbeyroad.sync）');
+      throw new Error('文件不是 Allegro 同步文件（缺少 kind=abbeyroad.sync）');
     }
     var plan = planMerge(incoming);
     var report = {
       added: 0, updated: 0, conflicts: 0, removed: 0,
+      tombstonesDropped: plan.tombstonesDropped || 0,
       unknown: plan.unknown, details: [], matched: plan.matched
     };
     var i;
@@ -2909,6 +3201,15 @@ function todoLongList() { return todoDailyList(); }
         });
       }
     }
+    for (i = 0; i < plan.conflicts.length; i++) {
+      report.conflicts++;
+      if (report.details.length < 40) {
+        report.details.push({
+          table: plan.conflicts[i].table, id: plan.conflicts[i].id,
+          action: 'conflict', label: labelOfRecord(plan.conflicts[i].rec)
+        });
+      }
+    }
     for (i = 0; i < plan.tombstones.length; i++) { report.removed++; }
     return report;
   }
@@ -2916,7 +3217,7 @@ function todoLongList() { return todoDailyList(); }
   /** 应用合并（在预览后调用） */
   function applyMerge(incoming, options) {
     options = options || {};
-    var plan = planMerge(incoming);
+    var plan = planMerge(incoming, options);
     var i, j;
     for (i = 0; i < plan.additions.length; i++) {
       var add = plan.additions[i];
@@ -2933,6 +3234,13 @@ function todoLongList() { return todoDailyList(); }
         }
       }
     }
+    /**
+     * v0.4.4 冲突：同 id、同时间戳、内容不同 → 本机保留，对方以新 id 追加为副本。
+     * 这样两边同时改同一条记录不会丢任何一方的改动（副本在列表里可见、可删）。
+     */
+    for (i = 0; i < plan.conflicts.length; i++) {
+      appendConflictCopy(plan.conflicts[i].table, plan.conflicts[i].rec, plan.maps);
+    }
     if (options.preferIncoming) {
       // 「以对方为准」：同一条记录（含按内容匹配上的）全部用对方的字段覆盖
       for (i = 0; i < MERGE_TABLES.length; i++) {
@@ -2946,7 +3254,15 @@ function todoLongList() { return todoDailyList(); }
           var mappedId = (mapName && plan.maps[mapName] && plan.maps[mapName][rec.id]) || rec.id;
           for (var m = 0; m < (state[table] || []).length; m++) {
             if (state[table][m].id === mappedId) {
-              state[table][m] = remapRecordRefs(table, rec, plan.maps, mappedId);
+              var next = remapRecordRefs(table, rec, plan.maps, mappedId);
+              /**
+               * v0.4.4：tasks2 的 entries 即使「以对方为准」也仍然取并集 ——
+               * 否则选了「以对方为准」又会把本机独有的打卡记录整份抹掉。
+               */
+              if (table === 'tasks2') {
+                next.entries = mergeTaskEntries(state[table][m].entries, rec.entries);
+              }
+              state[table][m] = next;
               break;
             }
           }
@@ -2998,9 +3314,26 @@ function todoLongList() { return todoDailyList(); }
         delete state.settings.schedule.currentSemesterId;
       }
     }
+    /**
+     * v0.4.4：墓碑按 entity+id 去重（较晚的 deletedAt 胜），不再无条件 concat。
+     *   · tomb.deletedAt 比本机记录时间晚（含相同）→ 本机软删除；
+     *   · 本机记录更晚 → 保留本机，并丢掉这条过期墓碑；
+     *   · 本机没有这条记录 → 墓碑照样合并，避免旧存档把它复活。
+     */
     if (Array.isArray(incoming.tombstones)) {
-      for (var t = 0; t < plan.tombstones.length; t++) { applyTombstone(plan.tombstones[t]); }
-      state.tombstones = (state.tombstones || []).concat(incoming.tombstones);
+      var tombs = dedupeTombstones(incoming.tombstones);
+      var keepTombs = [];
+      for (var t = 0; t < tombs.length; t++) {
+        var tb = tombs[t];
+        var live = liveRecordById(tb.entity, tb.id);
+        if (live && String(stampOf(live)) > String(tb.deletedAt || '')) {
+          dropTombstone(tb.entity, tb.id);   // 过期墓碑：丢掉，别在下一步又并回来
+          continue;
+        }
+        keepTombs.push(tb);
+        if (live) { applyTombstone(tb); }
+      }
+      mergeTombstones(keepTombs);
     }
     // 对方的课表用到第 13 节甚至更晚：直接把节次表补齐，别让这些课「没有时间」
     syncPeriodsToUsage();
@@ -3018,15 +3351,19 @@ function todoLongList() { return todoDailyList(); }
   }
 
   function applyTombstone(tomb) {
-    if (!tomb || !tomb.entity) { return; }
+    if (!tomb || !tomb.entity || !tomb.id) { return; }
     var list = state[tomb.entity];
     if (!Array.isArray(list)) { return; }
     /* v0.4.1：对方删掉的东西也在本机「软删除」——进回收站、可恢复，
-       而不是直接从本机抹掉（否则两台设备的回收站内容不一致）。 */
+       而不是直接从本机抹掉（否则两台设备的回收站内容不一致）。
+       v0.4.4：墓碑不再无视时间 —— 只有墓碑时间 >= 本机记录时间才删；
+       本机改得更晚就保留本机（过期墓碑在 applyMerge 里会被丢掉）。 */
+    var when = String(tomb.deletedAt || new Date().toISOString());
     for (var i = 0; i < list.length; i++) {
       if (list[i].id === tomb.id && !list[i].deletedAt) {
-        list[i].deletedAt = tomb.deletedAt || new Date().toISOString();
-        list[i].updatedAt = list[i].deletedAt;
+        if (String(stampOf(list[i])) > when) { continue; }
+        list[i].deletedAt = when;
+        list[i].updatedAt = when;
       }
     }
   }
@@ -3057,11 +3394,14 @@ function todoLongList() { return todoDailyList(); }
     return out;
   }
 
-  /** 记录的新鲜度：改过的时间与删除时间取较晚的那个（合并时比大小用） */
+  /**
+   * 记录的新鲜度（v0.4.4 合并用）：updatedAt → createdAt → ''。
+   * 都存成 ISO 字符串，所以直接字符串比较就是时间比较（不用 Date.parse，
+   * 避免时区/非法值把「新者胜」判错）。
+   */
   function stampOf(rec) {
     if (!rec) { return ''; }
-    var a = rec.updatedAt || '', b = rec.deletedAt || '';
-    return a > b ? a : b;
+    return String(rec.updatedAt || rec.createdAt || '');
   }
 
   /** 打删除标记（不物理移除）+ 记墓碑 */
@@ -3086,6 +3426,10 @@ function todoLongList() { return todoDailyList(); }
     if (entity === 'longTaskEntries') {
       var t = longTaskById(parentId);
       list = (t && t.entries) || [];
+    } else if (entity === 'taskEntries') {
+      // 统一任务（tasks2）的打卡记录同样是软删除的，恢复要回到它自己那条任务里
+      var t2r = todoById(parentId);
+      list = (t2r && t2r.entries) || [];
     } else {
       list = state[entity] || [];
     }
@@ -3119,7 +3463,7 @@ function todoLongList() { return todoDailyList(); }
 
   /** 清空回收站：把已删记录真正从文件里拿掉（墓碑留着，避免被旧存档复活） */
   function emptyTrash() {
-    var ents = ['events', 'courses', 'blocks', 'overrides', 'tasks', 'longTasks', 'quickTodos', 'types'];
+    var ents = ['events', 'courses', 'blocks', 'overrides', 'tasks', 'tasks2', 'longTasks', 'quickTodos', 'types'];
     for (var e = 0; e < ents.length; e++) {
       var k = ents[e];
       if (Array.isArray(state[k])) {
@@ -3130,6 +3474,13 @@ function todoLongList() { return todoDailyList(); }
     for (var i = 0; i < lt.length; i++) {
       if (Array.isArray(lt[i].entries)) {
         lt[i].entries = lt[i].entries.filter(function (x) { return !isDeleted(x); });
+      }
+    }
+    // 统一任务（tasks2）的打卡记录同理
+    var tk = state.tasks2 || [];
+    for (var ti = 0; ti < tk.length; ti++) {
+      if (Array.isArray(tk[ti].entries)) {
+        tk[ti].entries = tk[ti].entries.filter(function (x) { return !isDeleted(x); });
       }
     }
     save(true);
@@ -3158,6 +3509,16 @@ function todoLongList() { return todoDailyList(); }
     collect('tasks', '作业条目', function (r) { return r.text || ''; }, function (r) { return r.date || ''; });
     collect('longTasks', '长期任务', function (r) { return r.name || ''; }, function () { return '连同全部进度记录'; });
     collect('quickTodos', '待办速记', function (r) { return r.text || ''; }, null);
+    /**
+     * 统一任务（tasks2）：删除任务走的是 softDelete('tasks2', …)，
+     * 但回收站以前**没收这张表** —— 界面上写着「任务会进回收站（可恢复）」，
+     * 实际既看不到也恢复不了，还永远不会被清理。这里补齐。
+     */
+    collect('tasks2', '任务', function (r) { return r.text || '未命名任务'; },
+      function (r) {
+        var g = r.goal;
+        return g && Number(g.target) ? ('目标 ' + g.target + (g.unit || '')) : '未设目标';
+      });
     collect('types', '日程类型', function (r) { return r.label || ''; }, function () { return '恢复后相关日程会跟着回来'; });
     var lt = state.longTasks || [];
     for (var i = 0; i < lt.length; i++) {
@@ -3168,6 +3529,19 @@ function todoLongList() { return todoDailyList(); }
           entity: 'longTaskEntries', id: entries[j].id, parentId: lt[i].id, label: '长期任务记录',
           title: (lt[i].name || '长期任务') + ' +' + (entries[j].amount != null ? entries[j].amount : ''),
           sub: longTaskEntryDay(entries[j]), deletedAt: entries[j].deletedAt || '', rec: entries[j]
+        });
+      }
+    }
+    // 统一任务的打卡记录（单独删掉的一笔）
+    var tk2 = state.tasks2 || [];
+    for (var k2 = 0; k2 < tk2.length; k2++) {
+      var tes = tk2[k2].entries || [];
+      for (var j2 = 0; j2 < tes.length; j2++) {
+        if (!isDeleted(tes[j2])) { continue; }
+        out.push({
+          entity: 'taskEntries', id: tes[j2].id, parentId: tk2[k2].id, label: '任务记录',
+          title: (tk2[k2].text || '任务') + ' +' + (tes[j2].amount != null ? tes[j2].amount : ''),
+          sub: tes[j2].day || '', deletedAt: tes[j2].deletedAt || '', rec: tes[j2]
         });
       }
     }
@@ -3187,7 +3561,7 @@ function todoLongList() { return todoDailyList(); }
     if (!keep || keep <= 0) { return { records: 0, tombstones: 0, skipped: true }; }
     var cut = new Date(Date.now() - keep * 86400000).toISOString();
     var removed = 0;
-    var ents = ['events', 'courses', 'blocks', 'overrides', 'tasks', 'longTasks', 'quickTodos', 'types'];
+    var ents = ['events', 'courses', 'blocks', 'overrides', 'tasks', 'tasks2', 'longTasks', 'quickTodos', 'types'];
     for (var e = 0; e < ents.length; e++) {
       var k = ents[e];
       if (!Array.isArray(state[k])) { continue; }
@@ -3200,6 +3574,15 @@ function todoLongList() { return todoDailyList(); }
     for (var i = 0; i < lt.length; i++) {
       if (!Array.isArray(lt[i].entries)) { continue; }
       lt[i].entries = lt[i].entries.filter(function (x) {
+        if (x && x.deletedAt && x.deletedAt < cut) { removed++; return false; }
+        return true;
+      });
+    }
+    // 统一任务的打卡记录也要按保留期限清理（否则只增不减）
+    var tk = state.tasks2 || [];
+    for (var ti = 0; ti < tk.length; ti++) {
+      if (!Array.isArray(tk[ti].entries)) { continue; }
+      tk[ti].entries = tk[ti].entries.filter(function (x) {
         if (x && x.deletedAt && x.deletedAt < cut) { removed++; return false; }
         return true;
       });
@@ -3224,7 +3607,8 @@ function todoLongList() { return todoDailyList(); }
     daysBetween: daysBetween,
     weekdayOf: weekdayOf, mondayOf: mondayOf, hmToMinutes: hmToMinutes,
     minutesToHM: minutesToHM, clamp: clamp, escapeHtml: escapeHtml, deepCopy: deepCopy,
-    debounce: debounce, WEEKDAY_NAMES: WEEKDAY_NAMES, PALETTE: PALETTE, colorHex: colorHex
+    debounce: debounce, WEEKDAY_NAMES: WEEKDAY_NAMES, PALETTE: PALETTE, colorHex: colorHex,
+    cssColor: cssColor
   };
 
   AR.Const = {
@@ -3234,7 +3618,7 @@ function todoLongList() { return todoDailyList(); }
   };
 
   AR.Store = {
-    load: load, save: save, get: get, reset: reset, reload: reload, migrate: migrate,
+    load: load, save: save, storeStatus: storeStatus, get: get, reset: reset, reload: reload, migrate: migrate,
     currentSemester: currentSemester, periodsOf: periodsOf,
     courseById: courseById, teacherById: teacherById, locationById: locationById,
     blocksOfCourse: blocksOfCourse, overridesOfBlock: overridesOfBlock,
@@ -3284,6 +3668,8 @@ function todoLongList() { return todoDailyList(); }
     typeList: typeList, typeUpsert: typeUpsert, typeRemove: typeRemove,
     exportPayload: exportPayload, exportFileName: exportFileName,
     previewMerge: previewMerge, applyMerge: applyMerge, markDeleted: markDeleted,
+    /* v0.4.6：云同步要拿到精确的 additions/updates/conflicts 计数 */
+    planMerge: planMerge,
     /* v0.4.1 软删除 + 回收站 */
     isDeleted: isDeleted, softDelete: softDelete, restore: restore, trashList: trashList,
     emptyTrash: emptyTrash, liveOnly: liveOnly, courseList: courseList, stampOf: stampOf,

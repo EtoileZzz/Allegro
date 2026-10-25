@@ -1,4 +1,4 @@
-package com.ganxing.abbeyroad;
+package com.etoilezzz.allegro;
 
 import android.app.PendingIntent;
 import android.appwidget.AppWidgetManager;
@@ -58,7 +58,7 @@ final class WidgetRenderer {
 
     private static RemoteViews buildHead(Context ctx, WidgetData d) {
         RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_head);
-        v.setTextViewText(R.id.h_title, empty(d.dateText, "Abbey Road"));
+        v.setTextViewText(R.id.h_title, empty(d.dateText, "Allegro"));
         v.setTextViewText(R.id.h_sub, empty(d.todaySub, "还没有导入课表"));
         v.setTextViewText(R.id.h_badge, empty(d.todayBadge, "—"));
         // 0.4.1c：元素开关（关掉的直接隐藏，不留空位）
@@ -73,17 +73,123 @@ final class WidgetRenderer {
     private static RemoteViews buildNext(Context ctx, WidgetData d) {
         RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_next);
         boolean has = d.nextName != null && d.nextName.length() > 0;
-        v.setTextViewText(R.id.n_label, empty(d.nextLabel, "下一节课"));
-        v.setTextViewText(R.id.n_in, has ? empty(d.nextIn, "") : "");
+        long now = System.currentTimeMillis();
+
+        String label = empty(d.nextLabel, "下一节课");
+        String inText = has ? empty(d.nextIn, "") : "";
+        String timeText = has ? d.nextTime : "导入课表后这里会显示下一节课";
+        String placeText = has ? d.nextPlace : "";
+
+        // A7：有 nextStartMs 就用「现在」现算，网页算好的静态文案只作兜底。
+        // 老 payload 没有这些字段（nextStartMs = 0），行为与以前完全一致。
+        if (has && d.nextStartMs > 0L) {
+            label = nextLabelText(d, now);
+            inText = nextInText(d, now);
+            timeText = withDayPrefix(d, now, d.nextTime);
+        }
+
+        v.setTextViewText(R.id.n_label, label);
+        v.setTextViewText(R.id.n_in, inText);
         v.setTextViewText(R.id.n_name, has ? d.nextName : "最近没有安排");
-        v.setTextViewText(R.id.n_time, has ? d.nextTime : "导入课表后这里会显示下一节课");
-        v.setTextViewText(R.id.n_place, has ? d.nextPlace : "");
+        v.setTextViewText(R.id.n_time, timeText);
+        v.setTextViewText(R.id.n_place, placeText);
         // 0.4.1c：元素开关 —— 关掉的行隐藏
         v.setViewVisibility(R.id.n_in, d.hidden("nextIn") ? View.GONE : View.VISIBLE);
         v.setViewVisibility(R.id.n_time, d.hidden("nextTime") ? View.GONE : View.VISIBLE);
         v.setViewVisibility(R.id.n_place, d.hidden("nextPlace") ? View.GONE : View.VISIBLE);
         v.setOnClickPendingIntent(R.id.n_root, open(ctx, has ? "today" : "import", 11));
         return v;
+    }
+
+    /** 正在上课（有起止时间且当前落在区间内）。 */
+    private static boolean isOngoing(WidgetData d, long now) {
+        return d.nextStartMs > 0L && now >= d.nextStartMs
+                && d.nextEndMs > d.nextStartMs && now < d.nextEndMs;
+    }
+
+    /** 倒计时/状态：N 分钟后 → 进行中 → 已开始；没有时间戳就沿用网页的静态文案。 */
+    private static String nextInText(WidgetData d, long now) {
+        long start = d.nextStartMs;
+        if (start <= 0L) { return empty(d.nextIn, ""); }
+        if (now < start) {
+            long mins = (start - now + 59999L) / 60000L;   // 向上取整：差 1 秒也说「1 分钟后」
+            if (mins < 1L) { mins = 1L; }
+            if (mins < 60L) { return mins + " 分钟后"; }
+            long hours = mins / 60L;
+            long rest = mins % 60L;
+            if (hours < 24L) {
+                return rest == 0L ? (hours + " 小时后") : (hours + " 小时 " + rest + " 分后");
+            }
+            return (hours / 24L) + " 天后";
+        }
+        if (isOngoing(d, now)) {
+            long left = (d.nextEndMs - now + 59999L) / 60000L;
+            return left > 0L ? ("进行中 · 还剩 " + left + " 分钟") : "进行中";
+        }
+        return "已开始";
+    }
+
+    /** 上课中把标签从「下一节课」改成「正在上课」。 */
+    private static String nextLabelText(WidgetData d, long now) {
+        return isOngoing(d, now) ? "正在上课" : empty(d.nextLabel, "下一节课");
+    }
+
+    /** 时间行前面补「今天 / 明天 / 10月21日 周二」——跨天后不会再停在昨天。 */
+    private static String withDayPrefix(WidgetData d, long now, String base) {
+        String prefix = nextDayText(d, now);
+        String b = base == null ? "" : base;
+        if (prefix.length() == 0) { return b; }
+        return b.length() == 0 ? prefix : (prefix + " · " + b);
+    }
+
+    private static String nextDayText(WidgetData d, long now) {
+        long start = d.nextStartMs;
+        if (start <= 0L) { return ""; }
+        // dayKey 是网页生成快照那天；它和 nextStartMs 不在同一天说明数据自相矛盾，
+        // 这时只用绝对日期，不猜「今天 / 明天」。
+        boolean consistent = true;
+        if (d.dayKey != null && d.dayKey.length() > 0) {
+            consistent = d.dayKey.equals(dayKeyOf(start));
+        }
+        if (consistent) {
+            String startKey = dayKeyOf(start);
+            if (startKey.equals(dayKeyOf(now))) { return "今天"; }
+            if (startKey.equals(dayKeyOfNextDay(now))) { return "明天"; }
+        }
+        return monthDayText(start);
+    }
+
+    private static String dayKeyOf(long ms) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(ms);
+        return dayKeyOf(c);
+    }
+
+    private static String dayKeyOfNextDay(long ms) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(ms);
+        c.add(java.util.Calendar.DAY_OF_MONTH, 1);
+        return dayKeyOf(c);
+    }
+
+    private static String dayKeyOf(java.util.Calendar c) {
+        return c.get(java.util.Calendar.YEAR) + "-" + two(c.get(java.util.Calendar.MONTH) + 1)
+                + "-" + two(c.get(java.util.Calendar.DAY_OF_MONTH));
+    }
+
+    private static String two(int v) {
+        return v < 10 ? ("0" + v) : String.valueOf(v);
+    }
+
+    private static final String[] WEEKDAY_CN = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+
+    private static String monthDayText(long ms) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(ms);
+        int idx = c.get(java.util.Calendar.DAY_OF_WEEK) - 1;   // 1 = 周日
+        if (idx < 0 || idx > 6) { idx = 0; }
+        return (c.get(java.util.Calendar.MONTH) + 1) + "月" + c.get(java.util.Calendar.DAY_OF_MONTH)
+                + "日 " + WEEKDAY_CN[idx];
     }
 
     /* ── ③ 今日课程清单 ───────────────────────────────────────── */
@@ -163,7 +269,7 @@ final class WidgetRenderer {
         RemoteViews v = new RemoteViews(ctx.getPackageName(), R.layout.widget_shortcuts);
         String title = d.today.size() > 0
                 ? (empty(d.dateText, "今天") + " · " + d.today.size() + " 节课")
-                : empty(d.dateText, "Abbey Road") + " · 今天没有课";
+                : empty(d.dateText, "Allegro") + " · 今天没有课";
         v.setTextViewText(R.id.s_title, title);
         v.setOnClickPendingIntent(R.id.s_today, open(ctx, "today", 20));
         v.setOnClickPendingIntent(R.id.s_week, open(ctx, "week", 21));

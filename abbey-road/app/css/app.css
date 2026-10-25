@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 界面样式
+   Allegro · 界面样式
    说明：目标运行环境是 Chromium 101（Android WebView 101 / WebView2 152），
    因此不使用 :has()、CSS 嵌套、@container、color-mix 等更新的特性。
    ────────────────────────────────────────────────────────────── */
@@ -388,8 +388,10 @@ input, textarea { user-select: text; }
   100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
 }
 
-/* 键盘可达性：焦点环 */
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+/* 键盘可达性：焦点环。
+   只画 outline，**不要**在这里写 border-radius：胶囊按钮 999px、卡片 14~20px
+   会在键盘聚焦的一瞬间突变成方角；outline 本来就跟随元素自身的圆角绘制。 */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .zone:focus-visible { outline-offset: -3px; }
 
 .input, textarea.input, select.input {
@@ -583,9 +585,12 @@ input[type="range"]::-moz-range-thumb {
 .fix-row .idx { font-size: 11px; color: var(--text-tertiary); }
 
 /* ── 设置 ──────────────────────────────────────────────────── */
+/* 兜底定义；设置页真正生效的是下方 `.settings-body .settings-grid`（单列堆叠）。
+   这里**绝不能**再写 repeat(auto-fill, ...)：宽屏下它会把「搜索框」和
+   「整张分类列表」拆成左右两列（详见文件后部「设置页 · 宽屏断点策略」）。 */
 .settings-grid {
   flex: 1 1 auto; min-height: 0; overflow-y: auto;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  display: grid; grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3); align-content: start; padding-bottom: var(--sp-6);
 }
 .settings-grid .panel { margin-bottom: 0; }
@@ -812,33 +817,15 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   v0.1.1 新增：设置页导航 / 周次快切 / 月视图 / 区域展开
+   v0.1.1 新增：设置页外壳 / 周次快切 / 月视图 / 区域展开
    ══════════════════════════════════════════════════════════════ */
 
-/* ── 设置页：左侧分类导航（两端统一，始终在左，可滚动可点击） ── */
+/**
+ * 设置页外壳。v0.4.0 起左侧分类导航已删除（index.html 里没有 .settings-nav 节点），
+ * 这里只剩一个 flex 容器包住唯一的 .settings-body；保留 justify-content:center
+ * 是为了宽屏下 .settings-body 的 max-width 生效后仍然居中。
+ */
 .settings-shell { display: flex; gap: var(--sp-3); flex: 1 1 auto; min-height: 0; justify-content: center; }
-.settings-nav {
-  flex: 0 0 168px; width: 168px; padding: 10px;
-  border-radius: var(--r-panel);
-  display: flex; flex-direction: column; gap: 2px;
-  overflow-y: auto; overflow-x: hidden;
-  max-height: 100%; align-content: start;
-  -webkit-overflow-scrolling: touch;
-}
-.settings-nav button {
-  appearance: none; border: 0; background: transparent; color: var(--text-secondary);
-  text-align: left; padding: 9px 12px; border-radius: 12px; cursor: pointer;
-  font: inherit; font-size: 13px; white-space: nowrap; position: relative; overflow: hidden;
-  flex: 0 0 auto; text-overflow: ellipsis;
-  transition: background 200ms var(--ease-standard), color 200ms var(--ease-standard),
-              transform 220ms var(--ease-emphasized);
-}
-.settings-nav button:hover { background: var(--bg-subtle); color: var(--text-primary); }
-.settings-nav button:active { transform: scale(0.985); }
-.settings-nav button.active {
-  background: var(--accent-soft); color: var(--accent); font-weight: 600;
-  transition: background 260ms var(--ease-emphasized), color 200ms var(--ease-standard);
-}
 .settings-body {
   flex: 1 1 auto; min-width: 0; min-height: 0;
   overflow-y: auto; overflow-x: hidden;
@@ -847,9 +834,17 @@ input[type="range"]::-moz-range-thumb {
   padding: 2px 10px var(--sp-6);
   -webkit-overflow-scrolling: touch;
 }
+/**
+ * 设置页的「页面块」容器：搜索框 / 分类首页 / 返回条 / 二级页内容 都直接挂在这里。
+ * 它**只负责纵向堆叠，绝不分栏**。
+ * 以前这里是 repeat(auto-fill, minmax(340px,1fr)) 的多列网格 —— 宽屏下浏览器会把
+ * 两个直接子元素（搜索框、整张分类列表）各塞进一列：左边一根 364px 的搜索框，
+ * 右边一列 364px 里叠着全部分类卡。这就是 PC 端设置页看起来「挤成一团、右边空一块」
+ * 的根因。多列只允许出现在 `.set-home`（分类卡网格）或卡片内部。
+ */
 .settings-body .settings-grid {
   overflow: visible; flex: none; display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3); align-content: start; padding-bottom: var(--sp-6);
 }
 /* 面板要能被栅格轨道压窄：默认 min-width:auto 会让"内容最宽的那一项"
@@ -955,12 +950,10 @@ input[type="range"]::-moz-range-thumb {
 .zone-head-right { display: flex; align-items: center; gap: 6px; }
 
 @media (max-width: 900px) {
-  /* 窄屏也保留左侧导航，只是更窄、字号更小；两边各自独立滚动 */
+  /* 窄屏：外壳间距和滚动区内边距收一点，单列由上一条 .settings-grid 规则保证 */
   .settings-shell { gap: var(--sp-2); }
-  .settings-nav { flex: 0 0 104px; width: 104px; padding: 6px; }
-  .settings-nav button { padding: 8px 9px; font-size: 11.5px; border-radius: 10px; }
   .settings-body { padding: 2px 8px 14px; }
-  .settings-body .settings-grid { grid-template-columns: 1fr; }
+  .settings-body .settings-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1099,8 +1092,7 @@ input[type="range"]::-moz-range-thumb {
    ══════════════════════════════════════════════════════════════ */
 
 /* ── 按钮：按压 90/260ms，无外发光，无投影 ─────────────────── */
-.btn, .chip-btn, .module, .icon-btn, .preset-card, .nav-btn, .week-chip, .seg, .zone-toggle,
-.settings-nav button {
+.btn, .chip-btn, .module, .icon-btn, .preset-card, .nav-btn, .week-chip, .seg, .zone-toggle {
   position: relative; overflow: hidden;
   -webkit-tap-highlight-color: transparent;
 }
@@ -1178,19 +1170,6 @@ input[type="range"]::-moz-range-thumb {
   background: transparent; box-shadow: none; color: var(--accent);
   font-weight: 600;
 }
-
-/* ── 设置页导航：更窄、字号更小、选中放大 ─────────────────── */
-.settings-nav { flex: 0 0 148px; width: 148px; padding: 8px; }
-.settings-nav button {
-  font-size: 12px; padding: 8px 10px;
-  transform-origin: left center; transform: scale(1);
-  transition: transform var(--dur-press-out) var(--ease-fade-out),
-              background var(--dur-tab-color) var(--ease-fade-out),
-              color var(--dur-tab-color) var(--ease-fade-out);
-  text-overflow: clip; overflow: visible;
-}
-.settings-nav button.active { transform: scale(1.06); background: var(--accent-soft); color: var(--accent); }
-.settings-nav button:active { transform: scale(0.99); transition-duration: var(--dur-press-in); }
 
 /* ── 导入页可以上下滑动 ───────────────────────────────────── */
 /* 让高度约束真正成立：app(row flex) → main(column flex) → view(column flex) → 面板 → 滚动区 */
@@ -1366,37 +1345,14 @@ body { text-size-adjust: 100%; }
 
 /* ══════════════════════════════════════════════════════════════
    v0.1.6
-   ① 设置页导航：窄栏 + 选中项变宽/字大/加粗，未选中平滑回缩
-   ② 今日日程：简洁长条卡片；本周概览：迷你周表（与「周表」同构）
-   ③ 文字一律换行显示，不再用省略号截断
-   ④ 卡片之间的小白条：长按空白处 200ms 渐显，拖动即可改栏位尺寸
+   ① 今日日程：简洁长条卡片；本周概览：迷你周表（与「周表」同构）
+   ② 文字一律换行显示，不再用省略号截断
+   ③ 卡片之间的小白条：长按空白处 200ms 渐显，拖动即可改栏位尺寸
+   （原「设置页导航」条目随左侧导航一起删除，v0.4.0 起设置只有
+     分类首页 → 二级页 → 返回，没有左侧栏）
    ══════════════════════════════════════════════════════════════ */
 
-/* ── ① 设置页导航 ─────────────────────────────────────────── */
-.settings-nav {
-  flex: 0 0 104px; width: 104px; padding: 6px; gap: 2px;
-  overflow-x: visible; overflow-y: auto;
-}
-.settings-nav button {
-  font-size: 11px; padding: 7px 8px; border-radius: 10px;
-  white-space: normal; line-height: 1.25;
-  text-overflow: clip; overflow: visible; min-width: 0;
-  transform-origin: left center; transform: scale(1);
-  transition: transform 220ms var(--ease-smooth), background 200ms var(--ease-fade-out),
-              color 200ms var(--ease-fade-out), font-size 180ms var(--ease-fade-out),
-              padding 220ms var(--ease-smooth), box-shadow 220ms var(--ease-smooth);
-}
-.settings-nav button:hover { background: var(--bg-subtle); color: var(--text-primary); }
-.settings-nav button.active {
-  font-size: 12.5px; font-weight: 700; padding: 9px 10px;
-  margin: 0 -10px;                       /* 向两侧"长"出去 → 视觉上变宽 */
-  transform: scale(1.03);
-  background: var(--accent-soft); color: var(--accent);
-  box-shadow: 0 2px 10px var(--accent-glow);
-}
-.settings-nav button.active:active { transform: scale(0.99); }
-
-/* ── ③ 任何摘要文字都换行显示，不省略 ─────────────────────── */
+/* ── ② 任何摘要文字都换行显示，不省略 ─────────────────────── */
 .zone-compact { max-width: 100%; }
 .zone-compact .zc-big,
 .zone-compact .zc-small,
@@ -1646,10 +1602,6 @@ body { text-size-adjust: 100%; }
 .modal-root.open .modal-card { transform: scale(1); }
 .modal-root.closing .modal-card { transform: scale(0.96); }
 
-/* ── 设置页导航：不要"按下去缩一下"的廉价动效，只保留选中态变大 ── */
-.settings-nav button:active { transform: scale(1); transition-duration: 0ms; }
-.settings-nav button.active:active { transform: scale(1.03); }
-
 /* ── 迷你周表：底部留白更舒服 ── */
 .rail-mini { margin-bottom: 2px; }
 
@@ -1736,24 +1688,14 @@ body { text-size-adjust: 100%; }
 
 /* ══════════════════════════════════════════════════════════════
    v0.1.8
-   ① 设置页导航再收窄一点（文字仍完整显示）
-   ② 导入页：两行 Tab（1 提示词 / 2 课表文本，加粗带序号；手动添加 / 配置文件 在下一行）
-   ③ 课表文本页：下滑提示 + 「应用到课表」钉在右下角的悬浮按钮
-   ④ 引导：底部操作条固定，下一步永远在右下角
-   ⑤ 今日页删掉小白条（栏位尺寸只在设置里用滑块改）
+   ① 导入页：两行 Tab（1 提示词 / 2 课表文本，加粗带序号；手动添加 / 配置文件 在下一行）
+   ② 课表文本页：下滑提示 + 「应用到课表」钉在右下角的悬浮按钮
+   ③ 引导：底部操作条固定，下一步永远在右下角
+   ④ 今日页删掉小白条（栏位尺寸只在设置里用滑块改）
+   （原「设置页导航再收窄」随左侧导航一起删除：v0.4.0 起没有 .settings-nav）
    ══════════════════════════════════════════════════════════════ */
 
-/* ── ① 设置页导航再窄一档 ─────────────────────────────────── */
-.settings-nav { flex: 0 0 92px; width: 92px; padding: 5px; }
-.settings-nav button { font-size: 10.5px; padding: 6px 6px; }
-.settings-nav button.active {
-  font-size: 12px; padding: 8px 6px; margin: 0; transform: scale(1.02);
-}
-.settings-nav button.active:active { transform: scale(0.99); }
-/* 选中项的"变宽"靠字号 + 加粗 + 缩放实现，不用负外边距，避免出现横向滚动条 */
-.settings-nav { overflow-x: hidden; }
-
-/* ── ② 导入页的两行 Tab ───────────────────────────────────── */
+/* ── ① 导入页的两行 Tab ───────────────────────────────────── */
 #importTabs { margin-bottom: 6px; }
 #importSubNav { margin-bottom: 12px; }
 #importTabs .seg-step { font-weight: 700; letter-spacing: .2px; }
@@ -2876,6 +2818,14 @@ body[data-perf] {
   backdrop-filter: none !important;
 }
 
+/* 引导遮罩的模糊在 ::before 伪元素上，而 `body[data-perf] *` **匹配不到伪元素** ——
+   低端机 / 流畅模式下这片全屏 blur(6px) 仍会每帧合成。这里单独兜一条，
+   顺便把半透明加深一点补回清晰度（遮罩本来就要压住后面的界面）。 */
+body[data-perf] .onboarding::before {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  background: rgba(10, 12, 16, .55);
+}
+
 /* 背景柔光斑：blur(40px) 大模糊层 → 静态软边渐变（无 filter，光栅化一次就完）
    深度档下直接隐藏；glass 已被压成 off，卡片改用实色，可读性不受影响 */
 body[data-perf] .blob { filter: none; }
@@ -2999,6 +2949,8 @@ body[data-perf="min"] .blob { display: none; }
 }
 
 /* ══════════ 设置（v0.4.0 B′）：分类列表 + 行内高频项 ══════════ */
+/* 760px 只是「窄屏上限」，手机/平板本来就够不到它；
+   宽屏（≥900px）由本节末尾的宽屏规则放宽到 1120px 并分两列。 */
 .settings-body { max-width: 760px; margin: 0 auto; width: 100%; }
 .set-home { display: flex; flex-direction: column; gap: 14px; }
 .set-cat {
@@ -3057,11 +3009,12 @@ body[data-perf="min"] .blob { display: none; }
 .q-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 208px; }
 .q-btns .chip-btn { width: 100%; text-align: center; }
 .q-ver { font-size: 12px; color: var(--text-secondary); }
-/* 宽屏：高频项两列排，仍然对齐 */
+/* 平板 / 小窗：高频项两列排，label 撑满单元格剩余宽度，
+   控件被推到单元格右边缘 —— 同一行里的控件不会跟着 label 长短忽左忽右。 */
 @media (min-width: 640px) {
   .q-row { flex-direction: row; flex-wrap: wrap; align-items: center; }
   .q-item { flex: 1 1 calc(50% - 10px); min-width: 260px; }
-  .q-item .q-label { flex: 0 1 auto; }
+  .q-item .q-label { flex: 1 1 auto; }
 }
 
 /* 搜索：命中清单（分类 · 项目） */
@@ -3077,6 +3030,9 @@ body[data-perf="min"] .blob { display: none; }
 .hit-cat { flex: none; font-size: 11.5px; color: var(--text-tertiary); }
 .hit-item { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 搜索命中行右侧的小箭头。**不要复用 .set-cat-go** —— 那是 68×30 的「进入」胶囊，
+   每行命中顶一个大药丸会把分类 · 命中文本挤成一条缝。 */
+.hit-go { flex: none; font-size: 13px; color: var(--text-tertiary); }
 
 /* 二级页：返回条 + 内容 */
 .set-back { display: flex; align-items: center; gap: 10px; padding: 2px 0 12px; }
@@ -3087,6 +3043,54 @@ body[data-perf="min"] .blob { display: none; }
 @keyframes setHitFlash {
   0% { box-shadow: 0 0 0 3px var(--accent-glow); background: var(--accent-soft); }
   100% { box-shadow: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   设置页 · 宽屏断点策略（≥900px：PC / WebView2 大窗口）
+
+   历史问题（已修）：整页被 .settings-body 的 max-width:760px 限成一根窄柱，
+   而 .settings-grid 当时是 repeat(auto-fill, minmax(340px,1fr)) 的多列网格 ——
+   它的两个直接子元素「搜索框」和「分类列表」被分进两列，列表只剩 364px；
+   卡片里的 .q-item 又按 50%/min-260px 想排两列却排不下，label 与固定 180px 的
+   分段控件互相挤、控件位置随 label 长短参差。
+
+   现在的策略（只影响 ≥900px，<900px 一个字不变）：
+     · 整页上限 760 → 1120px（写在下面的 .settings-body 里，改宽度只改这一处）；
+     · 分类卡网格放在 .set-home：固定两列 repeat(2, minmax(0,1fr))
+       → 两列永远是「(容器宽 - 14)/2」，左右边缘严格对齐，不会一宽一窄。
+       900px 窗口下每列 ≈370px：label 仍有 ~127px，180px 分段控件放得下；
+       1120px 上限时每列 541px，label ~305px。
+       以后要三列：把这里改成 repeat(3, minmax(0,1fr))，并把 .settings-body
+       的 1120px 放宽到 ~1500px（三列每列至少 430px 才不挤）。
+     · 卡片内部：.set-cat 纵向 flex + .q-row 贴底（margin-top:auto）
+       → 同一排卡片等高，高频项底边 / 卡底都对齐（项数相同的卡，连
+         高频项顶部那条分区线也齐；项数不同的卡空出的高度留在标题下方）。
+     · .q-item 一行一项、label 撑满、控件贴右
+       → 控件宽度固定（分段 180 / 按钮组 208），右边缘全部对齐，不再互相挤压。
+   窄屏（<900px，含所有手机）完全不进这个媒体查询。 */
+@media (min-width: 900px) {
+  .settings-body { max-width: 1120px; padding: 2px 12px var(--sp-6); }
+  /* 搜索框不跟着 1120px 拉成一条长线（命中清单同宽，才好扫读） */
+  .set-search { max-width: 620px; }
+  /* 分类卡：固定两列，卡片等高 */
+  .set-home {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    align-items: stretch;
+  }
+  .set-cat { display: flex; flex-direction: column; }
+  .set-cat-head { flex: 0 0 auto; }
+  .set-cat .q-row { margin-top: auto; }
+  /* 高频项：一行一项（卡片 ~540px 宽，塞两列会把 label 压没） */
+  .q-row {
+    flex-direction: column; flex-wrap: nowrap;
+    align-items: stretch; gap: 8px;
+  }
+  .q-item { flex: 0 0 auto; width: 100%; min-width: 0; }
+  .q-item .q-label { flex: 1 1 auto; min-width: 0; }
+  .q-item .segmented { width: 180px; }
+  .q-btns { width: 208px; }
 }
 
 /* 设置（v0.4.1）：回收站列表 + 带撤销的提示 */
@@ -3474,11 +3478,20 @@ body[data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
 body[data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
 body[data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
 body[data-theme="dark"] .tk-gh-cell.none { background: #2A3038; opacity: .5; }
-body[data-perf] .tk-gh-cell { background: #dfe4ed !important; }
-body[data-perf] .tk-gh-cell.l1 { background: #b9cdf3 !important; }
-body[data-perf] .tk-gh-cell.l2 { background: #90aeee !important; }
-body[data-perf] .tk-gh-cell.l3 { background: #6d93e9 !important; }
-body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
+/* 流畅模式：贡献图换成"平色"（不叠半透明），但**绝不能带 !important**：
+   那会压过 body[data-theme="dark"] 的深色配色 —— 暗色主题 + 流畅模式下
+   30 天格子会整片变成亮灰/浅蓝。深色版本多挂一个 [data-theme="dark"] 提权，
+   与上面暗色主题的那组颜色保持一致。 */
+body[data-perf] .tk-gh-cell { background: #dfe4ed; }
+body[data-perf] .tk-gh-cell.l1 { background: #b9cdf3; }
+body[data-perf] .tk-gh-cell.l2 { background: #90aeee; }
+body[data-perf] .tk-gh-cell.l3 { background: #6d93e9; }
+body[data-perf] .tk-gh-cell.l4 { background: var(--accent); }
+body[data-perf][data-theme="dark"] .tk-gh-cell { background: #2A3038; }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l1 { background: rgba(122, 165, 246, .32); }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
 .tk-gh-legend {
   display: flex; align-items: center; gap: 4px; justify-content: flex-end;
   margin-top: 8px; font-size: 9.5px; color: var(--text-tertiary);
@@ -3622,11 +3635,20 @@ body[data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
 body[data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
 body[data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
 body[data-theme="dark"] .tk-gh-cell.none { background: #2A3038; opacity: .5; }
-body[data-perf] .tk-gh-cell { background: #dfe4ed !important; }
-body[data-perf] .tk-gh-cell.l1 { background: #b9cdf3 !important; }
-body[data-perf] .tk-gh-cell.l2 { background: #90aeee !important; }
-body[data-perf] .tk-gh-cell.l3 { background: #6d93e9 !important; }
-body[data-perf] .tk-gh-cell.l4 { background: var(--accent) !important; }
+/* 流畅模式：贡献图换成"平色"（不叠半透明），但**绝不能带 !important**：
+   那会压过 body[data-theme="dark"] 的深色配色 —— 暗色主题 + 流畅模式下
+   30 天格子会整片变成亮灰/浅蓝。深色版本多挂一个 [data-theme="dark"] 提权，
+   与上面暗色主题的那组颜色保持一致。 */
+body[data-perf] .tk-gh-cell { background: #dfe4ed; }
+body[data-perf] .tk-gh-cell.l1 { background: #b9cdf3; }
+body[data-perf] .tk-gh-cell.l2 { background: #90aeee; }
+body[data-perf] .tk-gh-cell.l3 { background: #6d93e9; }
+body[data-perf] .tk-gh-cell.l4 { background: var(--accent); }
+body[data-perf][data-theme="dark"] .tk-gh-cell { background: #2A3038; }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l1 { background: rgba(122, 165, 246, .32); }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
+body[data-perf][data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
 .tk-gh-legend {
   display: flex; align-items: center; gap: 4px; justify-content: flex-end;
   margin-top: 8px; font-size: 9.5px; color: var(--text-tertiary);

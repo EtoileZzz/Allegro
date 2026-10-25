@@ -6,7 +6,7 @@ using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
-namespace AbbeyRoad
+namespace Allegro
 {
     /// <summary>
     /// 主窗口：一个 WebView2 承载 app/ 里的界面（与 Android 完全同一套代码），
@@ -202,10 +202,10 @@ namespace AbbeyRoad
             }
             MessageBox.Show(
                 "无法启动 WebView2 组件。\n\n"
-                + "Abbey Road 依赖系统自带的 WebView2 运行时（Windows 10/11 一般已预装）。\n"
+                + "Allegro 依赖系统自带的 WebView2 运行时（Windows 10/11 一般已预装）。\n"
                 + "如提示缺失，请安装「Microsoft Edge WebView2 Runtime」后重试。\n\n"
                 + "详细信息：" + ex.Message,
-                "Abbey Road", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                "Allegro", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             Close();
         }
 
@@ -225,7 +225,7 @@ namespace AbbeyRoad
             Log.Write("自检开始");
             try
             {
-                sb.AppendLine("ABBEY ROAD · WINDOWS SELFTEST");
+                sb.AppendLine("ALLEGRO · WINDOWS SELFTEST");
                 sb.AppendLine("time=" + DateTime.Now.ToString("s"));
                 sb.AppendLine("webview2=" + _web.CoreWebView2.Environment.BrowserVersionString);
                 sb.AppendLine("webRoot=" + AppPaths.WebDir);

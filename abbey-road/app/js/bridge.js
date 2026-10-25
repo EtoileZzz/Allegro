@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 平台桥
+   Allegro · 平台桥
    同一套调用方式，三种后端：
      · Android：window.ARBridge（Java @JavascriptInterface，同步返回）
      · Windows：window.chrome.webview（WebView2 postMessage，异步回包）
@@ -179,7 +179,7 @@ var AR = window.AR || (window.AR = {});
 
   /**
    * 导出到微信 / 其它 App：
-   *   Android —— 先把文件写进「下载/Abbey Road」，再拉起系统分享面板（选微信即可发文件）；
+   *   Android —— 先把文件写进「下载/Allegro」，再拉起系统分享面板（选微信即可发文件）；
    *   Windows —— 没有「发到微信」的接口，降级为存到「下载」目录 + 复制内容（拖进微信或直接粘贴）；
    *   浏览器  —— 直接下载。
    */
@@ -220,7 +220,7 @@ var AR = window.AR || (window.AR = {});
 
   /**
    * 列出「导出目录」里 App 自己导出的配置文件。
-   * Android：媒体库里的 下载/Abbey Road；Windows：用户「下载」目录。
+   * Android：媒体库里的 下载/Allegro；Windows：用户「下载」目录。
    * 返回 [{name, uri, size, modified}]，浏览器端没有这个能力就返回空数组。
    */
   function listExports() {
@@ -248,7 +248,7 @@ var AR = window.AR || (window.AR = {});
   }
 
   function setAlarm(hour, minute, message) {
-    return call('setAlarm', [hour, minute, message || 'Abbey Road 提醒']);
+    return call('setAlarm', [hour, minute, message || 'Allegro 提醒']);
   }
 
   function addCalendarEvent(title, location, description, beginMs, endMs) {
@@ -270,6 +270,17 @@ var AR = window.AR || (window.AR = {});
 
   /** 桌面卡片数据同步（Android 端落盘并刷新小组件；其它平台空操作） */
   function syncWidget(json) { return call('syncWidget', [String(json || '')]); }
+
+  /* ── 课前提醒（Android 端真的排系统闹钟）──────────────────────
+     scheduleReminders 会**先取消全部再重排**，所以调用方不需要算差量，
+     整批重发即可。json 是数组，元素 { id, atMs, title, text }，
+     atMs 是"提醒触发时刻"的 Unix 毫秒（不是上课时刻）。
+     其它平台没有实现，返回 rejected，调用方应只在 hasAndroid 时用。 */
+  function scheduleReminders(json) {
+    return call('scheduleReminders', [String(json || '[]')]);
+  }
+  function cancelReminders() { return call('cancelReminders', []); }
+  function requestNotificationPermission() { return call('requestNotificationPermission', []); }
 
   function isNative() { return hasAndroid || hasWebView2; }
 
@@ -298,6 +309,9 @@ var AR = window.AR || (window.AR = {});
     exitApp: exitApp,
     beep: beep,
     syncWidget: syncWidget,
+    scheduleReminders: scheduleReminders,
+    cancelReminders: cancelReminders,
+    requestNotificationPermission: requestNotificationPermission,
     deviceName: function () {
       if (hasAndroid && window.ARBridge.deviceName) { return window.ARBridge.deviceName(); }
       return '';

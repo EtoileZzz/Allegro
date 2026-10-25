@@ -63,7 +63,7 @@ check('提示词足够短（AI 不该被长指令绕晕）', AR.Prompt.text.leng
 check('提示词版本 ar-txt-1.1', AR.Prompt.version === 'ar-txt-1.1.0');
 check('提示词包含颜色字段', AR.Prompt.text.indexOf('颜色') >= 0);
 check('提示词包含特殊事件行', AR.Prompt.text.indexOf('考试') >= 0 && AR.Prompt.text.indexOf('讲座') >= 0);
-check('提示词使用自定义分隔符格式', AR.Prompt.text.indexOf('AbbeyRoad 课表 v1') >= 0
+check('提示词使用自定义分隔符格式', AR.Prompt.text.indexOf('Allegro 课表 v1') >= 0
   && AR.Prompt.text.indexOf('｜') >= 0
   && AR.Prompt.text.indexOf('| --- |') < 0);
 
@@ -151,7 +151,7 @@ check('警告码为 W101/W130',
 /* ── 2c. 自定义文本格式（AR-TXT）──────────────────────────── */
 
 const arTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '总周数：18',
   '高等数学｜周一｜1-2｜1-16｜XX大学 信息楼305｜张三｜需带教材',
@@ -180,7 +180,7 @@ eq('AR-TXT：省略周次时字段不串位（老师）', at.rows[3].teachersRaw
 check('AR-TXT：省略周次按全周提示', at.issues.some((i) => i.code === 'W140'));
 
 const arTxtBad = AR.MdParse.parse([
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '高数｜周八｜1-2｜1-16｜信息楼305｜张三',
   '英语｜周五｜99｜1-16｜文科楼401｜李四',
   '物理｜周三｜5-6｜乱七八糟｜物理楼101｜王五'
@@ -201,7 +201,7 @@ eq('导入选项：学期名', arTxtOpt.semester.name, '测试学期');
 eq('导入选项：开学日期', arTxtOpt.semester.startDate, '2026-02-23');
 
 const arTxtOv = AR.MdParse.parse([
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '高等数学｜周一｜1-2｜1-16｜XX大学 信息楼305｜张三',
   '调课｜高等数学｜2026-10-08｜周四｜1-2｜XX大学 信息楼201｜国庆调休',
   '停课｜高等数学｜2026-10-01'
@@ -369,7 +369,7 @@ eq('周次标签（连堂）', AR.Schedule.weeksLabel(AR.Store.get().blocks[0], 
 const semOpts = { weekCount: 20, semester: { name: '我的学期', startDate: '2026-09-07', weekCount: 20 } };
 
 const colorTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '高等数学｜周一｜1-2｜1-16｜XX大学 信息楼305｜张三｜需带教材｜蓝',
   '大学物理｜周三｜5-6｜1-16｜XX大学 物理楼101｜李四｜｜#E8843C',
@@ -383,7 +383,7 @@ eq('颜色：十六进制原样保留', colorOf['大学物理'], '#E8843C');
 check('颜色：没写颜色时自动分配', !!colorOf['英语']);
 
 const evTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '考试｜高等数学 期中｜2026-11-12｜14:00-16:00｜XX大学 信息楼305｜闭卷',
   '讲座｜AI 前沿｜2026-09-20｜19:00-20:30｜报告厅'
@@ -400,7 +400,7 @@ eq('事件：按日期查得到', AR.Store.eventsOf('2026-11-12').length, 1);
 eq('事件：第 2 周里查得到讲座', AR.Store.eventsInWeek(2, AR.Store.currentSemester()).length, 1);
 
 const renameTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '高数A班｜周一｜1-2｜1-16｜X楼101｜张三｜｜蓝',
   '高数A班重修｜周二｜3-4｜1-16｜X楼102｜李四｜｜红'
@@ -430,7 +430,7 @@ eq('周次文本：解析出 4 周', pw.weeks.join(','), '1,2,3,5');
 eq('周次压缩', AR.Store.compressWeeks([1, 2, 3, 5, 7, 8]), '1-3,5,7-8');
 
 const editTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '编辑测试课｜周一｜1-2｜1-16｜X楼305｜王五｜｜绿'
 ].join('\n');
@@ -587,7 +587,7 @@ eq('导入自己的导出：课程数不变', AR.Store.get().courses.length, sel
 /* ── 12. 第 13 节及以后：节次表自动补足 ─────────────────── */
 
 const lateTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '晚课测试课｜周四｜13-14｜1-16｜测试楼101｜测试老师'
 ].join('\n');
@@ -607,7 +607,7 @@ eq('晚课：时间不再是空的', lateItems.length ? lateItems[0].start : '',
 /* ── 13. 重复导入：不加重复时段、不留孤儿 ────────────────── */
 
 const twiceTxt = [
-  'AbbeyRoad 课表 v1',
+  'Allegro 课表 v1',
   '开学日期：2026-09-07',
   '重复导入测试课｜周二｜3-4｜1-16｜重复楼101｜老师A｜备注一'
 ].join('\n');

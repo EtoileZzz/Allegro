@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 过渡动画注册表（AR.Motion）
+   Allegro · 过渡动画注册表（AR.Motion）
 
    两个设计要点：
    ① **进和出是一件事**。今日页聚焦、弹窗这类"有进有出"的场景只占一行，
@@ -342,10 +342,28 @@ var AR = window.AR || (window.AR = {});
           几何动效（翻转 / 折纸 / 错峰）全部保留
      min  深度：在标准之上再简化 3D 旋转、逐条错峰，时长收紧；
           功能完全不变，只是动画换便宜的等价物
-     降级集中在 get() / pose() 两个出口做，调用方一行不用改。 */
+     降级集中在 get() / pose() 两个出口做，调用方一行不用改。
+
+     ⚠ 系统「减弱动画」（prefers-reduced-motion）**不是**流畅模式的一档：
+     它只要求"少动、快结束"，不该关毛玻璃 / 光斑 / 贡献图配色 —— 那些是
+     ui.js applyPerf() 根据 perfLevel() 挂 data-perf / data-glass 决定的。
+     所以 perfLevel() 只读用户手动选的 perfMode；系统偏好单独由
+     reduceMotion() 返回，且只在"压短时长 / 位移"的出口使用。 */
   var PERF_VALID = { full: 1, lite: 1, min: 1 };
 
+  /** 系统「减弱动画」偏好（真布尔，和流畅模式无关）。缓存 MediaQueryList，
+      每次读 .matches —— 运行中改系统设置也能立刻生效。 */
+  var RM_QUERY = null;
+  function reduceMotion() {
+    if (typeof window === 'undefined' || !window.matchMedia) { return false; }
+    if (!RM_QUERY) {
+      try { RM_QUERY = window.matchMedia('(prefers-reduced-motion: reduce)'); } catch (e) { RM_QUERY = null; }
+    }
+    return !!(RM_QUERY && RM_QUERY.matches);
+  }
+
   function perfLevel() {
+    // 只认设置里的手动档位；系统减弱动画不再冒充 min（否则毛玻璃/光斑会被一起关掉）
     var s = settings();
     var v = s && s.appearance && s.appearance.perfMode;
     return PERF_VALID[v] ? v : 'full';
@@ -411,14 +429,44 @@ var AR = window.AR || (window.AR = {});
     return out;
   }
 
+  /**
+   * 系统「减弱动画」专用：只收紧**时间**（时长 + 错峰），
+   * 不换特效、不删 3D、不碰 blur —— 视觉层级完全交给 perfMode。
+   * 和 degradeDir 里的 min 分支分开写，是为了避免"系统偏好顺手把毛玻璃关了"。
+   */
+  function capTiming(d) {
+    if (!d) { return d; }
+    var out = copyOwn(d);
+    if (out.dur > 160) { out.dur = 160; }
+    if (out.fxDur > 160) { out.fxDur = 160; }
+    out.stagger = 0;
+    out.fxStagger = 0;
+    out.childStagger = 0;
+    return out;
+  }
+
   /** 整个样式降级（dir() 走这里；dir() 本身基于 get()，自动继承） */
   function degrade(st, lvl, scenario) {
-    if (!st || lvl === 'full') { return st; }
+    if (!st) { return st; }
+    if (lvl === 'full') {
+      // 关闭流畅模式：原样返回；只有系统减弱动画时收紧时长（不降特效）
+      if (!reduceMotion()) { return st; }
+      var soft = copyOwn(st);
+      if (st.in) { soft.in = capTiming(st.in); }
+      if (st.out) { soft.out = capTiming(st.out); }
+      return capTiming(soft);
+    }
     var out = copyOwn(st);
     if (st.in) { out.in = degradeDir(st.in, lvl, scenario); }
     if (st.out) { out.out = degradeDir(st.out, lvl, scenario); }
     // 扁平样式（contentIn / viewIn / listIn / dateSwitch / themeSwitch）
     out = degradeDir(out, lvl, scenario);
+    // 手动选了 min 又开了系统减弱：在 240ms 基础上再压一档，仍然不动特效
+    if (reduceMotion()) {
+      if (out.in) { out.in = capTiming(out.in); }
+      if (out.out) { out.out = capTiming(out.out); }
+      out = capTiming(out);
+    }
     return out;
   }
 
@@ -538,7 +586,13 @@ var AR = window.AR || (window.AR = {});
     p = p || {};
     var lvl = perfLevel();
     var tf = [];
-    var x = p.x || 0, y = p.y || 0;
+    /**
+     * 系统「减弱动画」：位移减半（时长已由 capTiming 收紧）。
+     * 3D / 旋转 / blur 属于"视觉层级"，只由 perfMode 的 min 档降级，
+     * 系统偏好不碰 —— 否则会和 P34 修的问题一样，把视觉与"少动"混在一起。
+     */
+    var damp = reduceMotion() ? 0.5 : 1;
+    var x = (p.x || 0) * damp, y = (p.y || 0) * damp;
     if (x || y) { tf.push('translate3d(' + x + 'px,' + y + 'px,0)'); }
     if (p.rx && lvl !== 'min') { tf.push('perspective(900px) rotateX(' + p.rx + 'deg)'); }
     if (p.ry && lvl !== 'min') { tf.push('perspective(760px) rotateY(' + p.ry + 'deg)'); }
@@ -555,6 +609,7 @@ var AR = window.AR || (window.AR = {});
     table: SCENARIOS,
     legacy: LEGACY,
     perfLevel: perfLevel,
+    reduceMotion: reduceMotion,
     ease: ease,
     cubicAt: cubicAt,
     easeTable: EASE,

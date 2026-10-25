@@ -1,4 +1,4 @@
-package com.ganxing.abbeyroad;
+package com.etoilezzz.allegro;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -15,7 +15,7 @@ import java.io.OutputStream;
  *
  * 没有桌面宿主（比如模拟器的启动器不支持小组件）时，用它来核对卡片排版：
  * 走的是同一套 layout + RemoteViews.apply()，所以能真实反映卡片长什么样。
- * 输出目录：Android/data/com.ganxing.abbeyroad/files/widget-preview/
+ * 输出目录：Android/data/com.etoilezzz.allegro/files/widget-preview/
  */
 final class WidgetPreview {
 

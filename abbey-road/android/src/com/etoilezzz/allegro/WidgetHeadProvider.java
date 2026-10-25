@@ -1,4 +1,4 @@
-package com.ganxing.abbeyroad;
+package com.etoilezzz.allegro;
 
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;

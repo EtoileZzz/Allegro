@@ -9,20 +9,23 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-namespace AbbeyRoadSetup
+namespace AllegroSetup
 {
     /// <summary>
-    /// Abbey Road Windows 安装器（无需管理员权限）：
-    ///   安装 → 解压到 %LOCALAPPDATA%\Programs\Abbey Road，建快捷方式，写卸载信息
+    /// Allegro Windows 安装器（无需管理员权限）：
+    ///   安装 → 解压到 %LOCALAPPDATA%\Programs\Allegro，建快捷方式，写卸载信息
     ///   卸载 → 删快捷方式、注册表项、安装目录（可选连带用户数据）
-    /// 支持静默：AbbeyRoad-Setup.exe /S 安装，/U 卸载。
+    /// 支持静默：Allegro-Setup.exe /S 安装，/U 卸载。
     /// </summary>
     internal static class Program
     {
-        private const string Product = "Abbey Road";
-        private const string Version = "0.4.1b";
-        private const string ExeName = "AbbeyRoad.exe";
-        private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\AbbeyRoad";
+        private const string Product = "Allegro";
+        // 安装器是单独编译的（只编 installer/Installer.cs，拿不到 AppPaths），
+        // 所以这里是独立的版本来源 —— 发布时与 windows/build.ps1 的 $version、
+        // app/js/core.js 的 APP_VERSION、windows/src/AppPaths.cs 的 FallbackVersion 手工同步。
+        internal const string Version = "0.4.8";
+        private const string ExeName = "Allegro.exe";
+        private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Allegro";
 
         private static string DefaultDir
         {
@@ -63,7 +66,7 @@ namespace AbbeyRoadSetup
             if (uninstall)
             {
                 DoUninstall(DefaultDir, false);
-                MessageBox.Show("Abbey Road 已卸载。", Product, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Allegro 已卸载。", Product, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -131,7 +134,7 @@ namespace AbbeyRoadSetup
         {
             try
             {
-                Process[] procs = Process.GetProcessesByName("AbbeyRoad");
+                Process[] procs = Process.GetProcessesByName("Allegro");
                 for (int i = 0; i < procs.Length; i++)
                 {
                     try { procs[i].Kill(); procs[i].WaitForExit(3000); }
@@ -200,7 +203,7 @@ namespace AbbeyRoadSetup
                 lnkType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, lnk, new object[] { targetExe });
                 lnkType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, lnk, new object[] { workDir });
                 lnkType.InvokeMember("Description", BindingFlags.SetProperty, null, lnk,
-                    new object[] { "Abbey Road · 课表与日程" });
+                    new object[] { "Allegro · 课表与日程" });
                 string ico = Path.Combine(workDir, "abbeyroad.ico");
                 if (File.Exists(ico))
                 {
@@ -219,7 +222,7 @@ namespace AbbeyRoadSetup
                 {
                     key.SetValue("DisplayName", Product + " · 课表与日程");
                     key.SetValue("DisplayVersion", Version);
-                    key.SetValue("Publisher", "GanXing");
+                    key.SetValue("Publisher", "EtoileZzz");
                     key.SetValue("InstallLocation", dir);
                     key.SetValue("DisplayIcon", exe);
                     key.SetValue("UninstallString", "\"" + Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
@@ -254,7 +257,7 @@ namespace AbbeyRoadSetup
 
         public SetupForm()
         {
-            Text = "Abbey Road 安装程序";
+            Text = "Allegro 安装程序";
             // 清单声明 PerMonitorV2 后，这里的像素值就是物理像素；按系统缩放折算，
             // 保持与旧版完全一致的对话框观感（只是不再发糊）
             float s;
@@ -269,13 +272,13 @@ namespace AbbeyRoadSetup
             BackColor = Color.White;
 
             Label title = new Label();
-            title.Text = "Abbey Road · 课表与日程";
+            title.Text = "Allegro · 课表与日程";
             title.Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold);
             title.SetBounds(B(24), B(20), B(480), B(30));
             Controls.Add(title);
 
             Label sub = new Label();
-            sub.Text = "版本 " + "0.4.1b" + " · 本地优先，不联网、不收集数据\n"
+            sub.Text = "版本 " + Program.Version + " · 本地优先，不联网、不收集数据\n"
                 + "安装到当前用户目录，无需管理员权限。";
             sub.SetBounds(B(24), B(54), B(500), B(40));
             sub.ForeColor = Color.FromArgb(90, 96, 114);
@@ -317,7 +320,7 @@ namespace AbbeyRoadSetup
             Controls.Add(_status);
 
             _launch = new CheckBox();
-            _launch.Text = "安装完成后启动 Abbey Road";
+            _launch.Text = "安装完成后启动 Allegro";
             _launch.Checked = true;
             _launch.SetBounds(B(24), B(212), B(300), B(24));
             Controls.Add(_launch);
@@ -368,7 +371,7 @@ namespace AbbeyRoadSetup
             catch (Exception ex)
             {
                 _status.Text = "安装失败：" + ex.Message;
-                MessageBox.Show("安装失败：\n" + ex.Message, "Abbey Road", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("安装失败：\n" + ex.Message, "Allegro", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
             {

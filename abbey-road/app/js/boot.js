@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 启动
+   Allegro · 启动
    串起：数据加载 → 主题/毛玻璃/动效 → 界面渲染 → 首次引导
    并接好来自原生外壳的回调（文件、导出、返回键、尺寸变化）
    ────────────────────────────────────────────────────────────── */
@@ -73,7 +73,7 @@
     } catch (e) {
       console.error('初始化失败', e);
       document.body.innerHTML = '<pre style="padding:24px;font-size:13px;white-space:pre-wrap">'
-        + 'Abbey Road 启动失败：\n' + (e && e.stack ? e.stack : e) + '</pre>';
+        + 'Allegro 启动失败：\n' + (e && e.stack ? e.stack : e) + '</pre>';
       return;
     }
 

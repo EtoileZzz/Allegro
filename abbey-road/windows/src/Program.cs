@@ -1,9 +1,9 @@
 using System;
 using System.Windows.Forms;
 
-namespace AbbeyRoad
+namespace Allegro
 {
-    /// <summary>Abbey Road · Windows 端入口。</summary>
+    /// <summary>Allegro · Windows 端入口。</summary>
     internal static class Program
     {
         [STAThread]
@@ -13,8 +13,8 @@ namespace AbbeyRoad
             Application.SetCompatibleTextRenderingDefault(false);
             AppDomain.CurrentDomain.UnhandledException += delegate(object s, UnhandledExceptionEventArgs e)
             {
-                MessageBox.Show("Abbey Road 遇到未处理的错误：\n" + e.ExceptionObject,
-                    "Abbey Road", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show("Allegro 遇到未处理的错误：\n" + e.ExceptionObject,
+                    "Allegro", MessageBoxButtons.OK, MessageBoxIcon.Error);
             };
             try
             {
@@ -22,7 +22,7 @@ namespace AbbeyRoad
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Abbey Road 启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(ex.Message, "Allegro 启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
     }

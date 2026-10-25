@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 固定 Markdown（MD-1）解析器
+   Allegro · 固定 Markdown（MD-1）解析器
    规范见规划文档 §9：容错优先 + 逐条错误提示 + 冲突检测 + 连堂课合并
    ────────────────────────────────────────────────────────────── */
 
@@ -929,7 +929,8 @@ var AR = window.AR || (window.AR = {});
 
   function looksLikeArTxt(text) {
     var t = String(text || '');
-    if (/AbbeyRoad\s*课表/i.test(t)) { return true; }
+    // 新旧两个格式头都认：改名之前导出的文本是「AbbeyRoad 课表 v1」，迁移时要能继续解析
+    if (/(?:Allegro|AbbeyRoad|Abbey\s*Road)\s*课表/i.test(t)) { return true; }
     var lines = t.split('\n');
     for (var i = 0; i < Math.min(lines.length, 60); i++) {
       var l = lines[i].trim();
@@ -1034,7 +1035,7 @@ var AR = window.AR || (window.AR = {});
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
       if (!line) { continue; }
-      if (/^AbbeyRoad\s*课表/i.test(line)) { continue; }
+      if (/^Allegro\s*课表/i.test(line)) { continue; }
       if (/^[#/]{1,2}/.test(line) && !AR_SEP_RE.test(line)) { continue; }
 
       var mStart = /^开学(?:日期|时间)\s*[:：]\s*(.+)$/.exec(line);

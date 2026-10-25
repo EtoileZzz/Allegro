@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 配置文件导入导出（v0.2.3 整块重构）
+   Allegro · 配置文件导入导出（v0.2.3 整块重构）
 
    以前这块逻辑散在 panels.js 里：导出按钮一个写法、文件导入一个写法、
    粘贴解析又一套，出了问题很难查，而且「当前学期」没跟着切 ——
@@ -30,6 +30,7 @@ var AR = window.AR || (window.AR = {});
 
   var pending = null;        // 预览通过、等待「合并导入」的配置对象
   var lastReport = null;     // 上一次预览的结果，用来说明「新增 / 更新」了多少
+  var lastPreviewText = null; // 上一次预览用的原文（apply 时用来判断输入框是否又变了）
 
   /* ══════════════════════ 导出 ══════════════════════ */
 
@@ -54,13 +55,13 @@ var AR = window.AR || (window.AR = {});
 
   /**
    * 导出到微信 / 其它 App。
-   * Android：先写进「下载 / Abbey Road」，再拉起系统分享面板（选微信发文件）。
+   * Android：先写进「下载 / Allegro」，再拉起系统分享面板（选微信发文件）。
    * Windows：没有发到微信的接口 → 存进「下载」并复制内容（拖进微信或直接粘贴）。
    * 浏览器：直接下载。
    */
   function exportToApp(btn) {
     if (btn) { AR.Bridge.haptic('medium', btn); }
-    AR.Bridge.shareFile(AR.Store.exportFileName(), payloadText(), 'application/json', 'Abbey Road 课表配置');
+    AR.Bridge.shareFile(AR.Store.exportFileName(), payloadText(), 'application/json', 'Allegro 课表配置');
   }
 
   function copyText(btn) {
@@ -127,6 +128,13 @@ var AR = window.AR || (window.AR = {});
     if (AR.UI.currentView && AR.UI.currentView() !== 'import') { AR.UI.show('import'); }
     var tab = document.querySelector('[data-tab="json"]');
     if (tab) { tab.click(); }
+    /**
+     * C9 配套：文件 / 分享导入时把内容同步进输入框。
+     * apply() 靠「输入框文本 vs 上次预览原文」判断要不要重新预览；
+     * 输入框里若还留着上一次粘贴的旧文本，不同步就会把旧文本当成新内容再导一次。
+     */
+    var box = $('jsonInput');
+    if (box && cleanText(text)) { box.value = cleanText(text); }
     var ok = previewText(text, sourceName);
     if (ok) {
       AR.UI.toast('已读取 ' + (sourceName || '配置文本') + '，确认预览后点「合并导入」');
@@ -152,7 +160,7 @@ var AR = window.AR || (window.AR = {});
   /** 看起来像课表文本（不是配置文件）就转给「课表文本」页，别让用户卡住 */
   function looksLikeTimetableText(t) {
     if (!t) { return false; }
-    if (/AbbeyRoad\s*课表/.test(t)) { return true; }
+    if (/Allegro\s*课表/.test(t)) { return true; }
     if (/^\s*\[/.test(t)) { return true; }
     if (/[｜|]/.test(t) && /周[一二三四五六日天]/.test(t)) { return true; }
     return false;
@@ -183,6 +191,12 @@ var AR = window.AR || (window.AR = {});
   function previewText(text, sourceName) {
     var h = hooks();
     if (!h.summary) { return false; }
+    /**
+     * 预览一失败就把旧 pending 作废：否则「合并导入」会导入上一份成功的配置
+     * （和下面 apply() 的 debounce 问题一起构成 C9 的两种陈旧 pending）。
+     */
+    pending = null;
+    lastPreviewText = null;
     var clean = cleanText(text);
     if (!clean) {
       h.summary.innerHTML = '<span class="tag danger">没有内容</span>';
@@ -209,7 +223,7 @@ var AR = window.AR || (window.AR = {});
         routeToText(clean, sourceName);
         return false;
       }
-      h.summary.innerHTML = '<span class="tag danger">不是 Abbey Road 配置文件</span>';
+      h.summary.innerHTML = '<span class="tag danger">不是 Allegro 配置文件</span>';
       h.issues.innerHTML = '<div class="issue error"><span class="code-badge">E101</span>'
         + '<span class="msg">这个 JSON 里没有 kind = abbeyroad.sync 标记，不是本 App 导出的配置文件。</span></div>';
       return false;
@@ -226,6 +240,7 @@ var AR = window.AR || (window.AR = {});
     }
 
     pending = data;
+    lastPreviewText = clean;
     lastReport = report;
 
     h.summary.innerHTML = '';
@@ -269,7 +284,7 @@ var AR = window.AR || (window.AR = {});
    */
   function mergePayload(payload) {
     if (!payload || payload.kind !== 'abbeyroad.sync') {
-      return { ok: false, message: '不是 Abbey Road 配置文件' };
+      return { ok: false, message: '不是 Allegro 配置文件' };
     }
     var semBefore = AR.Store.currentSemester();
     var periodsBefore = AR.Store.periodsOf(semBefore ? semBefore.id : null).length;
@@ -317,9 +332,18 @@ var AR = window.AR || (window.AR = {});
   /** 「合并导入」按钮：把预览过的配置合并进来 */
   function apply(btn) {
     var h = hooks();
+    /**
+     * v0.4.4：不能无条件用 pending。
+     * 输入框的预览是 400ms debounce：粘完新内容立刻点「合并导入」时，
+     * pending 还是上一份文件的配置，会把旧文件导进去。
+     * 所以先取输入框的原文，和上次真正预览过的原文比；不一致就重新预览这份文本。
+     */
+    var txt = cleanText(h.input ? h.input.value : '');
     var payload = pending;
-    if (!payload) {
-      var txt = cleanText(h.input ? h.input.value : '');
+    if (txt && txt !== lastPreviewText) {
+      if (!previewText(txt, '粘贴的配置文本')) { return false; }
+      payload = pending;
+    } else if (!payload) {
       if (!txt) { AR.UI.toast('请先选择配置文件，或把配置文本粘贴到上面'); return false; }
       if (!previewText(txt, '粘贴的配置文本')) { return false; }
       payload = pending;
@@ -329,6 +353,7 @@ var AR = window.AR || (window.AR = {});
 
     var res = mergePayload(payload);
     pending = null;
+    lastPreviewText = null;
     lastReport = null;
     if (h.input) { h.input.value = ''; }
     if (h.apply) { h.apply.disabled = true; }
@@ -363,6 +388,7 @@ var AR = window.AR || (window.AR = {});
   /** 清空待合并状态（「清空」按钮用） */
   function reset() {
     pending = null;
+    lastPreviewText = null;
     lastReport = null;
     var b = $('btnApplyJson');
     if (b) { b.disabled = true; }

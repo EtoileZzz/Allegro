@@ -11,7 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const REPO = 'EtoileZzz/AbbeyRoad----ScheduleApp';
+const REPO = 'EtoileZzz/Allegro';
 const TAG = 'v0.4.1a';
 const API = 'https://api.github.com';
 const TOKEN = process.env.GH_TOKEN;
@@ -68,9 +68,9 @@ async function upload(uploadUrl, file) {
   console.log('Release ' + TAG + '  id=' + rel.id + '  现有资产 ' + rel.assets.length + ' 个');
 
   const files = [
-    path.join(wsRoot, 'AbbeyRoad-v0.4.1a.apk'),
-    path.join(wsRoot, 'AbbeyRoad-Setup-v0.4.1a.exe'),
-    path.join(wsRoot, 'AbbeyRoad-v0.4.1a-src.zip')
+    path.join(wsRoot, 'Allegro-v0.4.1a.apk'),
+    path.join(wsRoot, 'Allegro-Setup-v0.4.1a.exe'),
+    path.join(wsRoot, 'Allegro-v0.4.1a-src.zip')
   ];
   for (const f of files) {
     if (!fs.existsSync(f)) { throw new Error('缺少本地文件：' + f); }

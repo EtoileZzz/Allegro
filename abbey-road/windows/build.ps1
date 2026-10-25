@@ -1,9 +1,9 @@
 ﻿$ErrorActionPreference = 'Stop'
 
-# Abbey Road · Windows 构建
-# 产出：dist\AbbeyRoad.exe（单文件，界面资源内置）
-#       dist\AbbeyRoad-Setup-v0.2.4.exe（安装器）
-#       dist\AbbeyRoad-v0.2.4-portable.zip（绿色版）
+# Allegro · Windows 构建
+# 产出：dist\Allegro.exe（单文件，界面资源内置）
+#       dist\Allegro-Setup-v0.2.4.exe（安装器）
+#       dist\Allegro-v0.2.4-portable.zip（绿色版）
 
 $root      = $PSScriptRoot
 $projRoot  = Split-Path $root -Parent
@@ -11,7 +11,7 @@ $appDir    = Join-Path $projRoot 'app'
 $dist      = Join-Path $projRoot 'dist'
 $out       = Join-Path $root 'build'
 $assets    = Join-Path $root 'assets'
-$version   = '0.4.4'
+$version   = '0.4.8'
 
 # 工具链目录：环境变量 $env:ABBEYROAD_WIN_TOOLS 或本地 build.local.ps1 覆盖，
 # 仓库里不留私人路径（Roslyn 编译器 + WebView2 SDK 解出来的 DLL）。
@@ -57,10 +57,10 @@ $refs += ('/r:' + (Join-Path $wv2 'lib\Microsoft.Web.WebView2.Core.dll'))
 $refs += ('/r:' + (Join-Path $wv2 'lib\Microsoft.Web.WebView2.WinForms.dll'))
 
 # 3) 编译主程序
-Write-Host '== 编译 AbbeyRoad.exe =='
+Write-Host '== 编译 Allegro.exe =='
 $appSources = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
 $appArgs = @('/nologo', '/target:winexe', '/platform:x64', '/langversion:7.3', '/optimize+',
-             ('/out:' + (Join-Path $out 'AbbeyRoad.exe')),
+             ('/out:' + (Join-Path $out 'Allegro.exe')),
              ('/win32icon:' + $ico),
              ('/win32manifest:' + $manifest),
              ('/resource:' + $webZip + ',web.zip')) + $refs + $appSources
@@ -76,13 +76,13 @@ Copy-Item (Join-Path $root 'README.txt') $out -Force
 
 # 5) 便携版
 Write-Host '== 生成便携版 =='
-$portableDir = Join-Path $dist 'AbbeyRoad-portable'
+$portableDir = Join-Path $dist 'Allegro-portable'
 New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
-foreach ($f in @('AbbeyRoad.exe', 'WebView2Loader.dll', 'Microsoft.Web.WebView2.Core.dll',
+foreach ($f in @('Allegro.exe', 'WebView2Loader.dll', 'Microsoft.Web.WebView2.Core.dll',
                  'Microsoft.Web.WebView2.WinForms.dll', 'abbeyroad.ico', 'README.txt')) {
     Copy-Item (Join-Path $out $f) $portableDir -Force
 }
-$portableZip = Join-Path $dist "AbbeyRoad-v$version-portable.zip"
+$portableZip = Join-Path $dist "Allegro-v$version-portable.zip"
 if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
 Compress-Archive -Path (Join-Path $portableDir '*') -DestinationPath $portableZip -Force
 
@@ -98,7 +98,7 @@ foreach ($n in @('System.dll', 'System.Core.dll', 'System.Drawing.dll', 'System.
                  'System.IO.Compression.dll', 'System.IO.Compression.FileSystem.dll')) {
     $setupRefs += ('/r:' + (Join-Path $fx $n))
 }
-$setupOut = Join-Path $dist "AbbeyRoad-Setup-v$version.exe"
+$setupOut = Join-Path $dist "Allegro-Setup-v$version.exe"
 $setupArgs = @('/nologo', '/target:winexe', '/platform:x64', '/langversion:7.3', '/optimize+',
                ('/out:' + $setupOut),
                ('/win32icon:' + $ico),
@@ -110,6 +110,6 @@ if ($LASTEXITCODE -ne 0) { throw '安装器编译失败' }
 
 Write-Host ''
 Write-Host 'DONE：'
-Get-ChildItem $dist -File | Where-Object { $_.Name -like '*AbbeyRoad*' } |
+Get-ChildItem $dist -File | Where-Object { $_.Name -like '*Allegro*' } |
     Select-Object Name, @{n = 'MB'; e = { [math]::Round($_.Length / 1MB, 2) } } | Format-Table -AutoSize
 Write-Host ('便携版目录：' + $portableDir)

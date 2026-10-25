@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────
-   Abbey Road · 界面主体
+   Allegro · 界面主体
    外壳导航 / 布局引擎（三预设 + 拖拽 + 聚焦态）/ 今日页 / 周表 / 毛玻璃弹窗
    ────────────────────────────────────────────────────────────── */
 
@@ -527,7 +527,14 @@ var AR = window.AR || (window.AR = {});
     // fxStagger 显式为 0（流畅模式·深度）时要当 0 用，不能被 || 吃回默认值
     var stagger = Math.round(((style.fxStagger != null ? style.fxStagger : 55)) / speed);
     var ease = AR.Motion ? AR.Motion.ease(style.ease) : 'cubic-bezier(.2,.8,.2,1)';
-    var kids, i, k;
+    /**
+     * U10：frames 必须在函数顶部**只初始化一次**。
+     * 以前 zoom / zoomOut 在 550 行就给它赋了关键帧，569 行又写了一句
+     * `var frames = null;` —— 那是赋值语句（不是重复声明），把刚赋的关键帧清空，
+     * 后面 612 行 `if (!frames) return` 直接返回：流畅模式下
+     * depth / spotlight / flip / fold / hinge 全都没动画。
+     */
+    var kids, i, k, frames = null;
 
     /**
      * 磁贴翻转的关键：**轴放在你点的那个位置所在的那条边**。
@@ -566,7 +573,6 @@ var AR = window.AR || (window.AR = {});
       return;
     }
 
-    var frames = null;
     var origin = 'center';
     if (fx === 'flipY') {
       origin = 'center';
@@ -1407,7 +1413,14 @@ var AR = window.AR || (window.AR = {});
   }
   function agvColor(key) {
     var t = agvTypeOf(key);
-    return t.color || U.colorHex(t.colorKey || '#5B8DEF');
+    /**
+     * U11：类型记录只有 `hex`（openTypeDialog 写的是 hex，没有 color / colorKey），
+     * 旧写法 `t.color || U.colorHex(t.colorKey || '#5B8DEF')` 两个字段都取不到，
+     * 于是**恒为默认蓝**，日程总览里所有类型看起来一个颜色。
+     *
+     * 颜色统一走 core 的 AR.Util.cssColor：合法 #hex 原样返回，脏值兜底成雾蓝。
+     */
+    return AR.Util.cssColor((t && t.hex) || '#5B8DEF');
   }
 
   /** A：月历条点阵（当月 + 下月），一眼看出哪几天有安排 */
@@ -2357,7 +2370,7 @@ var AR = window.AR || (window.AR = {});
 
   /** compact 态的摘要块：收起的那一栏只显示一两行，绝不出现被挤成竖排的文字 */
   function compactBlock(big, small, hint, accent) {
-    var bar = accent ? '<span class="zc-bar" style="background:' + accent + '"></span>' : '';
+    var bar = accent ? '<span class="zc-bar" style="background:' + AR.Util.cssColor(accent) + '"></span>' : '';
     return el('<div class="zone-compact' + (accent ? ' has-accent' : '') + '">' + bar
       + '<div class="zc-big">' + U.escapeHtml(big) + '</div>'
       + '<div class="zc-small">' + U.escapeHtml(small || '') + '</div>'
@@ -2468,7 +2481,7 @@ var AR = window.AR || (window.AR = {});
           var endMs = toMs(cursorDate, first.end) || (startMs + 45 * 60000);
           var at = remindAt(startMs);          // 默认提前 15 分钟（设置 → 系统集成）
           AR.Bridge.addCalendarEvent(first.course.name, first.location ? first.location.raw : '',
-            'Abbey Road 课表 · ' + first.periodLabel, at.ms, endMs);
+            'Allegro 课表 · ' + first.periodLabel, at.ms, endMs);
           AR.Bridge.haptic('medium', tools);
         });
         body.appendChild(tools);
@@ -2489,13 +2502,19 @@ var AR = window.AR || (window.AR = {});
           ? todayCompactRow(items[i], now, isToday)
           : (detailed ? todayDetailCard(items[i], now, isToday) : todayCard(items[i], now, isToday)));
       }
-      /* 特殊事件（考试 / 讲座 / 活动）也按长条卡片列在今天里 */
-      var dayEvents = AR.Store.eventsOf ? AR.Store.eventsOf(cursorDate) : [];
-      for (var ei = 0; ei < dayEvents.length; ei++) {
-        body.appendChild(eventStrip(dayEvents[ei]));
-      }
-      fadeInList(body, '.card, .strip');            // 规格书 4.2：列表只做淡入
     }
+
+    /**
+     * 特殊事件（考试 / 讲座 / 活动）也按长条卡片列在今天里。
+     * U2：必须放在 if/else **之外** —— 它以前塞在 "else（今天有课）" 分支里，
+     * 当天一节课都没有时，考试 / 讲座 / 活动全都不显示。
+     * 现在空态卡片与事件条并存，谁也不会被另一支挡住。
+     */
+    var dayEvents = AR.Store.eventsOf ? AR.Store.eventsOf(cursorDate) : [];
+    for (var ei = 0; ei < dayEvents.length; ei++) {
+      body.appendChild(eventStrip(dayEvents[ei]));
+    }
+    fadeInList(body, '.card, .strip');            // 规格书 4.2：列表只做淡入
 
     /**
      * 今日日程最下面：作业卡片 + 长期任务卡片（v0.3.8b 起各是各的卡片，
@@ -2532,7 +2551,7 @@ var AR = window.AR || (window.AR = {});
     // 上完的课压暗一点：一眼看出进度，又不用再占一行写「已结束」
     var dim = status === '已结束' ? ' style="opacity:.55"' : '';
     var node = el('<div class="strip dense"' + dim + '>'
-      + '<span class="st-bar" style="background:' + item.color + '"></span>'
+      + '<span class="st-bar" style="background:' + AR.Util.cssColor(item.color) + '"></span>'
       + '<div class="st-body">'
       + '<div class="st-line1">'
       + '<span class="st-time">' + U.escapeHtml(fmtRange(item)) + '</span>'
@@ -2566,7 +2585,7 @@ var AR = window.AR || (window.AR = {});
     if (item.kind === 'edit') { tags += '<span class="tag warn">单次调整</span>'; }
     if (item.kind === 'makeup' || item.kind === 'add') { tags += '<span class="tag warn">补课</span>'; }
     var node = el('<div class="strip"' + dim + '>'
-      + '<span class="st-bar" style="background:' + item.color + '"></span>'
+      + '<span class="st-bar" style="background:' + AR.Util.cssColor(item.color) + '"></span>'
       + '<div class="st-body">'
       + '<div class="st-head"><span class="st-title">' + U.escapeHtml(item.course.name) + '</span>'
       + '<span class="st-when">' + U.escapeHtml(item.periodLabel) + '</span></div>'
@@ -2633,7 +2652,7 @@ var AR = window.AR || (window.AR = {});
     if (item.isConsecutive) { tags += '<span class="tag">连堂</span>'; }
     if (item.kind !== 'normal') { tags += '<span class="tag warn">' + kindLabel(item.kind) + '</span>'; }
     var node = el('<div class="card flat today-card">'
-      + '<span class="card-accent" style="background:' + item.color + '"></span>'
+      + '<span class="card-accent" style="background:' + AR.Util.cssColor(item.color) + '"></span>'
       + '<div class="card-row between">'
       + '<span class="time-chip">' + U.escapeHtml(fmtRange(item)) + '</span>'
       + '<span class="muted">' + U.escapeHtml(item.periodLabel)
@@ -2663,7 +2682,7 @@ var AR = window.AR || (window.AR = {});
       var endMs = toMs(item.date, item.end) || (startMs + 45 * 60000);
       var at = remindAt(startMs);
       AR.Bridge.addCalendarEvent(item.course.name, item.location ? item.location.raw : '',
-        'Abbey Road 课表 · ' + item.periodLabel, at.ms, endMs);
+        'Allegro 课表 · ' + item.periodLabel, at.ms, endMs);
       AR.Bridge.haptic('medium', tools);
     });
     node.appendChild(tools);
@@ -2728,11 +2747,12 @@ var AR = window.AR || (window.AR = {});
   /** 今日列表里的事件长条：颜色来自事件类型 */
   function eventStrip(ev) {
     var t = AR.Store.eventType(ev.type);
+    var tc = AR.Util.cssColor(t.hex);
     var node = el('<div class="strip ev-strip">'
-      + '<span class="st-bar" style="background:' + t.hex + '"></span>'
+      + '<span class="st-bar" style="background:' + tc + '"></span>'
       + '<div class="st-body">'
       + '<div class="st-head"><span class="st-title">' + U.escapeHtml(ev.title) + '</span>'
-      + '<span class="ev-tag" style="background:' + t.hex + '">' + t.label + '</span></div>'
+      + '<span class="ev-tag" style="background:' + tc + '">' + U.escapeHtml(t.label) + '</span></div>'
       + '<div class="st-meta"><span class="st-time">' + U.escapeHtml(eventWhenText(ev)) + '</span>'
       + (ev.place ? ' · ' + U.escapeHtml(ev.place) : '')
       + (ev.note ? ' · ' + U.escapeHtml(ev.note) : '') + '</div>'
@@ -2755,8 +2775,8 @@ var AR = window.AR || (window.AR = {});
     for (var i = 0; i < evs.length; i++) {
       (function (ev) {
         var t = AR.Store.eventType(ev.type);
-        var row = el('<div class="ev-row"><span class="ev-tag" style="background:' + t.hex + '">'
-          + t.label + '</span><span class="ev-name">' + U.escapeHtml(ev.title) + '</span>'
+        var row = el('<div class="ev-row"><span class="ev-tag" style="background:' + AR.Util.cssColor(t.hex) + '">'
+          + U.escapeHtml(t.label) + '</span><span class="ev-name">' + U.escapeHtml(ev.title) + '</span>'
           + '<span class="ev-when">' + U.escapeHtml(eventWhenText(ev)) + '</span></div>');
         row.addEventListener('click', function () { openEventModal(ev); });
         wrap.appendChild(row);
@@ -2906,7 +2926,15 @@ var AR = window.AR || (window.AR = {});
        * 每天给 42px 下限，外面套 .wt-scroll 横向滑动，时间列 sticky 吸左；
        * 点课程块只弹"课程详情"，不带任何编辑入口（编辑在「周表」页）。
        */
-      var railAvail = Math.max(0, body.clientHeight - 40);
+      /**
+       * U14：这里必须按**展开态的目标矩形**算可用高度。
+       *
+       * setExpanded() 的顺序是"先 renderToday()、后 applyLayout()"，
+       * 所以展开那一帧 body.clientHeight 量到的还是收起态高度 ——
+       * 周表行高被算小（挤在一起），下面留一大片空白。
+       * railBodyHeightOpen() 用 rectsFor(..., 'week', ...) 直接算展开态目标高度。
+       */
+      var railAvail = Math.max(0, railBodyHeightOpen(body) - 40);
       var railWrap = el('<div class="wt-scroll"></div>');
       railWrap.appendChild(weekTableNode(sem, Math.max(weekNo, 1),
         { narrow: true, clickDays: true, fitH: railAvail, detailOnly: true }));
@@ -2999,6 +3027,28 @@ var AR = window.AR || (window.AR = {});
   }
 
   /**
+   * 「本周概览」**展开态**内容区的目标高度（U14）。
+   *
+   * 和上面的 railBodyHeight() 是两件事：那个按"收起态"算（缩略图行高要用收起高度），
+   * 这里按展开态的 rectsFor(..., 'week', ...) 算 —— 展开那一帧 DOM 还没长高，
+   * 直接量 body.clientHeight 会拿到收起态的高度。
+   * 返回值语义与 body.clientHeight 一致：已经扣掉栏头 + 内边距，只剩内容区高度。
+   */
+  function railBodyHeightOpen(body) {
+    var zone = $('zoneWeek');
+    var chrome = Math.max(0, (zone ? zone.getBoundingClientRect().height : 0) - (body ? body.clientHeight : 0));
+    var target = 0;
+    var el2 = Layout.el;
+    var W = el2 ? el2.clientWidth : 0, H = el2 ? el2.clientHeight : 0;
+    if (W && H) {
+      var r = rectsFor(resolvedPreset(), 'week', Layout.profiles[Layout.profileKey], W, H);
+      if (r && r.week) { target = r.week.h; }
+    }
+    if (!target) { target = (Layout.rects && Layout.rects.week) ? Layout.rects.week.h : (body ? body.clientHeight : 0); }
+    return Math.max(72, Math.round(target - chrome));
+  }
+
+  /**
    * 缩略图二次校准：插进 DOM 后按**真实溢出量**把行高压下去。
    *
    * 渲染时估算的表头高度和字体的实际高度总会差几个像素（主题、字号、
@@ -3032,7 +3082,7 @@ var AR = window.AR || (window.AR = {});
   /** 本周条目：简洁长条卡片（时间、地点、老师都在，文字自动换行不省略） */
   function weekRailRowRich(item) {
     var node = el('<div class="strip">'
-      + '<span class="st-bar" style="background:' + item.color + '"></span>'
+      + '<span class="st-bar" style="background:' + AR.Util.cssColor(item.color) + '"></span>'
       + '<div class="st-body">'
       + '<div class="st-head"><span class="st-title">' + U.escapeHtml(item.course.name) + '</span>'
       + '<span class="st-when">' + U.escapeHtml(item.periodLabel) + '</span></div>'
@@ -3127,7 +3177,7 @@ var AR = window.AR || (window.AR = {});
 
   function weekRailRow(item) {
     var node = el('<div class="week-course">'
-      + '<span class="bar" style="background:' + item.color + '"></span>'
+      + '<span class="bar" style="background:' + AR.Util.cssColor(item.color) + '"></span>'
       + '<span class="txt"><b>' + U.escapeHtml(item.course.name) + '</b><br>'
       + U.escapeHtml(item.periodLabel) + ' · ' + U.escapeHtml(item.start || '') + '</span></div>');
     node.addEventListener('click', function () {
@@ -3172,19 +3222,20 @@ var AR = window.AR || (window.AR = {});
     }
 
     // 状态色：只改边框（可选加粗）+ 一层很淡的同色光晕，不动课程本来颜色
+    var stColor = st ? AR.Util.cssColor(st.color) : '';
     var heroStyle = st
-      ? ' style="border:' + (st.thick ? 2 : 1) + 'px solid ' + st.color
-        + ';box-shadow:0 0 0 3px ' + hexA(st.color, 0.16) + ', var(--shadow-card)"'
+      ? ' style="border:' + (st.thick ? 2 : 1) + 'px solid ' + stColor
+        + ';box-shadow:0 0 0 3px ' + hexA(stColor, 0.16) + ', var(--shadow-card)"'
       : '';
     var stateTag = st
-      ? '<span class="tag" style="background:' + st.color + ';color:#fff;border-color:transparent">'
+      ? '<span class="tag" style="background:' + stColor + ';color:#fff;border-color:transparent">'
         + U.escapeHtml(st.label) + '</span>'
       : '';
     var dayText = target.ongoing ? '正在进行'
       : (target.offsetDays === 0 ? '今天' : ((target.day.getMonth() + 1) + '/' + target.day.getDate()))
         + ' ' + U.WEEKDAY_NAMES[U.weekdayOf(target.day)];
     var hero = el('<div class="next-hero' + (expanded ? ' focus' : '') + '"' + heroStyle + '>'
-      + '<span class="nh-bar" style="background:' + item.color + '"></span>'
+      + '<span class="nh-bar" style="background:' + AR.Util.cssColor(item.color) + '"></span>'
       + '<div class="nh-main">'
       + '<div class="nh-top"><span class="nh-time">' + U.escapeHtml(fmtRange(item)) + '</span>'
       + '<span class="nh-day">' + U.escapeHtml(dayText) + '</span></div>'
@@ -3243,7 +3294,7 @@ var AR = window.AR || (window.AR = {});
         var endMs = toMs(target.day, item.end) || (startMs + 45 * 60000);
         var at = remindAt(startMs);
         AR.Bridge.addCalendarEvent(item.course.name, item.location ? item.location.raw : '',
-          'Abbey Road 课表 · ' + item.periodLabel + (item.note ? ' · ' + item.note : ''), at.ms, endMs);
+          'Allegro 课表 · ' + item.periodLabel + (item.note ? ' · ' + item.note : ''), at.ms, endMs);
       });
       nextTools.querySelector('[data-act="alarm"]').addEventListener('click', function () {
         var at = remindAt(toMs(target.day, item.start) || Date.now());
@@ -3352,14 +3403,28 @@ var AR = window.AR || (window.AR = {});
    */
   function bindLongPress(node, fn, ms) {
     if (!node || !node.addEventListener) { return; }
-    var timer = null, x0 = 0, y0 = 0;
+    var timer = null, x0 = 0, y0 = 0, pid = null;
+    /**
+     * U14：抓指针 / 放指针。
+     * 不抓指针时，鼠标按住往元素外轻轻一拖，pointermove 就收不到了（事件跑到
+     * 别的元素上），位移判定失效 —— Windows 上表现为"移出后仍然长按触发"
+     * （误「找回」作业）。setPointerCapture 之后移出元素也照样收 move / up。
+     */
+    function release() {
+      if (pid == null) { return; }
+      try { if (node.releasePointerCapture) { node.releasePointerCapture(pid); } } catch (e) { }
+      pid = null;
+    }
     function detach() {
       node.removeEventListener('pointermove', move);
       node.removeEventListener('pointerup', cancel);
       node.removeEventListener('pointercancel', cancel);
+      node.removeEventListener('pointerleave', cancel);
+      node.removeEventListener('lostpointercapture', cancel);
     }
     function cancel() {
       if (timer) { clearTimeout(timer); timer = null; node.classList.remove('lp-wait'); }
+      release();
       detach();
     }
     function move(e2) {
@@ -3368,6 +3433,9 @@ var AR = window.AR || (window.AR = {});
     node.addEventListener('pointerdown', function (ev) {
       cancel();
       x0 = ev.clientX; y0 = ev.clientY;
+      pid = ev.pointerId;
+      // 抓不到（老内核 / 非活动指针）就退回原来的行为，不影响长按本身
+      try { if (node.setPointerCapture) { node.setPointerCapture(pid); } } catch (e) { }
       node.__lpFired = false;
       node.classList.add('lp-wait');
       timer = setTimeout(function () {
@@ -3380,6 +3448,9 @@ var AR = window.AR || (window.AR = {});
       node.addEventListener('pointermove', move);
       node.addEventListener('pointerup', cancel);
       node.addEventListener('pointercancel', cancel);
+      // 指针移出 / 捕获被系统收回，都当作"取消"：宁可少触发一次，也别误触发
+      node.addEventListener('pointerleave', cancel);
+      node.addEventListener('lostpointercapture', cancel);
     });
     node.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
   }
@@ -3739,13 +3810,13 @@ var AR = window.AR || (window.AR = {});
       var cell = el('<button class="' + cls + '" type="button"><span class="mc-d">' + d.getDate() + '</span></button>');
       var chips = el('<div class="mc-chips"></div>');
       for (var c = 0; c < items.length && c < 3; c++) {
-        chips.appendChild(el('<span class="mc-chip" style="background:' + items[c].color + '">'
+        chips.appendChild(el('<span class="mc-chip" style="background:' + AR.Util.cssColor(items[c].color) + '">'
           + U.escapeHtml(items[c].course.name) + '</span>'));
       }
       if (items.length > 3) { chips.appendChild(el('<span class="mc-more">+' + (items.length - 3) + '</span>')); }
       for (var e2 = 0; e2 < events.length; e2++) {
         var t2 = AR.Store.eventType(events[e2].type);
-        chips.appendChild(el('<span class="mc-ev" style="background:' + t2.hex + '">'
+        chips.appendChild(el('<span class="mc-ev" style="background:' + AR.Util.cssColor(t2.hex) + '">'
           + t2.mark + ' ' + U.escapeHtml(events[e2].title) + '</span>'));
       }
       cell.appendChild(chips);
@@ -4072,8 +4143,9 @@ var AR = window.AR || (window.AR = {});
         for (var mi = 0; mi < Math.min(mine.length, 2); mi++) {
           (function (ev) {
             var t = AR.Store.eventType(ev.type);
+            var tc = AR.Util.cssColor(t.hex);
             var chip = el('<button class="ev-chip' + (mini ? ' mini' : '') + '" type="button"'
-              + ' style="background:' + t.hex + ';border-color:' + t.hex + '" title="'
+              + ' style="background:' + tc + ';border-color:' + tc + '" title="'
               + U.escapeHtml(t.label + ' · ' + ev.title) + '">'
               + '<span class="mark">' + t.mark + '</span>'
               + (mini ? '' : '<span class="txt">' + U.escapeHtml(ev.title) + '</span>')
@@ -4131,12 +4203,12 @@ var AR = window.AR || (window.AR = {});
         var block;
         if (mini) {
           block = el('<div class="mg-block" style="grid-row:' + (row + 2 + evRow) + ' / span ' + span
-            + ';grid-column:' + col + ';background:' + hit.color + '"></div>');
+            + ';grid-column:' + col + ';background:' + AR.Util.cssColor(hit.color) + '"></div>');
         } else {
           // 用 background-color（不是 background 简写）：CSS 里那层淡淡的渐变才不会被清掉；
           // 同时按颜色亮度决定白字还是深色字
           block = el('<div class="wt-block ' + contrastClass(hit.color) + '" style="grid-row:' + (row + 2 + evRow) + ' / span ' + span
-            + ';grid-column:' + col + ';background-color:' + hit.color + '">'
+            + ';grid-column:' + col + ';background-color:' + AR.Util.cssColor(hit.color) + '">'
             + '<span class="n">' + U.escapeHtml(hit.course.name) + '</span>'
             + (hit.location ? '<span class="l">' + U.escapeHtml(hit.location.raw) + '</span>' : '')
             + (hit.teachers.length ? '<span class="k">' + U.escapeHtml(hit.teachers.map(function (t) { return t.name; }).join('、')) + '</span>' : '')
@@ -4171,7 +4243,7 @@ var AR = window.AR || (window.AR = {});
           var t2 = AR.Store.eventType(evb.type);
           var block2 = el('<div class="wt-block wt-evblock ' + contrastClass(t2.hex)
             + (evb.star ? ' star' : '') + '" style="grid-row:' + (pl.row + 2 + evRow) + ' / span ' + pl.span
-            + ';grid-column:' + (dayNums.indexOf(pl.wd) + 2) + ';background-color:' + t2.hex + '">'
+            + ';grid-column:' + (dayNums.indexOf(pl.wd) + 2) + ';background-color:' + AR.Util.cssColor(t2.hex) + '">'
             + '<span class="n">' + (evb.star ? '★ ' : '') + U.escapeHtml(evb.title || '未命名') + '</span>'
             + (evb.place ? '<span class="l">' + U.escapeHtml(evb.place) + '</span>' : '')
             + '</div>');
@@ -4271,11 +4343,15 @@ var AR = window.AR || (window.AR = {});
         reason: '调课'
       });
     } else {
-      // 移动：来源日取消 + 目标日 move（带上目标星期，保证被认领）
-      AR.Store.upsertOverride(block.id, courseId, sourceKey, { type: 'cancel', newDate: null, reason: '调课' });
       /**
-       * 已经是移到这天来的（kind='moved-in'）：直接改写它自己的记录，
-       * 不要再写一条新的 move（否则两条记录互相打架）。
+       * 移动：来源日取消 + 目标日 move（带上目标星期，保证被认领）。
+       *
+       * U15（v0.5 第二处调课丢课）：kind==='moved-in' 时**绝对不能**先写来源日
+       * 那条 cancel。这种条目本身就挂在"当前展示的那一天"，而它的单次记录
+       * date 正是这一天；upsertOverride 以 (blockId, date) 为键，写 cancel 会把
+       * 这条 move 记录**自己**改成 cancel —— 结果来源日（本来就被第一次调课的
+       * cancel 挡着）和目标日都查不到这节课，整节课凭空消失。
+       * 模板日的取消在第一次调课时已经写过了，这里只需改写它自己的 newDate。
        */
       if (item.kind === 'moved-in' && item.override && item.override.id) {
         var self = AR.Store.overrideById(item.override.id);
@@ -4287,9 +4363,9 @@ var AR = window.AR || (window.AR = {});
           self.newStartTime = st;
           self.newEndTime = en;
           self.updatedAt = new Date().toISOString();
-          // 原来那条"在来源日取消"的记录已无意义，交给上面的 upsert 覆盖即可
         }
       } else {
+        AR.Store.upsertOverride(block.id, courseId, sourceKey, { type: 'cancel', newDate: null, reason: '调课' });
         AR.Store.upsertOverride(block.id, courseId, targetKey, {
           type: 'move',
           newDate: targetKey, newWeekday: newWeekday,
@@ -4565,7 +4641,7 @@ var AR = window.AR || (window.AR = {});
       html += '</div>';
       if (items.length) {
         html += '<div class="ds-list">' + items.map(function (it) {
-          return '<span class="ds-chip" style="background:' + it.color + '">' + U.escapeHtml(it.course.name) + '</span>';
+          return '<span class="ds-chip" style="background:' + AR.Util.cssColor(it.color) + '">' + U.escapeHtml(it.course.name) + '</span>';
         }).join('') + '</div>';
       } else {
         html += '<div class="muted">那天没有课</div>';
@@ -4701,8 +4777,15 @@ var AR = window.AR || (window.AR = {});
     refreshHomework();
   }
 
-  /** 新建 / 编辑日程类型（名称 + 颜色） */
-  function openTypeDialog(rec, onDone) {
+  /**
+   * 新建 / 编辑日程类型（名称 + 颜色）。
+   * opts.onClose：被 ✕ / 点遮罩 / 系统返回关掉时调用（U9）。
+   *   "保存 / 取消"按钮有自己的回调（onDone），不算 onClose —— 用 settled 区分，
+   *   保证两条路径不会各回调一次。
+   */
+  function openTypeDialog(rec, onDone, opts) {
+    opts = opts || {};
+    var settled = false;
     var isEdit = !!(rec && rec.key);
     var picked = (rec && rec.hex) || U.PALETTE[1].hex;
     var body = el('<div class="lt-edit">'
@@ -4759,12 +4842,34 @@ var AR = window.AR || (window.AR = {});
             if (!name) { toast('先起个名字'); return; }
             var saved = AR.Store.typeUpsert({ key: isEdit ? rec.key : undefined, label: name, hex: picked });
             AR.Bridge.haptic('medium', $('modalCard'));
+            settled = true;          // U9：按钮已落定，close() 不再触发 onClose
             close();
             if (onDone) { onDone(saved); }
           }
         },
-        { label: '取消', onClick: function (close) { close(); if (onDone) { onDone(null); } } }
-      ]
+        {
+          /**
+           * U9：这条「取消」带 keep:true —— openModal 默认会过滤纯文字的
+           * 「取消 / 关闭」按钮（v0.4.1c 定稿），带 keep 的例外。
+           * 否则这个按钮根本不渲染，用户只能点 ✕，而 ✕ 以前不会回到表单。
+           */
+          label: '取消', keep: true,
+          onClick: function (close) {
+            settled = true;
+            close();
+            if (onDone) { onDone(null); }
+          }
+        }
+      ],
+      /**
+       * U9：✕ / 遮罩 / 返回 都走 closeModal，由它把"关掉了"这件事回调给调用方。
+       * settled 之后不再回调（保存 / 取消 已经各自处理）。
+       */
+      onClose: function () {
+        if (settled) { return; }
+        settled = true;
+        if (opts.onClose) { opts.onClose(); }
+      }
     });
     setTimeout(blurSoftInputs, 0);
   }
@@ -4891,6 +4996,13 @@ var AR = window.AR || (window.AR = {});
         openTypeDialog(null, function (saved) {
           if (saved) { v.type = saved.key; }
           openEventForm(v);
+        }, {
+          /**
+           * U9：点 ✕ / 遮罩 / 返回 关掉「新建类型」时，回到日程表单。
+           * v 里已经 syncV() 过（标题 / 日期 / 时间都在），不会再丢。
+           * 另两个调用方（管理类型里的「改 / 新建」）不传 opts，行为不变。
+           */
+          onClose: function () { openEventForm(v); }
         });
       });
       tbox.appendChild(addT);
@@ -5058,7 +5170,9 @@ var AR = window.AR || (window.AR = {});
           // 「添加日程」直接进统一表单：带上周表格子的日期+时间，默认显示在周表
           if (mo.k === 'event') {
             AR.Bridge.haptic('light', b);
-            var per = null, plist = AR.Store.periodsOf ? (AR.Store.periodsOf(sem) || []) : [];
+            // U4：periodsOf 收的是**学期 id**（本文件其余 14 处都传 sem.id），
+            // 传学期对象会走到兜底分支，拿到的节次时间可能不是这个学期的。
+            var per = null, plist = AR.Store.periodsOf ? (AR.Store.periodsOf(sem && sem.id) || []) : [];
             for (var pi = 0; pi < plist.length; pi++) {
               if (plist[pi].index === periodIdx) { per = plist[pi]; break; }
             }
@@ -5429,9 +5543,12 @@ var AR = window.AR || (window.AR = {});
      * v0.4.1c（用户定稿）：
      *   · 删掉纯文字的「取消」「关闭」按钮 —— 它们和 ✕ / 点遮罩空白 / 系统返回完全等效；
      *     带场景语义的（如「取消这一天的课」）不在删除之列。
+     *   · U9：带 `keep:true` 的例外保留。「新建类型」那条「取消」需要它 ——
+     *     既要有明确的返回入口，也要在返回时把用户已填的日程表单交还回去。
      *   · 按钮宽度由文字决定（CSS: flex:0 0 auto + nowrap），一行优先、放不下换第二行、间距 8px。
      */
     var actList = (opts.actions || []).filter(function (a) {
+      if (a && a.keep === true) { return true; }
       var lb = String((a && a.label) || '').trim();
       return lb && lb !== '取消' && lb !== '关闭';
     });
@@ -5491,7 +5608,25 @@ var AR = window.AR || (window.AR = {});
   function closeModal() {
     var root = $('modalRoot');
     if (root.hidden) { return false; }
+    var top = modalStack[modalStack.length - 1];
     modalStack.pop();
+    /**
+     * U9：带 onClose 的弹窗（目前只有「新建类型」）被 ✕ / 遮罩 / 系统返回关掉时，
+     * 必须把"关闭"这件事交回调用方 —— 日程表单里新建类型，关掉后要回到那张
+     * 还填着标题/日期/时间的表单，而不是整层消失、内容全丢。
+     *
+     * 这条路径不走退场动画：onClose 里通常会立刻 openModal 出新表单，
+     * 若先播 out 再延时隐藏，新弹窗会被这层的退场动画和隐藏定时器盖掉。
+     */
+    if (top && typeof top.onClose === 'function') {
+      if (modalCloseTimer) { clearTimeout(modalCloseTimer); modalCloseTimer = null; }
+      root.classList.remove('closing');
+      stopModalAnim($('modalCard'));
+      stopModalAnim($('modalScrim'));
+      root.hidden = true;
+      try { top.onClose(); } catch (e) { console.error('弹窗 onClose 失败', e); }
+      return true;
+    }
     playModal(root, $('modalCard'), 'out');
     if (modalCloseTimer) { clearTimeout(modalCloseTimer); }
     modalCloseTimer = setTimeout(function () {
@@ -5684,7 +5819,13 @@ var AR = window.AR || (window.AR = {});
     var day = item.date || new Date();
     var realBlock = AR.Store.blockById ? AR.Store.blockById(block.id) : null;
     // 补课 / 加课这种「单次课」没有模板 block，只能按"这一次"改
-    var hasOneOff = (!!item.override && item.kind !== 'normal') || !realBlock;
+    /**
+     * U3：作用域硬约束只认三种 —— 没有模板（合成 block）、补课、加课。
+     * 以前写成 `!!item.override && item.kind !== 'normal'`，只要这天有单次记录
+     * （调课 / 换教室 / 仅这次改备注）就整门课被强制降级成「仅这次」，
+     * 和下面 5690 那句"其余情况跟随用户上一次的选择"自相矛盾。
+     */
+    var hasOneOff = !realBlock || item.kind === 'makeup' || item.kind === 'add';
     /**
      * 作用域默认值（v0.4.1a 改）：
      *   · 单次课（补课 / 加课，没有模板）只能"仅这次"，这是硬约束；
@@ -5752,12 +5893,12 @@ var AR = window.AR || (window.AR = {});
         + '" style="background:' + U.PALETTE[pi].hex + '"></button>';
     }
     // 自定义颜色（色盘）：存 #RRGGBB，和调色板走同一套 colorKey
-    var customHex = /^#[0-9a-fA-F]{6}$/.test(String(pickedColor)) ? pickedColor : '#5B8DEF';
+    var customHex = AR.Util.cssColor(/^#[0-9a-fA-F]{6}$/.test(String(pickedColor)) ? pickedColor : '#5B8DEF');
     var customSwatch = /^#[0-9a-fA-F]{6}$/.test(String(pickedColor))
       ? '<button type="button" class="swatch custom active" data-color="' + customHex
-        + '" title="自定义" style="background:' + customHex + '"></button>'
+        + '" title="自定义" style="background:' + AR.Util.cssColor(customHex) + '"></button>'
       : '<button type="button" class="swatch custom" data-color="' + customHex
-        + '" title="自定义" style="background:' + customHex + '"></button>';
+        + '" title="自定义" style="background:' + AR.Util.cssColor(customHex) + '"></button>';
 
     var teacherText = item.teachers.length
       ? item.teachers.map(function (t) { return t.name; }).join('、') : '';
@@ -5816,7 +5957,7 @@ var AR = window.AR || (window.AR = {});
       + '<div class="swatches" id="ebColors">' + swatchHtml + '</div>'
       + '<div class="row color-custom">'
       + '<button class="btn color-open" type="button" id="ebColorPick">'
-      + '<span class="co-dot" id="ebColorDot" style="background:' + customHex + '"></span>打开色盘</button>'
+      + '<span class="co-dot" id="ebColorDot" style="background:' + AR.Util.cssColor(customHex) + '"></span>打开色盘</button>'
       + '<span class="muted">饱和/明度方块 + 色相条，也能直接填 #RRGGBB</span></div></div>'
       + '<div class="field edit-span"><label class="field-label">课程类型（影响配色方案）</label>'
       + '<div class="pick-slot" data-slot="track"></div>'
@@ -5839,7 +5980,7 @@ var AR = window.AR || (window.AR = {});
         if (!startMs) { toast('这节课还没有时间，先在下面设好节次'); return; }
         var at = remindAt(startMs);
         AR.Bridge.addCalendarEvent(item.course.name, place,
-          'Abbey Road 课表 · ' + (item.periodLabel || '') + (item.note ? ' · ' + item.note : ''),
+          'Allegro 课表 · ' + (item.periodLabel || '') + (item.note ? ' · ' + item.note : ''),
           at.ms, endMs || (startMs + 45 * 60000));
         AR.Bridge.haptic('medium', tools);
       });
@@ -6120,11 +6261,46 @@ var AR = window.AR || (window.AR = {});
         if (moved && !oneOff && item.kind !== 'moved-in') {
           AR.Store.upsertOverride(block.id, targetCourse.id, origKey, { type: 'cancel', newDate: null });
         }
+        /**
+         * U1 加固：moved-in 的课被**再次改星期**时，决定来源日那条 cancel 的去留。
+         *
+         * 调进来的课（moved-in）没有模板可依：模板星期 block.weekday 那天本来就由
+         * 一条 cancel 挡着，move 记录只负责把它显示到目标日。如果用户在弹窗里把星期
+         * 改回**模板星期**，模板课重新生效，那条 cancel 必须软删 —— 否则 cancel 把
+         * 模板日挡住、move 记录又指向同一天，两天同时查不到这节课（实测就是周一
+         * cancel、周三无记录）。改成别的星期则保留 cancel：模板日继续停课，
+         * 课程只搬到新目标日。
+         *
+         * 目标日等于模板星期所在日 ⇔ targetKey === 模板日。cancel 记在模板日上，
+         * 所以按 targetKey 找（origKey 是这张卡当前所在日，不是来源的模板日）。
+         */
+        if (item.kind === 'moved-in' && moved) {
+          var tplKey = U.dateKey(U.addDays(U.mondayOf(day), block.weekday - 1));
+          if (targetKey === tplKey) {
+            var ovsSrc = AR.Store.overridesOfBlock(block.id) || [];
+            for (var si = 0; si < ovsSrc.length; si++) {
+              var ovSrc = ovsSrc[si];
+              if (ovSrc.date === targetKey && ovSrc.type === 'cancel' && !ovSrc.deletedAt) {
+                if (AR.Store.removeOverride) { AR.Store.removeOverride(ovSrc.id); }
+                else { AR.Store.softDelete('overrides', ovSrc); }
+              }
+            }
+          }
+        }
       } else {
         // 改星期前先记下原星期：updateBlock 之后 block.weekday 就变了，届时就比较不出来了
         var prevWeekday = block.weekday;
+        /**
+         * U1（与上面 once 分支同一个根因，只是换到「所有时段」这条路径上）：
+         * moved-in 的卡片画在**目标日**，block.weekday 还停在模板日。
+         * 若把"显示日的星期"写进 block.weekday：整门模板课被搬到目标日，
+         * 紧接着下面"原星期的单次记录跟着搬"又把模板日的 cancel 搬到目标日，
+         * 并覆盖掉刚搬过去的 move 记录 —— 结果周一、周三同时查不到课（已复现）。
+         * 所以 moved-in 的星期只改它自己的 move 记录：模板星期这里一律不动。
+         */
+        var wdForBlock = (item.kind === 'moved-in') ? block.weekday : weekday;
         var up = AR.Store.updateBlock(block.id, {
-          weekday: weekday, periodStart: pStart, periodEnd: pEnd,
+          weekday: wdForBlock, periodStart: pStart, periodEnd: pEnd,
           startTime: customStart, endTime: customEnd,
           weekMode: wk.weekMode, weeks: wk.weeks,
           locationIds: loc ? [loc.id] : [], teacherIds: tIds
@@ -6140,7 +6316,32 @@ var AR = window.AR || (window.AR = {});
          * 做法：对每条"日期落在原星期"的记录，按同一周内平移 delta 天得到新日期，
          * 把内容复制到新日期、再把旧记录软删（进回收站，可恢复）。
          */
-        if (weekday !== prevWeekday) {
+        if (item.kind === 'moved-in') {
+          /* U1：moved-in 的星期改动 = 这次调课落到哪天（不动模板星期、不做迁移） */
+          if (moved) {
+            var mvOv = (item.override && item.override.id) ? AR.Store.overrideById(item.override.id) : null;
+            if (mvOv) {
+              mvOv.type = 'move';
+              mvOv.date = targetKey;
+              mvOv.newDate = targetKey;
+              mvOv.newWeekday = weekday;
+              mvOv.updatedAt = new Date().toISOString();
+              AR.Store.save(true);
+            }
+            var tplKey2 = U.dateKey(U.addDays(U.mondayOf(day), block.weekday - 1));
+            if (targetKey === tplKey2) {
+              /* 回到模板日 → 模板课重新生效，模板日那条 cancel 必须软删（同 once 分支） */
+              var ovsSrc2 = AR.Store.overridesOfBlock(block.id) || [];
+              for (var si2 = 0; si2 < ovsSrc2.length; si2++) {
+                var ovSrc2 = ovsSrc2[si2];
+                if (ovSrc2.date === targetKey && ovSrc2.type === 'cancel' && !ovSrc2.deletedAt) {
+                  if (AR.Store.removeOverride) { AR.Store.removeOverride(ovSrc2.id); }
+                  else { AR.Store.softDelete('overrides', ovSrc2); }
+                }
+              }
+            }
+          }
+        } else if (weekday !== prevWeekday) {
           var ovs = AR.Store.overridesOfBlock(block.id) || [];
           var delta = weekday - prevWeekday;
           var movedAny = false;
@@ -6225,7 +6426,14 @@ var AR = window.AR || (window.AR = {});
       node = slotOf('weekday');
       if (node) {
         node.appendChild(pickerTrigger({
-          id: 'ebWeekday', value: String(block.weekday || 1), options: weekdayOpts, title: '星期'
+          /**
+           * U1：初始值取「这天的实际星期」，不是模板块的星期。
+           * 调过课的卡片画在目标日（item.kind === 'moved-in'），模板块星期还停在来源日：
+           * 用 block.weekday 初始化，保存时 moved 会被误判成 true，把 move 记录改回模板日，
+           * 来源日的 cancel 又挡住模板课 —— 两天都查不到这节课。
+           * 上方节次回显（5727 附近）本来就是按"这天实际生效值"取的，这里保持一致。
+           */
+          id: 'ebWeekday', value: String(U.weekdayOf(day) || block.weekday || 1), options: weekdayOpts, title: '星期'
         }));
       }
       var periodList = periodOpts();
@@ -6450,7 +6658,7 @@ var AR = window.AR || (window.AR = {});
     wrap.appendChild(box);
     var row = el('<div class="row color-custom" style="margin-top:12px">'
       + '<button class="btn color-open" type="button" id="courseColorPick">'
-      + '<span class="co-dot" id="courseColorDot" style="background:' + custom + '"></span>打开色盘</button>'
+      + '<span class="co-dot" id="courseColorDot" style="background:' + AR.Util.cssColor(custom) + '"></span>打开色盘</button>'
       + '<button class="btn primary" type="button" id="courseColorApply">用这个颜色</button></div>');
     wrap.appendChild(row);
     openModal({
@@ -6623,7 +6831,7 @@ var AR = window.AR || (window.AR = {});
             AR.Bridge.addCalendarEvent(
               item.course.name,
               item.location ? item.location.raw : '',
-              'Abbey Road 课表 · ' + item.periodLabel + (item.note ? ' · ' + item.note : ''),
+              'Allegro 课表 · ' + item.periodLabel + (item.note ? ' · ' + item.note : ''),
               at.ms, endMs);
             AR.Bridge.haptic('medium', $('modalCard'));
           }
@@ -6640,8 +6848,15 @@ var AR = window.AR || (window.AR = {});
             S.settings.notifications.enabled = true;
             S.settings.notifications.defaultOffset = S.settings.notifications.defaultOffset || 15;
             AR.Store.save(true);
+            /**
+             * v0.5：以前这里只写了个布尔就弹「已开启课前提醒」，但 Android 侧
+             * 根本没有通知代码 —— 开关是假的。现在真的去排系统闹钟，并（首次）
+             * 请求通知权限；提示文案也不再打包票说已经开好了。
+             */
+            try { if (AR.Reminders) { AR.Reminders.enable(); } } catch (e) { }
             AR.Panels.renderSettings();
-            toast('已开启课前提醒：提前 ' + S.settings.notifications.defaultOffset + ' 分钟（可在设置里调整）');
+            toast('已开启课前提醒：提前 ' + S.settings.notifications.defaultOffset + ' 分钟'
+              + (AR.Bridge && AR.Bridge.hasAndroid ? '（首次需要允许通知权限）' : ''));
           }
         }
       ]
@@ -8930,6 +9145,13 @@ var AR = window.AR || (window.AR = {});
     }
     updateClock();
     if (AR.WidgetData && AR.WidgetData.sync) { AR.WidgetData.sync(true); }
+    /**
+     * 课前提醒也要跟着重排：系统在重启/清后台后会丢掉 AlarmManager 里的闹钟，
+     * 回前台重排一次就能覆盖（reminders.js 只排未来 7 天，代价很小）。
+     */
+    try { if (AR.Reminders) { AR.Reminders.sync(); } } catch (e) { }
+  // v0.4.6：回到前台时按「自动同步」频率决定要不要拉一次（失败静默，不影响本地）
+  try { if (AR.Sync && AR.Sync.maybeAuto) { AR.Sync.maybeAuto(); } } catch (e) { }
   }
 
   /* ── 主题 / 动效 / 毛玻璃 ─────────────────────────────────── */
@@ -9495,7 +9717,7 @@ var AR = window.AR || (window.AR = {});
       var rbox = el('<div class="cp-chips"></div>');
       for (var i = 0; i < recent.length; i++) {
         (function (h) {
-          var b = el('<button class="cp-chip" type="button" style="background:' + h + '" title="' + h + '"></button>');
+          var b = el('<button class="cp-chip" type="button" style="background:' + AR.Util.cssColor(h) + '" title="' + AR.Util.cssColor(h) + '"></button>');
           b.addEventListener('click', function () { setHex(h, true); });
           rbox.appendChild(b);
         })(recent[i]);
@@ -9509,7 +9731,7 @@ var AR = window.AR || (window.AR = {});
     var pbox = el('<div class="cp-chips"></div>');
     for (var p = 0; p < rec.length; p++) {
       (function (h) {
-        var b = el('<button class="cp-chip" type="button" style="background:' + h + '" title="' + h + '"></button>');
+        var b = el('<button class="cp-chip" type="button" style="background:' + AR.Util.cssColor(h) + '" title="' + AR.Util.cssColor(h) + '"></button>');
         b.addEventListener('click', function () { setHex(h, true); });
         pbox.appendChild(b);
       })(rec[p]);
@@ -9957,7 +10179,12 @@ var AR = window.AR || (window.AR = {});
   var TK_REC_OPEN = {};        // 哪张卡的「最近记录」打开了
   var TK_MINI_DAYS = 7;        // 折叠态迷你格：最近 7 天
   var TK_GH_WEEKS = 12;        // 展开的贡献图：多少周
-  function tkColor(t) { return U.colorHex(t.colorKey || '#5B8DEF'); }
+  /**
+   * U12：任务色也来自 colorKey（导入时可能是自定义 `#RRGGBB`，colorHex 原样返回），
+   * 这里统一过一遍 AR.Util.cssColor。所有 `background:' + tkColor(t)` 的调用点因此都安全，
+   * 有效颜色输出不变。
+   */
+  function tkColor(t) { return AR.Util.cssColor(U.colorHex(t.colorKey || '#5B8DEF')); }
   function tkDayKey(off) { return U.dateKey(U.addDays(new Date(), off || 0)); }
   function tkIcoHtml() { return '<i></i><i></i><i></i>'; }
   function tkRelDay(k) {
@@ -10178,7 +10405,13 @@ var AR = window.AR || (window.AR = {});
       + track
       + '<div class="tk-l2">' + l2 + '</div></div>'
       + '<span class="tk-hint">+' + tkSwipeTimes(t) + '</span></div>');
-    bindSwipeRow(row, { flyOut: true, onCommit: function () { tkPunch(t); } });
+    /**
+     * U5：这里**不能** flyOut:true。
+     * tkPunch 在"今天已达标"时会弹二次确认（只有「再记一次」），用户点 ✕ 取消后
+     * 没有任何 refresh —— 飞出去的行会永远停在 opacity 0，从这个列表里消失。
+     * 要二次确认的一律先滑回原位再回调；真正落库后由 AR.UI.refreshTasks() 重画。
+     */
+    bindSwipeRow(row, { flyOut: false, onCommit: function () { tkPunch(t); } });
     tkBindLongPress(row, function () { openTaskEdit(t); });
     return row;
   }
@@ -10278,7 +10511,33 @@ var AR = window.AR || (window.AR = {});
     var list = AR.Store.todoTodayList ? AR.Store.todoTodayList() : [];
     var d = new Date();
     var i, t;
-    function dayCount(task, k) { return AR.Store.todoDayCount(task, k); }
+    /**
+     * U13：先给每个任务建一次 `dayKey → 次数` 的字典（entries 只遍历一遍），
+     * 后面的 sumRange / 连续天数 / 迷你柱全部查表。
+     *
+     * 旧实现每个任务要跑 7 + 7 + 30 + 400 + 60 + 30 ≈ 578 次 todoDayCount，
+     * 而 todoDayCount 每次都会把该任务的 entries 全量扫一遍 —— 任务一多就是
+     * 几十万次无谓循环。口径与 todoDayCount 完全一致：同一天的多条记录按
+     * **条数**累加，已删除（deletedAt）的 entry 不计。
+     */
+    var dayBag = {};
+    for (i = 0; i < list.length; i++) {
+      var bag = {};
+      var entsAll = AR.Store.todoLiveEntries ? AR.Store.todoLiveEntries(list[i])
+        : (list[i].entries || []).filter(function (e) { return !e.deletedAt; });
+      for (var qb = 0; qb < entsAll.length; qb++) {
+        var kb = AR.Store.todoEntryDay(entsAll[qb]);
+        if (!kb) { continue; }
+        bag[kb] = (bag[kb] || 0) + 1;
+      }
+      dayBag[list[i].id] = bag;
+    }
+    function dayCount(task, k) {
+      var b = (task && task.id) ? dayBag[task.id] : null;
+      // 没有 id 的记录不建字典：退回原实现，保证口径完全一致
+      if (!b) { return AR.Store.todoDayCount(task, k); }
+      return b[k] || 0;
+    }
     function sumRange(task, from, to) {
       var n = 0;
       for (var q = from; q <= to; q++) { n += dayCount(task, U.dateKey(U.addDays(d, -q))); }
@@ -10289,7 +10548,7 @@ var AR = window.AR || (window.AR = {});
     for (i = 29; i >= 0; i--) {
       var k = U.dateKey(U.addDays(d, -i));
       var n2 = 0;
-      for (var q2 = 0; q2 < list.length; q2++) { n2 += AR.Store.todoDayCount(list[q2], k); }
+      for (var q2 = 0; q2 < list.length; q2++) { n2 += dayCount(list[q2], k); }
       daily.push({ k: k, n: n2 });
     }
     /* 星期分布 */
@@ -10338,10 +10597,17 @@ var AR = window.AR || (window.AR = {});
     var planRows = rows.filter(function (r) { return r.hasPlan; });
     var doneToday = planRows.filter(function (r) { return r.p.today >= r.need; }).length;
     var weekGoal = 0, weekDone = 0;
+    /**
+     * U7：本周 KPI 用 Store 的统一周口径（todoWeekGoal / todoWeekDone）。
+     * 以前 else 分支是 `need * 7`（每天的计划次数 ×7，对"指定星期/每 N 天"
+     * 明显偏大）配 `p.today`（分子只算今天）—— 分母分子都不是一周的数。
+     * weekly 任务两者本就等价（周期目标 = 一周几次，完成 = 逐日累加），
+     * 所以整段统一成同一口径，输出对 weekly 任务与旧实现完全一致。
+     */
     rows.forEach(function (r) {
       if (!r.hasPlan) { return; }
-      if (r.p.periodUnit === '本周') { weekGoal += r.p.periodGoal; weekDone += r.p.periodDone; }
-      else { weekGoal += r.need * 7; weekDone += r.p.today; }
+      weekGoal += AR.Store.todoWeekGoal(r.task, d);
+      weekDone += AR.Store.todoWeekDone(r.task, d);
     });
     var last7All = rows.reduce(function (a, r) { return a + r.last7; }, 0);
     var prev7All = rows.reduce(function (a, r) { return a + r.prev7; }, 0);
@@ -10539,8 +10805,15 @@ var AR = window.AR || (window.AR = {});
         if (p.periodDone >= p.periodGoal) { doneN++; }
         else if (p.today === 0) { overdue++; }
       }
-      if (p.periodUnit === '本周') { wkGoal += p.periodGoal; wkDone += p.periodDone; }
-      else if (p.periodGoal > 0) { wkGoal += ((t.cadence.times || 1) * 7); wkDone += p.today; }
+      /**
+       * U7：这一行是「本周」，分母分子都要按整周算（Store 的统一周口径）。
+       * 旧写法 `次数×7` 只对"每天 N 次"成立，且分子用的是 p.today（只加今天）——
+       * 指定星期 / 每 N 天 的任务口径全错。
+       */
+      if (p.periodGoal > 0) {
+        wkGoal += AR.Store.todoWeekGoal(t, d);
+        wkDone += AR.Store.todoWeekDone(t, d);
+      }
     });
     var pct = needN ? Math.round(doneN / needN * 100) : 0;
     var pctW = wkGoal ? Math.round(Math.min(1, wkDone / wkGoal) * 100) : 0;
@@ -10678,42 +10951,67 @@ var AR = window.AR || (window.AR = {});
   function openTaskDetail(t) {
     var d = new Date();
     var cur = (AR.Store.todoById ? AR.Store.todoById(t.id) : null) || t;
-    var p = AR.Store.todoProgress(cur, d);
     var body = el('<div class="tkd"></div>');
     tkAnimateExpand(body);
 
-    /* 概况：周期 + 累计 */
-    var pi = tkPeriodInfo(cur, p);
-    if (pi) {
-      var dn = pi.done, gl = pi.goal;
-      var total2 = Math.min(Math.max(gl, dn), 6), dots = '';
-      for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < dn ? '' : ' off') + '"></i>'; }
-      body.appendChild(el('<div class="tk-t2row"><span class="tk-t2lab">' + pi.unit + '</span>'
-        + '<span class="tk-t2dots">' + dots + (dn > 6 ? '<b class="tk-t2num">' + dn + '</b>' : '') + '</span>'
-        + '<span class="tk-t2val"><b>' + pi.unit + ' ' + dn + '</b> / ' + gl + ' 次</span></div>'));
-    } else {
-      body.appendChild(el('<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
-        + '<span class="tk-t2dots"><b class="tk-t2num">' + p.today + '</b></span>'
-        + '<span class="tk-t2val">未设计划</span></div>'));
+    /**
+     * U6：顶部（今天/本周概况 + 累计 + 计划 + 贡献图）抽成**可重入**的 paintTop()。
+     *
+     * 以前这里只在打开弹窗时画一次，手动添加一笔后只调 paintRecs() —— 顶部的
+     * 「今天/本周 x/y」、累计进度条、贡献图全都停在打开那一刻的数字。
+     * 现在打完卡 / 撤销一笔都重画这一块；它在输入框**上方**且是独立容器，
+     * 所以只重建顶部，输入框不重建、焦点不丢。
+     */
+    var topBox = el('<div class="tkd-top"></div>');
+    function paintTop() {
+      var live = (AR.Store.todoById ? AR.Store.todoById(cur.id) : null) || cur;
+      var pp = AR.Store.todoProgress(live, d);
+      var pi = tkPeriodInfo(live, pp);
+      var html = '';
+      if (pi) {
+        /**
+         * U8：休息日（指定星期里没有今天 / 每 N 天没轮到）由 tkPeriodInfo 返回
+         * { rest:true, goal:0 }。直拼 x/y 会显示成「今天 0 / 0 次」，像卡住了；
+         * 统一走 tkPeriodText —— 它会回「今天不用做」。
+         */
+        if (pi.rest) {
+          html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
+            + '<span class="tk-t2dots"></span>'
+            + '<span class="tk-t2val">' + tkPeriodText(live, pp) + '</span></div>';
+        } else {
+          var dn = pi.done, gl = pi.goal;
+          var total2 = Math.min(Math.max(gl, dn), 6), dots = '';
+          for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < dn ? '' : ' off') + '"></i>'; }
+          html += '<div class="tk-t2row"><span class="tk-t2lab">' + pi.unit + '</span>'
+            + '<span class="tk-t2dots">' + dots + (dn > 6 ? '<b class="tk-t2num">' + dn + '</b>' : '') + '</span>'
+            + '<span class="tk-t2val"><b>' + pi.unit + ' ' + dn + '</b> / ' + gl + ' 次</span></div>';
+        }
+      } else {
+        html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
+          + '<span class="tk-t2dots"><b class="tk-t2num">' + pp.today + '</b></span>'
+          + '<span class="tk-t2val">未设计划</span></div>';
+      }
+      if (pp.hasGoal) {
+        html += '<div class="tk-t2row"><span class="tk-t2lab">累计</span>'
+          + '<span class="tk-t2track"><span class="tk-t2fill" style="width:' + pp.percent
+          + '%;background:' + tkColor(live) + '"></span></span>'
+          + '<span class="tk-t2val"><b>' + pp.total + '</b> / ' + pp.target + ' '
+          + U.escapeHtml(live.goal.unit || '') + '</span></div>';
+      }
+      var plan = tkPlanText(live);
+      html += '<div class="tkd-line">' + (plan ? ('计划：' + U.escapeHtml(plan)) : '没有计划，随时可记')
+        + (pp.hasGoal ? '' : '（未设目标）') + '</div>';
+      /* 贡献图 */
+      html += '<div class="tk-shead">最近 12 周</div>' + tkGhGrid(live);
+      topBox.innerHTML = html;
     }
-    if (p.hasGoal) {
-      body.appendChild(el('<div class="tk-t2row"><span class="tk-t2lab">累计</span>'
-        + '<span class="tk-t2track"><span class="tk-t2fill" style="width:' + p.percent
-        + '%;background:' + tkColor(cur) + '"></span></span>'
-        + '<span class="tk-t2val"><b>' + p.total + '</b> / ' + p.target + ' '
-        + U.escapeHtml(cur.goal.unit || '') + '</span></div>'));
-    }
-    var plan = tkPlanText(cur);
-    body.appendChild(el('<div class="tkd-line">' + (plan ? ('计划：' + U.escapeHtml(plan)) : '没有计划，随时可记')
-      + (p.hasGoal ? '' : '（未设目标）') + '</div>'));
-
-    /* 贡献图 */
-    body.appendChild(el('<div class="tk-shead">最近 12 周</div>'));
-    body.appendChild(el(tkGhGrid(cur)));
+    body.appendChild(topBox);
+    paintTop();
 
     /* 最近记录（可逐笔撤销） */
     /* 「手动添加」放在最近记录上面 */
     body.appendChild(tkCountInput(cur, function () {
+      paintTop();             // U6：顶部「今天/本周」+ 累计 + 贡献图同步重算
       paintRecs();
       if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
     }));
@@ -10732,6 +11030,7 @@ var AR = window.AR || (window.AR = {});
           if (!ents.length) { return; }
           if (AR.Store.todoRemoveEntry(live.id, ents[ents.length - 1].id)) {
             AR.UI.toast('已撤销 ' + tkRelDay(day) + ' 的一笔');
+            paintTop();       // U6：撤销也会改变顶部进度，一起重算
             paintRecs();
             if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
           }
@@ -10787,13 +11086,20 @@ var AR = window.AR || (window.AR = {});
     /* 周期词：有计划按 今天/本周 显示，没计划只报今天的次数 */
     var pi2 = tkPeriodInfo(t, p);
     if (pi2) {
-      var dn = pi2.done, gl = pi2.goal;
-      var total2 = Math.min(Math.max(gl, dn), 6);
-      var dots = '';
-      for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < dn ? '' : ' off') + '"></i>'; }
-      html += '<div class="tk-t2row"><span class="tk-t2lab">' + pi2.unit + '</span>'
-        + '<span class="tk-t2dots">' + dots + (dn > 6 ? '<b class="tk-t2num">' + dn + '</b>' : '') + '</span>'
-        + '<span class="tk-t2val"><b>' + pi2.unit + ' ' + dn + '</b> / ' + gl + ' 次</span></div>';
+      /* U8：休息日显示「今天不用做」，不要拼成「今天 0 / 0 次」 */
+      if (pi2.rest) {
+        html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
+          + '<span class="tk-t2dots"></span>'
+          + '<span class="tk-t2val">' + tkPeriodText(t, p) + '</span></div>';
+      } else {
+        var dn = pi2.done, gl = pi2.goal;
+        var total2 = Math.min(Math.max(gl, dn), 6);
+        var dots = '';
+        for (var i = 0; i < total2; i++) { dots += '<i class="tk-t2dot' + (i < dn ? '' : ' off') + '"></i>'; }
+        html += '<div class="tk-t2row"><span class="tk-t2lab">' + pi2.unit + '</span>'
+          + '<span class="tk-t2dots">' + dots + (dn > 6 ? '<b class="tk-t2num">' + dn + '</b>' : '') + '</span>'
+          + '<span class="tk-t2val"><b>' + pi2.unit + ' ' + dn + '</b> / ' + gl + ' 次</span></div>';
+      }
     } else {
       html += '<div class="tk-t2row"><span class="tk-t2lab">今天</span>'
         + '<span class="tk-t2dots"><b class="tk-t2num">' + p.today + '</b></span>'
@@ -10889,14 +11195,14 @@ var AR = window.AR || (window.AR = {});
       });
       /* 自定义颜色（色盘）：存 #RRGGBB，和调色板走同一套 colorKey */
       var tkCustom = el('<button type="button" class="swatch custom' + (isCustomHex ? ' active' : '')
-        + '" title="自定义" style="background:' + curHex + '"></button>');
+        + '" title="自定义" style="background:' + AR.Util.cssColor(curHex) + '"></button>');
       tkCustom.addEventListener('click', function () {
         openColorPicker(curHex, function (hex) { draft.colorKey = hex; paint(); });
       });
       sw.appendChild(tkCustom);
       wrap.appendChild(sw);
       var tkCp = el('<button class="btn color-open" type="button" style="margin-top:4px">'
-        + '<span class="co-dot" style="background:' + curHex + '"></span>打开色盘</button>');
+        + '<span class="co-dot" style="background:' + AR.Util.cssColor(curHex) + '"></span>打开色盘</button>');
       tkCp.addEventListener('click', function () {
         openColorPicker(curHex, function (hex) { draft.colorKey = hex; paint(); });
       });

@@ -1,13 +1,14 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
 
-# Abbey Road - Android build
+# Allegro - Android build
 # Requires: JDK 17 + Android SDK 34 (platform 34 + build-tools 34.0.0)
 #
 # Toolchain paths and the signing password come from environment variables or a
 # local private config, so the repository never carries any private data:
 #   $env:ABBEYROAD_BUILD_ROOT   -> toolchain root (default $HOME\.android-build)
 #   $env:ABBEYROAD_KS_PASS      -> keystore password
-#   $ks / $ksPass               -> may also be set by build.local.ps1 in this dir
+#   $env:ABBEYROAD_KS_ALIAS     -> optional key alias (omit for single-key stores)
+#   $ks / $ksPass / $ksAlias    -> may also be set by build.local.ps1 in this dir
 # build.local.ps1 is gitignored, so it never enters the repo or the source zip.
 #
 # NOTE FOR MAINTAINERS: keep THIS FILE pure ASCII. Windows PowerShell 5.1 reads
@@ -19,8 +20,13 @@ $projRoot  = Split-Path $root -Parent
 $appDir    = Join-Path $projRoot 'app'
 $dist      = Join-Path $projRoot 'dist'
 $buildRoot = if ($env:ABBEYROAD_BUILD_ROOT) { $env:ABBEYROAD_BUILD_ROOT } else { Join-Path $HOME '.android-build' }
-$ksPass    = if ($env:ABBEYROAD_KS_PASS) { $env:ABBEYROAD_KS_PASS } else { 'abbeyroad-dev' }
+# No default password on purpose: a built-in fallback silently turns the
+# "missing password" guard below into dead code. Configure the real one.
+$ksPass    = if ($env:ABBEYROAD_KS_PASS) { $env:ABBEYROAD_KS_PASS } else { '' }
 $ks        = ''
+# Optional key alias. apksigner only needs it when the keystore holds more
+# than one key; when empty the flag is omitted so old configs keep working.
+$ksAlias   = if ($env:ABBEYROAD_KS_ALIAS) { $env:ABBEYROAD_KS_ALIAS } else { '' }
 
 $localCfg = Join-Path $root 'build.local.ps1'
 if (Test-Path $localCfg) { . $localCfg }   # local private override (not committed)
@@ -29,8 +35,30 @@ $jdk       = Join-Path $buildRoot 'jdk-17.0.20+8'
 $sdk       = Join-Path $buildRoot 'sdk'
 $platform  = Join-Path $sdk 'platforms\android-34\android.jar'
 $bt        = Join-Path $sdk 'build-tools\34.0.0'
-$version   = '0.4.4'
-$versionCode = 60
+$version   = '0.4.8'
+$versionCode = 64
+
+# ---------------------------------------------------------------------------
+# Version consistency: build.ps1 and AndroidManifest.xml both hard-code the
+# version. If they drift, one of them silently wins (aapt2 link overrides the
+# manifest), so assert they agree and say which file to edit.
+# ---------------------------------------------------------------------------
+$manifestPath = Join-Path $root 'AndroidManifest.xml'
+if (-not (Test-Path $manifestPath)) { throw "Missing AndroidManifest.xml: $manifestPath" }
+$manifestText = Get-Content -Raw -Encoding UTF8 $manifestPath
+$codeMatch = [regex]::Match($manifestText, 'android:versionCode\s*=\s*"(\d+)"')
+$nameMatch = [regex]::Match($manifestText, 'android:versionName\s*=\s*"([^"]+)"')
+if (-not $codeMatch.Success -or -not $nameMatch.Success) {
+    throw 'Cannot read android:versionCode / android:versionName from AndroidManifest.xml'
+}
+$manifestCode = [int]$codeMatch.Groups[1].Value
+$manifestName = $nameMatch.Groups[1].Value
+if ($manifestCode -ne $versionCode) {
+    throw "versionCode mismatch: build.ps1=$versionCode, AndroidManifest.xml=$manifestCode. Update android/build.ps1 or android/AndroidManifest.xml."
+}
+if ($manifestName -ne $version) {
+    throw "versionName mismatch: build.ps1=$version, AndroidManifest.xml=$manifestName. Update android/build.ps1 or android/AndroidManifest.xml."
+}
 
 $env:JAVA_HOME = $jdk
 $env:PATH = "$jdk\bin;$bt;$env:PATH"
@@ -108,10 +136,22 @@ if (-not $ksPass) {
     $m2 = [char]0x7F3A + [char]0x5C11 + [char]0x7B7E + [char]0x540D + [char]0x53E3 + [char]0x4EE4
     throw "$m2 : set `$env:ABBEYROAD_KS_PASS or `$ksPass in build.local.ps1"
 }
-$apk = Join-Path $dist "AbbeyRoad-v$version.apk"
-& "$bt\apksigner.bat" sign --ks $ks --ks-pass "pass:$ksPass" --key-pass "pass:$ksPass" `
-    --out $apk "$out\aligned.apk"
+$apk = Join-Path $dist "Allegro-v$version.apk"
+$signArgs = @('sign', '--ks', $ks, '--ks-pass', "pass:$ksPass", '--key-pass', "pass:$ksPass")
+if ($ksAlias) { $signArgs += @('--ks-key-alias', $ksAlias) }
+$signArgs += @('--out', $apk, "$out\aligned.apk")
+& "$bt\apksigner.bat" @signArgs
 if ($LASTEXITCODE -ne 0) { throw 'apksigner failed' }
+
+# Verification only: print the signing certificate so a human can compare the
+# SHA-256 with the historical release fingerprint. A DIFFERENT fingerprint is
+# reported, never thrown -- only "this APK is not validly signed" fails here.
+Write-Host '== verify signature =='
+$verifyOut = & "$bt\apksigner.bat" verify --print-certs $apk
+$verifyCode = $LASTEXITCODE
+if ($verifyOut) { $verifyOut | ForEach-Object { Write-Host $_ } }
+if ($verifyCode -ne 0) { throw 'apksigner verify failed: output APK is not validly signed' }
+Write-Host 'Signature verified. Compare the certificate SHA-256 above with the release fingerprint manually.'
 
 Write-Host ''
 Write-Host "DONE -> $apk"

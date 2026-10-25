@@ -542,7 +542,7 @@ const script = String.raw`(async () => {
       await sleep(150);
       AR.Bridge.openUrl = origOpen;
       check('点它会打开 GitHub 仓库地址',
-        opened === 'https://github.com/EtoileZzz/AbbeyRoad----ScheduleApp', String(opened));
+        opened === 'https://github.com/EtoileZzz/Allegro', String(opened));
     }
 
     // f) 所有弹窗的进出场动画必须完全一致（今日页「时间」vs 周表「课程」）
