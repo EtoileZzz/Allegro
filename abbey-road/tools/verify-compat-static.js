@@ -549,6 +549,23 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     panelsSync.indexOf('EtoileZzz/Allegro') >= 0 && panelsSync.indexOf('----ScheduleApp') < 0);
   ok('C139 未连接时也能看到「自动同步」（两种状态都渲染）',
     (panelsSync.match(/appendAutoSync\(\);/g) || []).length >= 2);
+  const bootSync = fs.readFileSync(path.join(appDir, 'js/boot.js'), 'utf8');
+  ok('C146 打卡记录用自分时间戳合并（否则删除/撤销同步不出去）',
+    coreSync.indexOf('function entryStamp') >= 0 && coreSync.indexOf('entryStamp(e) > entryStamp(out[at])') >= 0);
+  ok('C147 删除/撤销打卡都会写条目自己的 updatedAt',
+    (coreSync.match(/t\.entries\[i\]\.updatedAt = /g) || []).length >= 3);
+  ok('C148 恢复时间严格晚于删除时间（同毫秒 +1ms）',
+    coreSync.indexOf('function stampAfter') >= 0 && coreSync.indexOf('stampAfter(rec.deletedAt)') >= 0);
+  ok('C142 冷启动会按频率自动同步（不只挂在回前台）',
+    bootSync.indexOf('AR.Sync.maybeAuto') >= 0);
+  ok('C143 自动同步有「每次改动后」模式，且是一排直接可见的按钮（不再是下拉框）',
+    panelsSync.indexOf("{ v: 'every', t: '每次改动后' }") >= 0
+    && syncSrc.indexOf('DEBOUNCE_FAST_MS') >= 0
+    && panelsSync.indexOf('<select class="input" id="syAuto">') < 0);
+  ok('C144 每次同步（含自动）都会提示一次',
+    /AR\.UI\.toast\(msg\)/.test(syncSrc) && syncSrc.indexOf('已同步 · 云端 rev') >= 0);
+  ok('C145 云端只保留 1 份当前 + 20 版历史（不会无限增长）',
+    workerSrc.indexOf('HISTORY_KEEP = 20') >= 0);
   ok('C141 「数据与同步」的显式面板清单里包含云同步（否则永远不显示）',
     panelsSync.indexOf('SYNC_PANELS = [panelSync, panelCloudSync') >= 0);
   ok('C140 还没发过 Release（404）时不报「检查更新失败」',

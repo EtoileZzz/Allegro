@@ -930,6 +930,38 @@ var AR = window.AR || (window.AR = {});
     box.appendChild(qBtn('导出备份', function (b) { AR.ConfigIO.exportFile(b); }));
     box.appendChild(qBtn('导出到微信', function (b) { AR.ConfigIO.exportToApp(b); }));
     row.appendChild(qItem('备份', box));
+    /* v0.5.0：把「云同步」放进「数据与同步」的高频项，一眼能看到状态并直接点同步 */
+    var syncReady = !!(AR.Sync && AR.Sync.isConfigured && AR.Sync.isConfigured());
+    var syncBtns = el('<div class="q-btns"></div>');
+    if (syncReady) {
+      syncBtns.appendChild(qBtn('立即同步', function (b) {
+        b.disabled = true;
+        var old = b.textContent;
+        b.textContent = '同步中…';
+        AR.Sync.syncNow().then(function () {
+          b.disabled = false; b.textContent = old;
+          renderSettings();
+        }).catch(function (e) {
+          b.disabled = false; b.textContent = old;
+          AR.UI.toast((e && e.message) ? e.message : '同步失败');
+        });
+      }));
+    } else {
+      syncBtns.appendChild(qBtn('开启云同步', function () {
+        settingsCat = 'syncdata';
+        renderSettings();
+      }));
+    }
+    row.appendChild(qItem('云同步', syncBtns));
+    var syncSt = (AR.Sync && AR.Sync.status) ? AR.Sync.status() : {};
+    var syncWhen = '';
+    if (syncSt.lastSyncAt) {
+      var dt = new Date(syncSt.lastSyncAt);
+      syncWhen = '上次同步 ' + (dt.getMonth() + 1) + '-' + dt.getDate() + ' ' + dt.getHours() + ':' + (dt.getMinutes() < 10 ? '0' : '') + dt.getMinutes();
+    } else {
+      syncWhen = syncReady ? '还没同步过' : '未开启（端到端加密）';
+    }
+    row.appendChild(el('<div class="q-item"><span class="q-label muted">' + esc(syncWhen) + '</span></div>'));
     var size = 0;
     try { size = (JSON.stringify(S).length / 1024).toFixed(1); } catch (e) { }
     row.appendChild(el('<div class="q-item"><span class="q-label muted">数据约 ' + size + ' KB · 只存本机</span></div>'));
@@ -2965,11 +2997,7 @@ function renderLongTaskList(host) {
       if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
       var p = kind === 'pull' ? AR.Sync.pullOnly() : (kind === 'force' ? AR.Sync.overwriteCloud() : AR.Sync.syncNow());
       p.then(function (r) {
-        var s = AR.Sync.status();
-        var msg = kind === 'pull' ? '已合并云端内容'
-          : ('同步完成 · 云端 rev ' + (r && r.rev ? r.rev : s.lastRev));
-        if (s.lastConflicts) { msg += ' · 冲突 ' + s.lastConflicts + ' 条（已存为本机副本）'; }
-        AR.UI.toast(msg);
+        // 提示统一在 AR.Sync 内部（自动/手动都只弹一次），这里只刷新界面
         renderSettings();
       }).catch(function (e) {
         if (btn) { btn.disabled = false; btn.textContent = label; }
@@ -2994,29 +3022,47 @@ function renderLongTaskList(host) {
     /** 自动同步（未连接时也能先选，连接后生效） */
     function appendAutoSync() {
       box.appendChild(el('<div class="field"><label class="field-label">自动同步</label></div>'));
-      var autoSel = el('<select class="input" id="syAuto">'
-        + '<option value="off"' + (cfg.autoMode === 'off' ? ' selected' : '') + '>关闭（只手动）</option>'
-        + '<option value="open"' + (cfg.autoMode !== 'off' && cfg.autoMode !== 'min' ? ' selected' : '') + '>每次打开 App 同步</option>'
-        + '<option value="min"' + (cfg.autoMode === 'min' ? ' selected' : '') + '>每隔几分钟同步</option>'
-        + '</select>');
-      box.appendChild(autoSel);
-      autoSel.addEventListener('change', function () {
-        AR.Sync.setConfig({ autoMode: autoSel.value });
-        renderSettings();
-      });
-      if (cfg.autoMode === 'min') {
-        var minSel = el('<select class="input" id="syMin">'
-          + [5, 10, 15, 30].map(function (m) {
-            return '<option value="' + m + '"' + (Number(cfg.autoMin) === m ? ' selected' : '') + '>每 ' + m + ' 分钟</option>';
-          }).join('') + '</select>');
-        box.appendChild(minSel);
-        minSel.addEventListener('change', function () {
-          AR.Sync.setConfig({ autoMin: Number(minSel.value) });
-          renderSettings();
-        });
+      /**
+       * v0.5.0：从下拉框改成一排直接可见的按钮。
+       * 以前是 <select>，选项藏在弹出的列表里，很多人（包括我自己验收时）根本不知道
+       * 还有「每次改动后同步」这一档 —— 设置项不该需要点开才发现。
+       */
+      var MODES = [
+        { v: 'off', t: '关闭' },
+        { v: 'every', t: '每次改动后' },
+        { v: 'open', t: '每次打开' },
+        { v: 'min', t: '定时' }
+      ];
+      var cur = cfg.autoMode || 'open';
+      var modeRow = el('<div class="row gap wrap"></div>');
+      for (var mi = 0; mi < MODES.length; mi++) {
+        (function (m) {
+          var b = el('<button class="chip-btn' + (cur === m.v ? ' active' : '') + '" type="button">' + esc(m.t) + '</button>');
+          b.addEventListener('click', function () {
+            AR.Sync.setConfig({ autoMode: m.v });
+            AR.UI.toast('自动同步：' + m.t);
+            renderSettings();
+          });
+          modeRow.appendChild(b);
+        })(MODES[mi]);
+      }
+      box.appendChild(modeRow);
+      if (cur === 'min') {
+        var minRow = el('<div class="row gap wrap"></div>');
+        var mins = [5, 10, 15, 30];
+        for (var mi2 = 0; mi2 < mins.length; mi2++) {
+          (function (mm) {
+            var mb = el('<button class="chip-btn' + (Number(cfg.autoMin) === mm ? ' active' : '') + '" type="button">每 ' + mm + ' 分钟</button>');
+            mb.addEventListener('click', function () {
+              AR.Sync.setConfig({ autoMin: mm });
+              renderSettings();
+            });
+            minRow.appendChild(mb);
+          })(mins[mi2]);
+        }
+        box.appendChild(minRow);
       }
     }
-
     if (!synced) {
       /* ── 未配置：引导表单 ── */
       box.appendChild(el('<p class="muted">填好这三项就能同步。数据在设备上加密（AES-256-GCM，PBKDF2 310k 轮），'
@@ -3070,6 +3116,11 @@ function renderLongTaskList(host) {
     if (st.dirty) { stateRow.appendChild(el('<span class="tag danger">有改动待上传</span>')); }
     if (st.lastConflicts) { stateRow.appendChild(el('<span class="tag danger">上次冲突 ' + esc(String(st.lastConflicts)) + ' 条</span>')); }
     box.appendChild(stateRow);
+    /* 云空间说明：让用户知道「每次 100KB」不会把配额撑爆 */
+    var kb = Math.round((Number(st.lastBytes) || 0) / 1024);
+    box.appendChild(el('<p class="muted">云端只保留 1 份当前密文 + 最近 20 版历史（更早的自动删除）。'
+      + (kb ? ('按现在 ' + kb + ' KB/份算，最多约 ' + Math.max(1, Math.round(kb * 21 / 1024)) + ' MB。') : '')
+      + '</p>'));
 
     appendAutoSync();
 

@@ -28,7 +28,8 @@
   var AAD_PREFIX = 'ARS1|';
   var PUSH_RETRIES = 3;
   var NET_TIMEOUT = 12000;
-  var DEBOUNCE_MS = 30000;     // 本地改动后多久去抖推送
+  var DEBOUNCE_MS = 30000;     // 「打开时/定时」模式的改动去抖
+  var DEBOUNCE_FAST_MS = 1500; // 「每次改动后同步」模式的去抖（几乎立即）
   var OPEN_GAP_MS = 2000;      // 刚同步过就不重复同步
   var MAX_ENVELOPE = 1500000;  // 超过就别传了（正常状态只有几十 KB）
 
@@ -351,7 +352,7 @@
           }
           return apiCall('PUT', '/state', { envelope: envelope }, matchRev).then(function (res) {
             if (res.status === 200) {
-              return { rev: Number((res.json || {}).rev) || (matchRev + 1) };
+              return { rev: Number((res.json || {}).rev) || (matchRev + 1), bytes: envelope.length };
             }
             if (res.status === 409 && attempt < PUSH_RETRIES) {
               var cur = res.json || {};
@@ -373,7 +374,7 @@
       });
     }
     return step(ifMatchRev).then(function (r) {
-      finish({ rev: r.rev, pushed: true, pulled: true, conflicts: 0 });
+      finish({ rev: r.rev, bytes: r.bytes, pushed: true, pulled: true, conflicts: 0 });
       return r;
     });
   }
@@ -383,8 +384,22 @@
     run.lastSyncAt = nowMs();
     run.dirty = false;
     run.lastConflicts = info.conflicts || 0;
+    if (info.bytes) { run.lastBytes = info.bytes; }
     writeJSON(RUN_KEY, run);
     emit('done', info);
+    /**
+     * v0.4.7：每次同步（含自动同步）都提示一次。
+     * 以前只有手动按钮才 toast，自动同步静默跑完，用户不知道到底同没同。
+     */
+    try {
+      if (AR.UI && AR.UI.toast) {
+        var msg = (info.pushed === false)
+          ? ('已合并云端内容 · rev ' + (info.rev || 0))
+          : ('已同步 · 云端 rev ' + (info.rev || 0));
+        if (info.conflicts) { msg += ' · 冲突 ' + info.conflicts + ' 条（已存本机副本）'; }
+        AR.UI.toast(msg);
+      }
+    } catch (e) { }
   }
 
   /* ─────────────── 对外动作 ─────────────── */
@@ -400,6 +415,7 @@
       rememberPass: cfg.rememberPass !== false,
       lastRev: Number(run.lastRev) || 0, lastSyncAt: Number(run.lastSyncAt) || 0,
       lastConflicts: Number(run.lastConflicts) || 0,
+      lastBytes: Number(run.lastBytes) || 0,
       dirty: !!run.dirty, busy: !!busy
     };
   }
@@ -408,14 +424,15 @@
   function onLocalSave() {
     if (applying) { return; }          // 合并远端内容引起的保存，不算本地改动
     if (!isConfigured()) { return; }
-    if ((cfg.autoMode || 'open') === 'off') { return; }
+    var mode = cfg.autoMode || 'open';
+    if (mode === 'off') { return; }
     run.dirty = true;
     writeJSON(RUN_KEY, run);
     if (debounceTimer) { clearTimeout(debounceTimer); }
     debounceTimer = setTimeout(function () {
       debounceTimer = null;
       syncNow().catch(function () { /* 静默：本地已保存，下次再说 */ });
-    }, DEBOUNCE_MS);
+    }, mode === 'every' ? DEBOUNCE_FAST_MS : DEBOUNCE_MS);
   }
 
   /** 打开 App / 回到前台：按频率决定要不要拉一次 */

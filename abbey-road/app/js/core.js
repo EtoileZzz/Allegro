@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.4.7';
+var APP_VERSION = '0.5.0';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -914,7 +914,7 @@ function todoLongList() { return todoDailyList(); }
     if (!t.entries) { t.entries = []; }
     var now = new Date();
     var e = {
-      id: uid(), k: dateKey(now), at: now.toISOString(),
+      id: uid(), k: dateKey(now), at: now.toISOString(), updatedAt: now.toISOString(),
       amount: amt, note: String(note || '').slice(0, 120)
     };
     if (opts && opts.src) { e.src = opts.src; }
@@ -929,8 +929,10 @@ function todoLongList() { return todoDailyList(); }
     if (!t || !t.entries) { return false; }
     for (var i = 0; i < t.entries.length; i++) {
       if (t.entries[i].id === entryId && !t.entries[i].deletedAt) {
-        t.entries[i].deletedAt = new Date().toISOString();   // 软删除，回收站可恢复
-        t.updatedAt = t.entries[i].deletedAt;
+        var delAt = stampAfter(t.entries[i].updatedAt || t.entries[i].at);
+        t.entries[i].deletedAt = delAt;   // 软删除，回收站可恢复
+        t.entries[i].updatedAt = delAt;   // ★ 条目自己的时间戳：不更新它，删除就传不出去
+        t.updatedAt = delAt;
         save(true);
         return true;
       }
@@ -943,8 +945,10 @@ function todoLongList() { return todoDailyList(); }
     if (!t || !t.entries) { return false; }
     for (var i = t.entries.length - 1; i >= 0; i--) {
       if (!t.entries[i].deletedAt) {
-        t.entries[i].deletedAt = new Date().toISOString();
-        t.updatedAt = t.entries[i].deletedAt;
+        var undoAt = stampAfter(t.entries[i].updatedAt || t.entries[i].at);
+        t.entries[i].deletedAt = undoAt;
+        t.entries[i].updatedAt = undoAt;   // ★ 同上
+        t.updatedAt = undoAt;
         save(true);
         return true;
       }
@@ -1226,6 +1230,7 @@ function todoLongList() { return todoDailyList(); }
       id: uid(), amount: amt, note: String(note || '').slice(0, 120),
       at: new Date().toISOString()
     };
+    e.updatedAt = e.at;
     t.entries.push(e);
     t.updatedAt = e.at;
     save(true);
@@ -1238,8 +1243,10 @@ function todoLongList() { return todoDailyList(); }
     for (var i = 0; i < t.entries.length; i++) {
       if (t.entries[i].id === entryId && !t.entries[i].deletedAt) {
         /* v0.4.1：删掉的这一笔也进回收站（可恢复） */
-        t.entries[i].deletedAt = new Date().toISOString();
-        t.updatedAt = t.entries[i].deletedAt;
+        var ltDelAt = stampAfter(t.entries[i].updatedAt || t.entries[i].at);
+        t.entries[i].deletedAt = ltDelAt;
+        t.entries[i].updatedAt = ltDelAt;   // ★ 条目自己的时间戳
+        t.updatedAt = ltDelAt;
         save(true);
         return true;
       }
@@ -2990,6 +2997,31 @@ function todoLongList() { return todoDailyList(); }
    * 「带 deletedAt 的按删除处理」：软删除的 entry 仍留在并集里（只是标记删除），
    * 这样两边对同一笔的删除/恢复也能靠时间戳分胜负。
    */
+  /**
+   * 打卡记录的时间戳。
+   *
+   * v0.4.7 修复：条目以前既没有 updatedAt 也没有 createdAt，只有 at（打卡时刻），
+   * 于是 stampOf() 恒为空串，合并时比较永远为假 —— 结果是**条目永远本机优先**，
+   * 「删除一笔 / 撤销一笔」在另一台设备上完全同步不过去。
+   * 现在用条目自己的 updatedAt，退一步用 at。
+   */
+  /**
+   * 返回一个**严格大于** prevIso 的时间戳。
+   * 用途：删除→撤销可能落在同一毫秒，打平后平局规则会偏向「删除」，撤销就输了。
+   * 硬保证新时间戳更大，撤销一定赢。
+   */
+  function stampAfter(prevIso) {
+    var prev = prevIso ? Date.parse(prevIso) : 0;
+    var now = Date.now();
+    var ms = (isFinite(prev) && prev >= now) ? prev + 1 : now;
+    return new Date(ms).toISOString();
+  }
+
+  function entryStamp(e) {
+    if (!e) { return ''; }
+    return String(e.updatedAt || e.at || '');
+  }
+
   function mergeTaskEntries(localEntries, incomingEntries) {
     var out = [], byId = {}, i, e;
     var les = Array.isArray(localEntries) ? localEntries : [];
@@ -3008,8 +3040,13 @@ function todoLongList() { return todoDailyList(); }
       if (at == null) {
         byId[e.id] = out.length;
         out.push(deepCopy(e));
-      } else if (stampOf(e) > stampOf(out[at])) {
+      } else if (entryStamp(e) > entryStamp(out[at])) {
         out[at] = deepCopy(e);                             // 同 id 新者胜（含删除标记）
+      } else if (entryStamp(e) === entryStamp(out[at]) && e.deletedAt && !out[at].deletedAt) {
+        /* 时间戳打平时（老数据没有 updatedAt）：让删除这一侧胜出，
+           否则删掉的记录会被对方的活记录一直复活。
+           撤销会先更新 updatedAt，所以正常的「撤销」仍然赢。 */
+        out[at] = deepCopy(e);
       }
     }
     return out;
@@ -3435,7 +3472,7 @@ function todoLongList() { return todoDailyList(); }
     }
     for (var i = 0; i < list.length; i++) { if (list[i].id === id) { rec = list[i]; } }
     if (!rec) { return false; }
-    var now = new Date().toISOString();
+    var now = stampAfter(rec.deletedAt);   // ★ 必须比删除时间新，否则打平时撤销会输
     delete rec.deletedAt;
     rec.updatedAt = now;
     clearTomb(entity, id);
