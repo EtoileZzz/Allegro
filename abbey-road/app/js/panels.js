@@ -1226,14 +1226,6 @@ var AR = window.AR || (window.AR = {});
      */
     if (cat.key === 'syncdata') {
       var host0 = el('<div class="set-detail" id="set-' + cat.key + '"></div>');
-      /**
-       * 诊断行（v0.4.8）：把「这份界面资源内部的版本号 + 面板数量」直接印在页面上。
-       * 换包排查时不用猜「装没装上」——这行文字就是运行时代码的指纹。
-       */
-      try {
-        host0.appendChild(el('<p class="muted" id="syncBuildMark">数据与同步 · 资源版本 v'
-          + esc(String(AR.Const.APP_VERSION)) + ' · 面板 ' + 5 + ' 个（含云同步）</p>'));
-      } catch (e) { }
       var SYNC_PANELS = [panelSync, panelCloudSync, panelIntegration, panelData, panelTrash];
       for (var q = 0; q < SYNC_PANELS.length; q++) {
         try {
