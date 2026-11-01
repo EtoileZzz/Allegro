@@ -3048,6 +3048,304 @@ function renderLongTaskList(host) {
     box.appendChild(el('<p class="muted">下次提醒：今天 ' + esc(times[0] || '—')
       + ' · ' + esc((sum && sum.title) || '今天没有待办') + '</p>'));
 
+    /* ── v0.5.2：通知自检 / 后台保护 ─────────────────────────── */
+    var platform = 'web';
+    try { platform = AR.Bridge.platform() || 'web'; } catch (e) { platform = 'web'; }
+
+    function toastSafe(msg) {
+      try { if (AR.UI && AR.UI.toast) { AR.UI.toast(msg); } } catch (e) { }
+    }
+
+    function errText(e) {
+      if (!e) { return '未知错误'; }
+      if (typeof e === 'string') { return e; }
+      if (e.message) { return String(e.message); }
+      return '系统没有响应';
+    }
+
+    /**
+     * 统一收口 Bridge 的 Promise：成功 / 失败各一个回调，链尾再兜一次 catch。
+     * 老宿主上方法可能不存在或同步抛错，所以 invoke 本身也包在 try 里。
+     */
+    function runBridge(invoke, onOk, onFail) {
+      var p = null;
+      try { p = invoke(); } catch (e) {
+        if (onFail) { try { onFail(e); } catch (ignore) { } }
+        return;
+      }
+      if (!p || typeof p.then !== 'function') {
+        if (onOk) { try { onOk(p); } catch (ignore2) { } }
+        return;
+      }
+      p.then(function (v) {
+        if (onOk) { try { onOk(v); } catch (ignore3) { } }
+      }, function (e) {
+        if (onFail) { try { onFail(e); } catch (ignore4) { } }
+      }).catch(function () { });
+    }
+
+    function actionBtn(label, onTap) {
+      var b = el('<button class="btn" type="button">' + esc(label) + '</button>');
+      b.addEventListener('click', function () {
+        try { onTap(); } catch (e) { toastSafe('操作失败：' + errText(e)); }
+      });
+      return b;
+    }
+
+    function openSystem(invoke, name) {
+      runBridge(invoke, function (r) {
+        if (r === 'unsupported') { toastSafe('当前平台不支持「' + name + '」'); }
+      }, function (e) {
+        toastSafe('打开' + name + '失败：' + errText(e));
+      });
+    }
+
+    function p2(n) { return n < 10 ? '0' + n : String(n); }
+    function fmtNext(ms) {
+      var n = Number(ms);
+      if (!n || !isFinite(n)) { return '—'; }
+      var d = new Date(n);
+      if (!isFinite(d.getTime())) { return '—'; }
+      return p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' '
+        + p2(d.getHours()) + ':' + p2(d.getMinutes());
+    }
+
+    function localBuildInfo() {
+      var info = { count: 0, next: 0 };
+      try {
+        var list = (AR.Reminders && AR.Reminders.build) ? AR.Reminders.build() : [];
+        if (list && typeof list.length === 'number') {
+          info.count = list.length;
+          for (var i = 0; i < list.length; i++) {
+            var at = Number(list[i] && list[i].atMs);
+            if (isFinite(at) && at > 0 && (!info.next || at < info.next)) { info.next = at; }
+          }
+        }
+      } catch (e) { }
+      return info;
+    }
+
+    function boolOf(v) {
+      if (v === true || v === 1 || v === '1' || v === 'true') { return true; }
+      if (v === false || v === 0 || v === '0' || v === 'false') { return false; }
+      return null;
+    }
+
+    function diagRow(label, desc) {
+      var row = el('<div class="setting-row"><div class="setting-text">'
+        + '<div class="t">' + esc(label) + '</div>'
+        + '<div class="d">' + esc(desc) + '</div></div>'
+        + '<span class="tag">读取中…</span></div>');
+      return { node: row, tag: row.querySelector('.tag'), desc: row.querySelector('.d') };
+    }
+
+    function setTag(tagEl, text, kind) {
+      tagEl.textContent = text;
+      tagEl.className = 'tag' + (kind ? ' ' + kind : '');
+    }
+
+    function unknownStatus(row, label) {
+      setTag(row.tag, '未知', 'warn');
+      row.desc.textContent = '没有读到' + label + '状态，请到系统设置里确认';
+    }
+
+    box.appendChild(el('<div class="field-label" style="margin-top:18px">通知自检</div>'));
+    if (platform !== 'android') {
+      box.appendChild(el('<p class="muted">'
+        + (platform === 'windows' ? '通知自检仅 Android 可用' : '仅原生端可用') + '</p>'));
+    } else {
+      var summaryEl = el('<p class="muted">已排 … 条提醒 · 下次 读取中…</p>');
+      box.appendChild(summaryEl);
+
+      var notifRow = diagRow('通知权限', '读取中…');
+      var exactRow = diagRow('精确闹钟', '读取中…');
+      var batteryRow = diagRow('电池优化', '读取中…');
+      box.appendChild(notifRow.node);
+      box.appendChild(exactRow.node);
+      box.appendChild(batteryRow.node);
+
+      var setSummary = function (count, next) {
+        var n = Number(count);
+        if (!isFinite(n) || n < 0) { n = 0; }
+        summaryEl.textContent = '已排 ' + Math.round(n) + ' 条提醒 · 下次 ' + fmtNext(next);
+      };
+
+      var applyDiagnostics = function (raw) {
+        var d = null;
+        if (raw) {
+          if (typeof raw === 'string') {
+            try { d = JSON.parse(raw); } catch (e) { d = null; }
+          } else if (typeof raw === 'object') {
+            d = raw;
+          }
+        }
+        if (!d) {
+          var fb0 = localBuildInfo();
+          setSummary(fb0.count, fb0.next);
+          unknownStatus(notifRow, '通知权限');
+          unknownStatus(exactRow, '精确闹钟');
+          unknownStatus(batteryRow, '电池优化');
+          return;
+        }
+
+        var count = d.scheduledCount;
+        var next = d.nextAtMs;
+        var hasCount = (count !== null && count !== undefined && count !== '' && isFinite(Number(count)));
+        var hasNext = (next !== null && next !== undefined && next !== '' && isFinite(Number(next)));
+        if (!hasCount || !hasNext) {
+          var fb = localBuildInfo();
+          if (!hasCount) { count = fb.count; }
+          if (!hasNext) { next = fb.next; }
+        }
+        setSummary(count, next);
+
+        var notif = boolOf(d.notifEnabled);
+        if (notif === true) {
+          setTag(notifRow.tag, '已开启', '');
+          notifRow.desc.textContent = '系统通知权限正常';
+        } else if (notif === false) {
+          setTag(notifRow.tag, '未开启', 'danger');
+          notifRow.desc.textContent = '通知不会显示，点下方「通知设置」开启';
+        } else {
+          unknownStatus(notifRow, '通知权限');
+        }
+
+        var exact = boolOf(d.exactAlarm);
+        if (exact === true) {
+          setTag(exactRow.tag, '已开启', '');
+          exactRow.desc.textContent = '可以按设定时间准时提醒';
+        } else if (exact === false) {
+          setTag(exactRow.tag, '未开启', 'danger');
+          exactRow.desc.textContent = '系统会延后提醒';
+        } else {
+          unknownStatus(exactRow, '精确闹钟');
+        }
+
+        var batt = boolOf(d.batteryIgnored);
+        if (batt === true) {
+          setTag(batteryRow.tag, '已加入白名单', '');
+          batteryRow.desc.textContent = '后台运行不受电池优化限制';
+        } else if (batt === false) {
+          setTag(batteryRow.tag, '未加入', 'danger');
+          batteryRow.desc.textContent = '可能被后台清理，建议加入白名单';
+        } else {
+          unknownStatus(batteryRow, '电池优化');
+        }
+      };
+
+      var sendTestNotify = function () {
+        runBridge(function () {
+          return AR.Bridge.notifyNow('Allegro 测试通知',
+            '如果你看到这条，说明通知权限和渠道都正常');
+        }, function (r) {
+          if (r === 'unsupported') { toastSafe('当前平台不支持测试通知'); return; }
+          if (r !== 'ok') {
+            toastSafe('发送失败：' + (r ? String(r) : '系统没有确认'));
+            return;
+          }
+          toastSafe('已发送，看下通知栏');
+        }, function (e) {
+          toastSafe('发送失败：' + errText(e));
+        });
+      };
+
+      var sendTestAlarm = function () {
+        var payload = JSON.stringify([{
+          id: 'test-' + Date.now(),
+          atMs: Date.now() + 10000,
+          title: 'Allegro 测试闹钟',
+          text: '10 秒前你点过测试',
+          channel: 'daily'
+        }]);
+        /* 真实链路会覆盖正式排程；12 秒后无条件恢复一次，避免留下测试闹钟。 */
+        setTimeout(function () {
+          try { if (AR.Reminders && AR.Reminders.sync) { AR.Reminders.sync(true); } } catch (e) { }
+        }, 12000);
+        runBridge(function () {
+          return AR.Bridge.scheduleReminders(payload);
+        }, function (r) {
+          if (r === 'unsupported') { toastSafe('当前平台不支持闹钟'); return; }
+          if (r !== 'ok') {
+            toastSafe('测试闹钟设置失败：' + (r ? String(r) : '系统没有确认'));
+            return;
+          }
+          toastSafe('10 秒后应弹通知（到点没弹 → 是闹钟权限/后台限制）');
+        }, function (e) {
+          toastSafe('测试闹钟设置失败：' + errText(e));
+        });
+      };
+
+      var testRow = el('<div class="row gap wrap"></div>');
+      testRow.appendChild(actionBtn('发送测试通知', sendTestNotify));
+      testRow.appendChild(actionBtn('10 秒后测试闹钟', sendTestAlarm));
+      box.appendChild(testRow);
+
+      var jumpRow = el('<div class="row gap wrap"></div>');
+      jumpRow.appendChild(actionBtn('通知设置', function () {
+        openSystem(function () { return AR.Bridge.openNotificationSettings(); }, '通知设置');
+      }));
+      jumpRow.appendChild(actionBtn('精确闹钟', function () {
+        openSystem(function () { return AR.Bridge.openExactAlarmSettings(); }, '精确闹钟设置');
+      }));
+      jumpRow.appendChild(actionBtn('电池优化', function () {
+        openSystem(function () { return AR.Bridge.openBatterySettings(); }, '电池优化设置');
+      }));
+      jumpRow.appendChild(actionBtn('应用详情', function () {
+        openSystem(function () { return AR.Bridge.openAppDetails(); }, '应用详情');
+      }));
+      box.appendChild(jumpRow);
+
+      runBridge(function () { return AR.Bridge.reminderDiagnostics(); }, applyDiagnostics, function () {
+        var fb = localBuildInfo();
+        setSummary(fb.count, fb.next);
+        unknownStatus(notifRow, '通知权限');
+        unknownStatus(exactRow, '精确闹钟');
+        unknownStatus(batteryRow, '电池优化');
+      });
+    }
+
+    box.appendChild(el('<div class="field-label" style="margin-top:18px">后台保护</div>'));
+    if (platform !== 'android' && platform !== 'windows') {
+      box.appendChild(el('<p class="muted">仅原生端可用</p>'));
+    } else {
+      box.appendChild(el('<p class="muted">国产 ROM 常会清理后台，导致闹钟不响。建议：允许自启动 / 允许后台运行 / 关闭电池优化。</p>'));
+      var protectRow = el('<div class="row gap wrap"></div>');
+      protectRow.appendChild(actionBtn('加入电池优化白名单', function () {
+        openSystem(function () { return AR.Bridge.openBatterySettings(); }, '电池优化设置');
+      }));
+      protectRow.appendChild(actionBtn('应用详情', function () {
+        openSystem(function () { return AR.Bridge.openAppDetails(); }, '应用详情');
+      }));
+      box.appendChild(protectRow);
+
+      if (platform === 'windows') {
+        var autoTouched = false;
+        var autoSwitch = rowSwitch('开机时自动启动',
+          '登录 Windows 后自动打开 Allegro，让提醒服务尽早恢复', false, function (v) {
+            autoTouched = true;
+            runBridge(function () { return AR.Bridge.setAutostart(v); }, function (r) {
+              if (r === false) {
+                if (autoInput.checked === v) { autoInput.checked = !v; }
+                toastSafe('设置失败（可能被系统策略拦截）');
+                return;
+              }
+              toastSafe('已设置');
+            }, function () {
+              if (autoInput.checked === v) { autoInput.checked = !v; }
+              toastSafe('设置失败（可能被系统策略拦截）');
+            });
+          });
+        var autoInput = autoSwitch.querySelector('input');
+        box.appendChild(autoSwitch);
+        runBridge(function () { return AR.Bridge.getAutostart(); }, function (v) {
+          if (autoTouched) { return; }
+          autoInput.checked = (v === true || v === 1 || v === 'true');
+        }, function () {
+          if (!autoTouched) { autoInput.checked = false; }
+        });
+      }
+    }
+
     return panel('提醒与通知', box, 'notify');
   }
 

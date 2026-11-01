@@ -556,6 +556,23 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   const mani = fs.readFileSync(path.join(root5, 'android/AndroidManifest.xml'), 'utf8');
   const schedJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderScheduler.java'), 'utf8');
   const recvJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderReceiver.java'), 'utf8');
+  /* ── 0.5.1a：学期去重 + 通知自检 ── */
+  ok('C163 默认学期按名字配对（不再按开学日，否则同步会多出空学期）',
+    coreSync.indexOf("'default-semester'") >= 0 && coreSync.indexOf('function pruneEmptySemesters') >= 0);
+  ok('C164 合并与迁移都会清理多余的空默认学期',
+    coreSync.indexOf('pruneEmptySemesters();') >= 0 && coreSync.indexOf('applyMerge') >= 0);
+  ok('C165 设置页有通知自检与测试按钮',
+    panelsSync.indexOf('通知自检') >= 0 && panelsSync.indexOf('发送测试通知') >= 0
+    && panelsSync.indexOf('10 秒后测试闹钟') >= 0);
+  ok('C166 设置页有后台保护 + Windows 开机自启',
+    panelsSync.indexOf('后台保护') >= 0 && panelsSync.indexOf('开机时自动启动') >= 0);
+  const mainJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/MainActivity.java'), 'utf8');
+  ok('C167 Android 桥有通知自检 / 立即测试 / 系统设置跳转',
+    mainJava.indexOf('notifyNow') >= 0 && mainJava.indexOf('reminderDiagnostics') >= 0
+    && mainJava.indexOf('openNotificationSettings') >= 0 && mainJava.indexOf('openExactAlarmSettings') >= 0
+    && mainJava.indexOf('warnIfNotificationsOffOnce') >= 0);
+  ok('C168 Windows 端有前台提醒轮询（否则 Windows 永远不响）',
+    fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8').indexOf('tickWindows') >= 0);
   ok('C156 开机后会重排闹钟（BOOT_COMPLETED + BootReceiver）',
     mani.indexOf('RECEIVE_BOOT_COMPLETED') >= 0 && mani.indexOf('BootReceiver') >= 0
     && fs.existsSync(path.join(root5, 'android/src/com/etoilezzz/allegro/BootReceiver.java')));

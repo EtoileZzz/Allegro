@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.5.1';
+var APP_VERSION = '0.5.1a';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -1522,6 +1522,12 @@ function todoLongList() { return todoDailyList(); }
     opts = opts || {};
     if (!s.settings) { s.settings = defaultSettings((s.semesters && s.semesters[0] && s.semesters[0].id) || uid()); }
     ensureNotifExtras(s);   // v0.5.1：每日提醒 / 个性化覆盖补默认
+    /**
+     * v0.5.1a：把「多出来的空默认学期」清掉。
+     * 放在这里而不是每次保存，是因为它要写墓碑（软删除），属于数据修复。
+     */
+    /* 注意：不能改写 state 变量本身（其它模块持有它的引用），只在 s 就是 state 时清理 */
+    try { if (s === state) { pruneEmptySemesters(); } } catch (e) { }
     if (!s.settings.layout) { s.settings.layout = { preset: 'dual-horizontal', followDeviceSuggestion: true }; }
     // v0.1.8：布局只保留「左右 / 上中下」，旧的「自动」「左中右」统一折算成「左右」
     s.settings.layout.preset = (s.settings.layout.preset === 'stacked-vertical') ? 'stacked-vertical' : 'dual-horizontal';
@@ -3023,7 +3029,20 @@ function todoLongList() { return todoDailyList(); }
   function naturalKeyOf(table, rec, maps) {
     if (!rec) { return null; }
     var cid, sem, bid;
-    if (table === 'semesters') { return rec.startDate ? ('date:' + rec.startDate) : null; }
+    if (table === 'semesters') {
+      /**
+       * v0.5.1a 修复：以前只按「开学日期」配对。
+       * 空状态会自动补一个「我的学期」（开学日 = 当周周一），两台设备生成的日期不同，
+       * 于是永远配不上 → 每次同步都多出一个空的「我的学期」。
+       * 默认名字的学期按名字配对（两个都是「我的学期」就是同一个），
+       * 用户自己起的名字仍按开学日期配对，避免把不同学期并掉。
+       */
+      var nm = String(rec.name == null ? '' : rec.name).trim();
+      if (!nm || nm === '我的学期' || nm === '默认学期') {
+        return 'default-semester';
+      }
+      return rec.startDate ? ('date:' + rec.startDate) : null;
+    }
     if (table === 'teachers') { return rec.name ? ('name:' + String(rec.name).trim()) : null; }
     if (table === 'locations') { return rec.raw ? ('raw:' + String(rec.raw).trim()) : null; }
     if (table === 'courses') {
@@ -3171,6 +3190,46 @@ function todoLongList() { return todoDailyList(); }
    * 用途：删除→撤销可能落在同一毫秒，打平后平局规则会偏向「删除」，撤销就输了。
    * 硬保证新时间戳更大，撤销一定赢。
    */
+  /**
+   * v0.5.1a：清掉「多出来的空默认学期」。
+   *
+   * 只有同时满足才删（宁可少删，不能误删用户的数据）：
+   *   · 名字是默认的（空 / 我的学期 / 默认学期）
+   *   · 没有任何课程挂在这个学期下
+   *   · 不是当前选中的学期
+   *   · 本机还有别的学期（至少留一个）
+   * 删除走软删除 + 墓碑，这样另一台设备同步时也会跟着删掉，不会又被同步回来。
+   * @returns {number} 删掉几个
+   */
+  function pruneEmptySemesters() {
+    var list = state.semesters || [];
+    var live = [];
+    var i;
+    for (i = 0; i < list.length; i++) { if (!isDeleted(list[i])) { live.push(list[i]); } }
+    if (live.length <= 1) { return 0; }
+    var curId = (state.settings && state.settings.schedule && state.settings.schedule.currentSemesterId) || '';
+    var used = {};
+    var courses = state.courses || [];
+    for (i = 0; i < courses.length; i++) {
+      var c = courses[i];
+      if (!c || isDeleted(c)) { continue; }
+      if (c.semesterId) { used[c.semesterId] = 1; }
+    }
+    var removed = 0;
+    for (i = 0; i < live.length; i++) {
+      var sem = live[i];
+      if (!sem || !sem.id) { continue; }
+      if (sem.id === curId) { continue; }
+      if (used[sem.id]) { continue; }
+      var nm = String(sem.name == null ? '' : sem.name).trim();
+      if (nm && nm !== '我的学期' && nm !== '默认学期') { continue; }
+      if (live.length - removed <= 1) { break; }
+      softDelete('semesters', sem);
+      removed++;
+    }
+    return removed;
+  }
+
   function stampAfter(prevIso) {
     var prev = prevIso ? Date.parse(prevIso) : 0;
     var now = Date.now();
@@ -3549,6 +3608,7 @@ function todoLongList() { return todoDailyList(); }
     /* v0.5.1：合并可能给记录换 id（冲突副本），个性化通知的 key 要跟着搬，并清掉孤儿 */
     try {
       if (plan.maps && plan.maps.course) { remapCourseOverrides(plan.maps.course); }
+      pruneEmptySemesters();   // v0.5.1a：合并可能带进空学期
       cleanOrphanOverrides();
     } catch (e) { }
   }
@@ -3878,6 +3938,7 @@ function todoLongList() { return todoDailyList(); }
     courseLeadMin: courseLeadMin, taskNotif: taskNotif,
     legacyTaskLeadHours: legacyTaskLeadHours, eventTypeLeadMin: eventTypeLeadMin,
     cleanOrphanOverrides: cleanOrphanOverrides, ensureNotifExtras: ensureNotifExtras,
+    pruneEmptySemesters: pruneEmptySemesters,
     todoDaySum: todoDaySum,
     /* v0.4.1 软删除 + 回收站 */
     isDeleted: isDeleted, softDelete: softDelete, restore: restore, trashList: trashList,

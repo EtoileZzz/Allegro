@@ -33,6 +33,10 @@ public class ReminderReceiver extends BroadcastReceiver {
     /** 兼容旧引用：默认（课前）渠道。 */
     static final String CHANNEL_ID = CHANNEL_CLASS;
 
+    /** 排障自检通知的固定 id（见 postNow）；不参与闹钟 requestCode 体系。 */
+    static final int ID_SELFTEST_CLASS = 99002;
+    static final int ID_SELFTEST_DAILY = 99001;
+
     private static final String NAME_CLASS = "课前提醒";
     private static final String DESC_CLASS = "每节课开始前的提醒";
     private static final String NAME_DAILY = "每日提醒";
@@ -64,6 +68,43 @@ public class ReminderReceiver extends BroadcastReceiver {
         ensureChannel(ctx, ReminderScheduler.CHANNEL_CLASS);
     }
 
+    /**
+     * 立即发一条通知，**不经过 AlarmManager**。
+     *
+     * 排障时用来把「闹钟」和「权限 + 渠道 + 通知」两段拆开看：
+     *   自检通知能弹 → 排程/闹钟那段有问题；
+     *   自检通知不能弹 → 先修通知权限或渠道。
+     *
+     * 和 onReceive 共用同一套「建渠道 + 构建通知」逻辑（ensureChannel / post），
+     * 所以它验证的就是真实提醒链路的那一段。
+     *
+     * @param kind class / daily（也接受渠道 id；未知值按 class）
+     * @return true 表示 notify() 已提交给系统；false 表示抛异常或参数不可用
+     */
+    public static boolean postNow(Context ctx, String kind, String title, String text) {
+        if (ctx == null) { return false; }
+        boolean daily = isDaily(kind);
+        String channelId = daily ? CHANNEL_DAILY : CHANNEL_CLASS;
+        try {
+            ensureChannel(ctx, daily ? ReminderScheduler.CHANNEL_DAILY : ReminderScheduler.CHANNEL_CLASS);
+            String t = clamp(title, "Allegro", 120);
+            String x = clamp(text, "", 800);
+            // 固定 id：反复点自检不会在通知栏堆一叠（正式提醒用 hashCode，不会撞上这两个值）
+            int id = daily ? ID_SELFTEST_DAILY : ID_SELFTEST_CLASS;
+            return post(ctx, channelId, id, t, x, System.currentTimeMillis());
+        } catch (Throwable t) {
+            Log.w(TAG, "自检通知发送失败", t);
+            return false;
+        }
+    }
+
+    /** "daily" / "daily_reminders" → true；其余（含 null / 空 / 未知）→ false（按课前提醒）。 */
+    private static boolean isDaily(String kind) {
+        if (kind == null) { return false; }
+        String v = kind.trim().toLowerCase(java.util.Locale.US);
+        return ReminderScheduler.CHANNEL_DAILY.equals(v) || CHANNEL_DAILY.equals(v);
+    }
+
     /** 按 kind（class / daily）建对应渠道；已存在时是空操作，不会覆盖用户改过的重要性。 */
     static void ensureChannel(Context ctx, String kind) {
         if (ctx == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) { return; }
@@ -90,9 +131,10 @@ public class ReminderReceiver extends BroadcastReceiver {
         }
     }
 
-    private static void post(Context ctx, String channelId, int id, String title, String text, long atMs) {
+    /** 组装并投递通知。返回 false 表示系统没接（没有 NotificationManager）。 */
+    private static boolean post(Context ctx, String channelId, int id, String title, String text, long atMs) {
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm == null) { return; }
+        if (nm == null) { return false; }
 
         Notification.Builder b;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -114,6 +156,7 @@ public class ReminderReceiver extends BroadcastReceiver {
 
         Notification n = b.build();
         nm.notify(id, n);
+        return true;
     }
 
     /** 点通知 → 打开 App 的「今天」 */

@@ -26,6 +26,27 @@
   var DEFAULT_DUE_HOURS = 24;
 
   var timer = null;
+  var tickTimer = null;            // Windows：前台轮询（Android 用系统闹钟，不需要）
+  var FIRED_KEY = 'allegro.reminders.fired.v1';
+  var FIRED_KEEP_MS = 3 * 86400000;
+
+  /** 读「已弹过」的记录（只留最近 3 天，防存档无限涨） */
+  function loadFired() {
+    try {
+      var raw = localStorage.getItem(FIRED_KEY);
+      var o = raw ? JSON.parse(raw) : {};
+      var now = Date.now();
+      var cut = now - FIRED_KEEP_MS;
+      var out = {};
+      for (var k in o) {
+        if (Object.prototype.hasOwnProperty.call(o, k) && Number(o[k]) > cut) { out[k] = Number(o[k]); }
+      }
+      return out;
+    } catch (e) { return {}; }
+  }
+  function saveFired(o) {
+    try { localStorage.setItem(FIRED_KEY, JSON.stringify(o)); } catch (e) { }
+  }
 
   function notifSettings() {
     try {
@@ -285,6 +306,52 @@
     return out;
   }
 
+  /**
+   * Windows 端没有 AlarmManager，也没有后台进程（关掉窗口只是进托盘，进程还在），
+   * 所以用一个 20 秒的前台轮询：到点的条目直接调系统通知桥弹出来。
+   * —— v0.5.1 之前 Windows 完全没有提醒引擎，这也是「提醒不响」的一个原因。
+   */
+  function tickWindows(now) {
+    if (!AR.Bridge || !AR.Bridge.hasWebView2) { return 0; }
+    if (!AR.Bridge.notifyNow) { return 0; }
+    now = now || Date.now();
+    var list = [];
+    /**
+     * 关键：build() 会滤掉「atMs <= now + 30s」的条目（Android 侧不需要补发过去的时间），
+     * 但前台轮询恰恰要在「刚好到点」那一刻看到它。所以把基准时间往前挪 2.5 分钟，
+     * 让窗口覆盖 [now-2min, now+1min]，再用下面的 2 分钟窗口过滤。
+     */
+    try { list = build(new Date(now - 150000)); } catch (e) { return 0; }
+    var fired = loadFired();
+    var hit = 0;
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (!it || !it.atMs) { continue; }
+      /* 只弹「刚刚到点」的：2 分钟窗口，避免打开 App 时把一堆旧提醒全弹出来 */
+      if (it.atMs > now || it.atMs < now - 120000) { continue; }
+      if (fired[it.id]) { continue; }
+      try { AR.Bridge.notifyNow(it.title, it.text); } catch (e) { }
+      fired[it.id] = now;
+      hit++;
+    }
+    if (hit) { saveFired(fired); }
+    return hit;
+  }
+
+  /** 前台轮询启停（只在 Windows 用；重复调用安全） */
+  function ensureTick() {
+    if (!AR.Bridge || !AR.Bridge.hasWebView2) { return; }
+    if (tickTimer) { return; }
+    tickTimer = setInterval(function () {
+      try { tickWindows(); } catch (e) { }
+    }, 20000);
+    try { tickWindows(); } catch (e) { }
+  }
+
+  function stopTick() {
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  }
+
   function pushNow() {
     if (!AR.Bridge || !AR.Bridge.hasAndroid || !AR.Bridge.scheduleReminders) { return; }
     if (!anyEnabled()) {
@@ -297,6 +364,7 @@
 
   function sync(immediate) {
     if (timer) { clearTimeout(timer); timer = null; }
+    if (AR.Bridge && AR.Bridge.hasWebView2) { ensureTick(); }
     if (immediate) { pushNow(); return; }
     timer = setTimeout(function () { timer = null; pushNow(); }, DEBOUNCE_MS);
   }
@@ -325,6 +393,10 @@
     sync: sync,
     enable: enable,
     cancel: cancel,
-    MAX_DAILY_TIMES: MAX_DAILY_TIMES
+    MAX_DAILY_TIMES: MAX_DAILY_TIMES,
+    tickWindows: tickWindows,      // 手动跑一次前台检查（排障/测试用）
+    ensureTick: ensureTick,
+    stopTick: stopTick,
+    clearFired: function () { try { localStorage.removeItem(FIRED_KEY); } catch (e) { } }
   };
 })();

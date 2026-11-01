@@ -110,6 +110,7 @@ namespace Allegro
                 case "setbackdrop": _form.SetBackdropEnabled(Bool(a, 0)); return "ok";
                 case "notify": _form.ShowNotification(Str(a, 0), Str(a, 1)); return "ok";
                 case "setautostart": return SetAutostart(Bool(a, 0));
+            case "getautostart": return IsAutostartOn() ? "true" : "false";
                 case "exitapp": BeginInvoke(delegate { Application.Exit(); }); return "ok";
                 default: return null;
             }

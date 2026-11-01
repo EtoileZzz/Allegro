@@ -282,6 +282,45 @@ var AR = window.AR || (window.AR = {});
   function cancelReminders() { return call('cancelReminders', []); }
   function requestNotificationPermission() { return call('requestNotificationPermission', []); }
 
+  /* ── v0.5.2：通知自检 / 后台保护（排障用）──────────────────────
+     notifyNow      立刻发一条通知（不走闹钟）→ 只验证「权限 + 渠道」这一段
+     diagnostics    返回 JSON：权限、精确闹钟、电池优化、已排条数、下次时间
+     open*          跳到对应的系统设置页
+     都是「能调就调，不能调就静默」，绝不抛错影响界面。 */
+  function notifyNow(title, text) {
+    if (!isNative()) { return Promise.resolve('unsupported'); }
+    return call('notify', [String(title || 'Allegro'), String(text || '')]);
+  }
+  function reminderDiagnostics() {
+    if (!hasAndroid) { return Promise.resolve(null); }
+    return call('reminderDiagnostics', []);
+  }
+  function openNotificationSettings() {
+    if (!hasAndroid) { return Promise.resolve('unsupported'); }
+    return call('openNotificationSettings', []);
+  }
+  function openExactAlarmSettings() {
+    if (!hasAndroid) { return Promise.resolve('unsupported'); }
+    return call('openExactAlarmSettings', []);
+  }
+  function openBatterySettings() {
+    if (!hasAndroid) { return Promise.resolve('unsupported'); }
+    return call('openBatterySettings', []);
+  }
+  function openAppDetails() {
+    if (!hasAndroid) { return Promise.resolve('unsupported'); }
+    return call('openAppDetails', []);
+  }
+  /** Windows：写/删开机自启（HKCU Run）。其它平台空操作 */
+  function setAutostart(on) {
+    if (!hasWebView2) { return Promise.resolve('unsupported'); }
+    return call('setautostart', [!!on]);
+  }
+  function getAutostart() {
+    if (!hasWebView2) { return Promise.resolve(null); }
+    return call('getautostart', []);
+  }
+
   function isNative() { return hasAndroid || hasWebView2; }
 
   AR.Bridge = {
@@ -312,6 +351,15 @@ var AR = window.AR || (window.AR = {});
     scheduleReminders: scheduleReminders,
     cancelReminders: cancelReminders,
     requestNotificationPermission: requestNotificationPermission,
+    /* v0.5.2 排障 / 后台保护 */
+    notifyNow: notifyNow,
+    reminderDiagnostics: reminderDiagnostics,
+    openNotificationSettings: openNotificationSettings,
+    openExactAlarmSettings: openExactAlarmSettings,
+    openBatterySettings: openBatterySettings,
+    openAppDetails: openAppDetails,
+    setAutostart: setAutostart,
+    getAutostart: getAutostart,
     deviceName: function () {
       if (hasAndroid && window.ARBridge.deviceName) { return window.ARBridge.deviceName(); }
       return '';

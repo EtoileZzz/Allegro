@@ -60,6 +60,16 @@ final class ReminderScheduler {
     /** 最后一次成功下发的 JSON：开机后 BootReceiver 靠它把闹钟补回来。 */
     private static final String KEY_LAST_JSON = "reminders.last";
 
+    /**
+     * 最近一次成功排程的「摘要」，只给排障用（Bridge.reminderDiagnostics）：
+     * 这次真的排了几条、下一条什么时候响、这次排程发生在什么时候。
+     * 必须有：AlarmManager 里到底有没有闹钟，从 Java 侧查不出来（PendingIntent
+     * 只能 FLAG_NO_CREATE 逐条试），所以排程时自己记一份。
+     */
+    private static final String KEY_SUMMARY_COUNT = "reminders.count";
+    private static final String KEY_SUMMARY_NEXT_AT = "reminders.nextAt";
+    private static final String KEY_SUMMARY_AT = "reminders.at";
+
     /** 网页一次性传过来的 JSON 上限（按 UTF-8 字节算） */
     private static final int MAX_JSON_BYTES = 256 * 1024;
     /** 单次最多排多少条，避免一条坏数据把系统闹钟队列打爆 */
@@ -101,6 +111,8 @@ final class ReminderScheduler {
         long now = System.currentTimeMillis();
         int scheduled = 0;
         int skipped = 0;
+        /** 成功排上的最小 atMs —— 也就是「下一条」；一条都没排上就保持 MAX（落盘时写 0） */
+        long nextAt = Long.MAX_VALUE;
         List<Integer> codes = new ArrayList<Integer>();
 
         for (int i = 0; i < arr.length(); i++) {
@@ -138,6 +150,7 @@ final class ReminderScheduler {
                 if (setAlarm(ctx, code, atMs, intent)) {
                     codes.add(code);
                     scheduled++;
+                    if (atMs < nextAt) { nextAt = atMs; }
                 } else {
                     skipped++;
                 }
@@ -148,6 +161,9 @@ final class ReminderScheduler {
         }
 
         saveCodes(ctx, codes);
+        // 排程成功才写摘要：坏 JSON / 超限的 payload 在上面已经 return，摘要保持上一份好数据，
+        // 不会出现「网页传坏了 → 排障里却显示 0 条」这种把人带偏的现象。
+        saveSummary(ctx, scheduled, nextAt == Long.MAX_VALUE ? 0L : nextAt);
         Log.i(TAG, "课前提醒已排程 " + scheduled + " 条，跳过 " + skipped + " 条");
         return "ok";
     }
@@ -183,6 +199,47 @@ final class ReminderScheduler {
         }
     }
 
+    /* ── 排程摘要（排障用，只读） ─────────────────────────────── */
+
+    /**
+     * 最近一次成功排程一共排上几条。没有摘要 / 已取消 / 读取失败都返回 0。
+     * 只在 schedule() 成功结束后由 saveSummary 写入；cancelAllInternal 清零。
+     */
+    static int getLastScheduledCount(Context ctx) {
+        if (ctx == null) { return 0; }
+        try {
+            return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getInt(KEY_SUMMARY_COUNT, 0);
+        } catch (Throwable t) {
+            Log.w(TAG, "读取排程摘要失败", t);
+            return 0;
+        }
+    }
+
+    /** 已排闹钟里最早的那个 atMs（毫秒）；没有就是 0。 */
+    static long getLastNextAtMs(Context ctx) {
+        if (ctx == null) { return 0L; }
+        try {
+            return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getLong(KEY_SUMMARY_NEXT_AT, 0L);
+        } catch (Throwable t) {
+            Log.w(TAG, "读取排程摘要失败", t);
+            return 0L;
+        }
+    }
+
+    /** 上次成功排程的时刻（毫秒）；没有就是 0。 */
+    static long getLastScheduleAtMs(Context ctx) {
+        if (ctx == null) { return 0L; }
+        try {
+            return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getLong(KEY_SUMMARY_AT, 0L);
+        } catch (Throwable t) {
+            Log.w(TAG, "读取排程摘要失败", t);
+            return 0L;
+        }
+    }
+
     /* ── 内部实现 ─────────────────────────────────────────────── */
 
     /** 显式 Intent 的「身份」只由 action + 组件决定，extras 不参与 PendingIntent 匹配。 */
@@ -206,7 +263,13 @@ final class ReminderScheduler {
                 } catch (Throwable ignored) { }
             }
         }
-        sp.edit().remove(KEY_CODES).apply();
+        // 摘要一起清零：没有闹钟就不该在排障里报「已排 N 条 / 下一条 xxx」。
+        // （schedule() 内部也会走到这里，末尾的 saveSummary 会用新值覆盖，顺序没问题。）
+        sp.edit().remove(KEY_CODES)
+                .remove(KEY_SUMMARY_COUNT)
+                .remove(KEY_SUMMARY_NEXT_AT)
+                .remove(KEY_SUMMARY_AT)
+                .apply();
     }
 
     private static void cancelCode(Context ctx, AlarmManager am, int code) {
@@ -275,6 +338,23 @@ final class ReminderScheduler {
                     .edit().putString(KEY_CODES, sb.toString()).apply();
         } catch (Throwable t) {
             Log.w(TAG, "保存提醒索引失败", t);
+        }
+    }
+
+    /**
+     * 记录这次排程的摘要（条数 / 下一条 / 排程时刻）。
+     * 三者一起写：排障页要么看到一致的一组新值，要么看到上一组完整值。
+     */
+    private static void saveSummary(Context ctx, int count, long nextAtMs) {
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt(KEY_SUMMARY_COUNT, count < 0 ? 0 : count)
+                    .putLong(KEY_SUMMARY_NEXT_AT, nextAtMs > 0L ? nextAtMs : 0L)
+                    .putLong(KEY_SUMMARY_AT, System.currentTimeMillis())
+                    .apply();
+        } catch (Throwable t) {
+            Log.w(TAG, "保存排程摘要失败", t);
         }
     }
 

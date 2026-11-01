@@ -2,6 +2,8 @@ package com.etoilezzz.allegro;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlarmManager;
+import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
@@ -17,6 +19,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.AlarmClock;
@@ -49,6 +52,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Allegro · Android 外壳
@@ -667,6 +672,7 @@ public class MainActivity extends Activity {
                 String res = ReminderScheduler.schedule(MainActivity.this, json);
                 // 排程不依赖通知权限；权限只影响「弹不弹」。第一次排提醒时顺便问一次。
                 ensureNotificationPermission(false);
+                warnIfNotificationsOffOnce();   // 权限没开时提示一次（6h 节流）
                 return res;
             } catch (Throwable t) {
                 Log.w(TAG, "排程课前提醒失败", t);
@@ -736,6 +742,212 @@ public class MainActivity extends Activity {
                     } catch (Throwable ignored) { }
                 }
             });
+        }
+
+        /* ── 通知自检 / 后台保护（v0.5.2 排障）────────────────────── */
+
+        /**
+         * 立刻发一条通知，**不经过 AlarmManager** —— 把「权限 + 渠道 + 通知」这段
+         * 单独验一遍，用来快速判断用户反馈的「提醒没响」到底断在哪一段：
+         *   这里弹得出来 → 通知链路没问题，接着查排程/闹钟（exactAlarm、scheduledCount）；
+         *   这里也弹不出来 → 先修通知权限或渠道，别在排程上浪费时间。
+         *
+         * 用 daily_reminders 渠道（IMPORTANCE_DEFAULT）：自检不该像课前提醒那样强行打断。
+         * 投递放主线程做，最多等 2 秒，绝不无限阻塞 JavaBridge 线程。
+         *
+         * @return "ok" 或 "error: ..."（永远不抛）
+         */
+        @JavascriptInterface
+        public String notifyNow(final String title, final String text) {
+            final String[] out = new String[]{"error: timeout"};
+            final CountDownLatch latch = new CountDownLatch(1);
+            Runnable job = new Runnable() {
+                public void run() {
+                    try {
+                        boolean ok = ReminderReceiver.postNow(MainActivity.this,
+                                ReminderScheduler.CHANNEL_DAILY, title, text);
+                        out[0] = ok ? "ok" : "error: notify rejected";
+                    } catch (Throwable t) {
+                        Log.w(TAG, "自检通知失败", t);
+                        out[0] = "error: " + t.getClass().getSimpleName();
+                    } finally {
+                        latch.countDown();
+                    }
+                }
+            };
+            try {
+                runOnUiThread(job);
+                // 已经在主线程时 runOnUiThread 是同步执行，await 立刻返回
+                if (!latch.await(2, TimeUnit.SECONDS)) { return "error: timeout"; }
+            } catch (Throwable t) {
+                if (t instanceof InterruptedException) { Thread.currentThread().interrupt(); }
+                Log.w(TAG, "自检通知等待失败", t);
+                return "error: " + t.getClass().getSimpleName();
+            }
+            return out[0] == null ? "error: unknown" : out[0];
+        }
+
+        /**
+         * 和 notifyNow 完全同一套实现。
+         *
+         * 为什么要有这个别名：网页侧 app/js/bridge.js 的 notifyNow() 实际是
+         * `call('notify', ...)`（与 Windows 端 WebBridge.cs 的 case "notify" 对齐）。
+         * 两个名字都暴露，网页无论按哪个名字调都能打到实现上。
+         */
+        @JavascriptInterface
+        public String notify(final String title, final String text) {
+            return notifyNow(title, text);
+        }
+
+        /**
+         * 排障快照：把「通知权限 / 渠道 / 精确闹钟 / 电池优化 / 已排摘要」一次性交给网页。
+         *
+         * 纯读取 + 每个系统调用各自 try/catch，整段再包一层 Throwable：
+         * 任何一项在某个 ROM 上不可用都只是那一个字段保守取值，不会让桥调用崩掉。
+         *
+         * 字段：sdkInt / notifEnabled / channelClass / channelDaily / exactAlarm /
+         *       batteryIgnored / scheduledCount / nextAtMs / lastScheduleAt
+         * @return JSON 字符串；连 JSONObject 都构造失败时返回 {"error":"..."}
+         */
+        @JavascriptInterface
+        public String reminderDiagnostics() {
+            try {
+                JSONObject o = new JSONObject();
+                int sdk = Build.VERSION.SDK_INT;
+                o.put("sdkInt", sdk);
+
+                NotificationManager nm = (NotificationManager)
+                        getSystemService(Context.NOTIFICATION_SERVICE);
+
+                // API 24+ 才有 areNotificationsEnabled；更低版本没有「按应用关通知」的概念
+                boolean notifEnabled = true;
+                if (sdk >= 24 && nm != null) {
+                    try {
+                        notifEnabled = nm.areNotificationsEnabled();
+                    } catch (Throwable ignored) {
+                        notifEnabled = true;
+                    }
+                }
+                o.put("notifEnabled", notifEnabled);
+
+                // 渠道存在性：渠道没建 → targetSdk 34 下通知会被系统静静丢掉
+                boolean channelClass = false;
+                boolean channelDaily = false;
+                if (sdk >= 26 && nm != null) {
+                    try {
+                        channelClass = nm.getNotificationChannel(ReminderReceiver.CHANNEL_CLASS) != null;
+                    } catch (Throwable ignored) { }
+                    try {
+                        channelDaily = nm.getNotificationChannel(ReminderReceiver.CHANNEL_DAILY) != null;
+                    } catch (Throwable ignored) { }
+                }
+                o.put("channelClass", channelClass);
+                o.put("channelDaily", channelDaily);
+
+                // Android 12+：没有「闹钟和提醒」权限就只能退化成非精确
+                boolean exactAlarm = true;
+                if (sdk >= 31) {
+                    try {
+                        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+                        exactAlarm = am != null && am.canScheduleExactAlarms();
+                    } catch (Throwable ignored) {
+                        exactAlarm = false;
+                    }
+                }
+                o.put("exactAlarm", exactAlarm);
+
+                // Doze 不裁白名单里的应用；API 23 以下没有电池优化开关，视为放行
+                boolean batteryIgnored = true;
+                if (sdk >= 23) {
+                    try {
+                        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                        batteryIgnored = pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+                    } catch (Throwable ignored) {
+                        batteryIgnored = false;
+                    }
+                }
+                o.put("batteryIgnored", batteryIgnored);
+
+                // 排程摘要来自 ReminderScheduler 上次成功排程时写的 prefs；没有就是 0
+                Context ctx = MainActivity.this;
+                o.put("scheduledCount", ReminderScheduler.getLastScheduledCount(ctx));
+                o.put("nextAtMs", ReminderScheduler.getLastNextAtMs(ctx));
+                o.put("lastScheduleAt", ReminderScheduler.getLastScheduleAtMs(ctx));
+                return o.toString();
+            } catch (Throwable t) {
+                Log.w(TAG, "排障信息生成失败", t);
+                try {
+                    return new JSONObject().put("error", t.getClass().getSimpleName()).toString();
+                } catch (Throwable ignored) {
+                    return "{\"error\":\"unknown\"}";
+                }
+            }
+        }
+
+        /** 跳「应用通知设置」；系统没有这一屏就退到应用详情页。 */
+        @JavascriptInterface
+        public void openNotificationSettings() {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    try {
+                        Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                        i.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(i);
+                        return;
+                    } catch (Throwable t) {
+                        Log.w(TAG, "ACTION_APP_NOTIFICATION_SETTINGS 失败", t);
+                    }
+                    startAppDetails();
+                }
+            });
+        }
+
+        /**
+         * 跳「闹钟和提醒」权限页（Android 12+）；低版本 / 打不开时退到应用详情页。
+         * 这一页是「提醒不准时 / 完全不响」最常见的开关。
+         */
+        @JavascriptInterface
+        public void openExactAlarmSettings() {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        try {
+                            Intent i = new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM);
+                            i.setData(Uri.parse("package:" + getPackageName()));
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(i);
+                            return;
+                        } catch (Throwable t) {
+                            Log.w(TAG, "ACTION_REQUEST_SCHEDULE_EXACT_ALARM 失败", t);
+                        }
+                    }
+                    startAppDetails();
+                }
+            });
+        }
+
+        /** 跳应用详情页（所有权限问题的最终兜底入口）。 */
+        @JavascriptInterface
+        public void openAppDetails() {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    startAppDetails();
+                }
+            });
+        }
+
+        /** 应用详情页；已经是最后的兜底，失败只 toast，绝不再往下抛。 */
+        private void startAppDetails() {
+            try {
+                Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                i.setData(Uri.parse("package:" + getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            } catch (Throwable t) {
+                Log.w(TAG, "ACTION_APPLICATION_DETAILS_SETTINGS 失败", t);
+                toast("请到系统设置 → 应用 → Allegro 里手动修改");
+            }
         }
 
         /**
@@ -1156,6 +1368,27 @@ public class MainActivity extends Activity {
     }
 
     /** 外层工具提示（内部类 Bridge 也有同名方法，供网页直接调用）。 */
+    /**
+     * 通知权限关着时，排多少闹钟都不会弹 —— 用户看到的就是「提醒不响」。
+     * 所以每次排程后检查一次，最多 6 小时提示一次，避免每次保存都弹。
+     */
+    private void warnIfNotificationsOffOnce() {
+        try {
+            if (Build.VERSION.SDK_INT < 24) { return; }
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) { return; }
+            if (nm.areNotificationsEnabled()) { return; }
+            SharedPreferences sp = getSharedPreferences("abbeyroad_reminders", MODE_PRIVATE);
+            long last = sp.getLong("reminders.warnedAt", 0L);
+            long now = System.currentTimeMillis();
+            if (last > 0L && (now - last) < 6L * 3600L * 1000L) { return; }
+            sp.edit().putLong("reminders.warnedAt", now).apply();
+            toast("通知权限未开启，提醒不会显示 —— 去系统设置里允许 Allegro 发送通知");
+        } catch (Throwable t) {
+            Log.w(TAG, "提醒通知权限检查失败", t);
+        }
+    }
+
     private void toast(final String msg) {
         runOnUiThread(new Runnable() {
             public void run() {
