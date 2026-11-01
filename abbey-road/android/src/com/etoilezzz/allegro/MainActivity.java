@@ -670,6 +670,7 @@ public class MainActivity extends Activity {
         public String scheduleReminders(final String json) {
             try {
                 String res = ReminderScheduler.schedule(MainActivity.this, json);
+                lastScheduleResult = (res == null ? "null" : res);
                 // 排程不依赖通知权限；权限只影响「弹不弹」。第一次排提醒时顺便问一次。
                 ensureNotificationPermission(false);
                 warnIfNotificationsOffOnce();   // 权限没开时提示一次（6h 节流）
@@ -871,6 +872,9 @@ public class MainActivity extends Activity {
                 // 排程摘要来自 ReminderScheduler 上次成功排程时写的 prefs；没有就是 0
                 Context ctx = MainActivity.this;
                 o.put("scheduledCount", ReminderScheduler.getLastScheduledCount(ctx));
+                /* v0.5.1b：AlarmManager 里真实存在的闹钟数 + 上次排程的返回值 */
+                o.put("pendingCount", ReminderScheduler.countPending(ctx));
+                o.put("lastResult", lastScheduleResult == null ? "" : lastScheduleResult);
                 o.put("nextAtMs", ReminderScheduler.getLastNextAtMs(ctx));
                 o.put("lastScheduleAt", ReminderScheduler.getLastScheduleAtMs(ctx));
                 return o.toString();
@@ -1372,6 +1376,9 @@ public class MainActivity extends Activity {
      * 通知权限关着时，排多少闹钟都不会弹 —— 用户看到的就是「提醒不响」。
      * 所以每次排程后检查一次，最多 6 小时提示一次，避免每次保存都弹。
      */
+    /** v0.5.1b：上一次 scheduleReminders 的原生返回值（排障用，跨调用保留） */
+    private static String lastScheduleResult = "";
+
     private void warnIfNotificationsOffOnce() {
         try {
             if (Build.VERSION.SDK_INT < 24) { return; }

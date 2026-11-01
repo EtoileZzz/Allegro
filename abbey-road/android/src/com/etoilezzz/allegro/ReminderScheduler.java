@@ -240,6 +240,40 @@ final class ReminderScheduler {
         }
     }
 
+    /**
+     * v0.5.1b：数一数 AlarmManager 里**真实存在**的待触发闹钟。
+     *
+     * prefs 里的 reminders.count 只能证明「网页发来的 JSON 里有几条」，
+     * 证明不了闹钟真的排进去了（权限、ROM 限制、代码异常都可能让 setAlarm 失败）。
+     * 这里用保存过的 requestCode 逐个 FLAG_NO_CREATE 反查：能拿到 PendingIntent
+     * 才算真的排上了。排障时它和 scheduledCount 不一致就说明断在排程这一段。
+     */
+    static int countPending(Context ctx) {
+        if (ctx == null) { return 0; }
+        int alive = 0;
+        try {
+            String raw = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_CODES, "");
+            if (raw == null || raw.length() == 0) { return 0; }
+            String[] parts = raw.split(",");
+            for (int i = 0; i < parts.length; i++) {
+                String p = parts[i].trim();
+                if (p.length() == 0) { continue; }
+                int code;
+                try { code = Integer.parseInt(p); } catch (Throwable t) { continue; }
+                try {
+                    int flags = PendingIntent.FLAG_NO_CREATE;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { flags |= PendingIntent.FLAG_IMMUTABLE; }
+                    PendingIntent pi = PendingIntent.getBroadcast(ctx, code, baseIntent(ctx), flags);
+                    if (pi != null) { alive++; }
+                } catch (Throwable ignored) { }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "统计待触发闹钟失败", t);
+        }
+        return alive;
+    }
+
     /* ── 内部实现 ─────────────────────────────────────────────── */
 
     /** 显式 Intent 的「身份」只由 action + 组件决定，extras 不参与 PendingIntent 匹配。 */

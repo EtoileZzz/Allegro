@@ -26,6 +26,8 @@
   var DEFAULT_DUE_HOURS = 24;
 
   var timer = null;
+  var lastResult = '';        // 上一次 scheduleReminders 的原生返回值
+  var lastResultAt = 0;
   var tickTimer = null;            // Windows：前台轮询（Android 用系统闹钟，不需要）
   var FIRED_KEY = 'allegro.reminders.fired.v1';
   var FIRED_KEEP_MS = 3 * 86400000;
@@ -359,7 +361,25 @@
       return;
     }
     var list = build();
-    try { AR.Bridge.scheduleReminders(JSON.stringify(list)); } catch (e) { }
+    /**
+     * v0.5.1b：原生返回值以前被丢掉（scheduleReminders 会返回 "ok" 或 "error: ..."）。
+     * 现在记下来：排障时能看到「到底排上了没有、报什么错」。
+     */
+    try {
+      var p = AR.Bridge.scheduleReminders(JSON.stringify(list));
+      if (p && p.then) {
+        p.then(function (res) {
+          lastResult = (res == null ? 'null' : String(res));
+          lastResultAt = Date.now();
+          if (lastResult.indexOf('error') === 0) {
+            try { if (AR.UI && AR.UI.toast) { AR.UI.toast('提醒排程失败：' + lastResult); } } catch (e2) { }
+          }
+        }, function (err) {
+          lastResult = 'reject: ' + (err && err.message ? err.message : err);
+          lastResultAt = Date.now();
+        });
+      }
+    } catch (e) { lastResult = 'throw: ' + (e && e.message ? e.message : e); }
   }
 
   function sync(immediate) {
@@ -394,6 +414,7 @@
     enable: enable,
     cancel: cancel,
     MAX_DAILY_TIMES: MAX_DAILY_TIMES,
+    lastResult: function () { return { result: lastResult, at: lastResultAt, size: (function () { try { return build().length; } catch (e) { return -1; } })() }; },
     tickWindows: tickWindows,      // 手动跑一次前台检查（排障/测试用）
     ensureTick: ensureTick,
     stopTick: stopTick,

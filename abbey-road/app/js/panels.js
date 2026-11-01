@@ -3198,6 +3198,17 @@ function renderLongTaskList(host) {
           if (!hasNext) { next = fb.next; }
         }
         setSummary(count, next);
+        /* v0.5.1b：排程链路的三个数字——定位「闹钟到底排没排上」 */
+        try {
+          var pcRaw = Number(d.pendingCount);
+          var lr = (AR.Reminders && AR.Reminders.lastResult) ? AR.Reminders.lastResult() : null;
+          var pipe = box.querySelector('#notifPipe');
+          if (!pipe) { pipe = el('<p class="muted" id="notifPipe"></p>'); box.appendChild(pipe); }
+          var txt = 'AlarmManager 实际待触发 ' + (isFinite(pcRaw) ? pcRaw : '?') + ' 条';
+          if (lr && lr.size >= 0) { txt += ' · 按当前设置算出 ' + lr.size + ' 条'; }
+          if (lr && lr.result) { txt += ' · 上次排程：' + lr.result; }
+          pipe.textContent = txt;
+        } catch (e) { }
 
         var notif = boolOf(d.notifEnabled);
         if (notif === true) {
