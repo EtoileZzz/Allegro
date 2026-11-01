@@ -556,6 +556,23 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   const mani = fs.readFileSync(path.join(root5, 'android/AndroidManifest.xml'), 'utf8');
   const schedJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderScheduler.java'), 'utf8');
   const recvJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderReceiver.java'), 'utf8');
+  /* ── 0.5.1c：通知形式 / 无计划任务 / 预览 / 展开全部记录 ── */
+  const remC = fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8');
+  const coreC = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
+  ok('C169 每日提醒支持三种通知形式（summary/byType/each）',
+    coreC.indexOf("form: 'summary'") >= 0
+    && remC.indexOf("form === 'each'") >= 0 && remC.indexOf("form === 'byType'") >= 0);
+  ok('C170 无计划任务可配置（includeUnplanned）',
+    coreC.indexOf('includeUnplanned') >= 0 && remC.indexOf('isPlannedTask') >= 0);
+  ok('C171 内容分母用目标量（goal.target），不再是次数',
+    remC.indexOf('goalTarget') >= 0 && remC.indexOf('taskProgress') >= 0
+    && remC.indexOf('function taskNeed') < 0);
+  ok('C172 作业按「布置日起每天提醒」而不是到期',
+    remC.indexOf('assignmentsFor') >= 0 && remC.indexOf('due-') < 0);
+  ok('C173 提醒有 preview()（设置页预览下一条）',
+    remC.indexOf('preview: function') >= 0 && panelsSync.indexOf('预览下一条通知') >= 0);
+  ok('C174 最近记录可「展开全部」',
+    fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8').indexOf('data-rec-all') >= 0);
   /* ── 0.5.1a：学期去重 + 通知自检 ── */
   ok('C163 默认学期按名字配对（不再按开学日，否则同步会多出空学期）',
     coreSync.indexOf("'default-semester'") >= 0 && coreSync.indexOf('function pruneEmptySemesters') >= 0);
@@ -603,8 +620,8 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C152 合并后重映射课程覆盖 + 清孤儿',
     core51.indexOf('remapCourseOverrides(plan.maps.course)') >= 0 && core51.indexOf('cleanOrphanOverrides()') >= 0);
   const remSrc = fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8');
-  ok('C153 提醒调度支持四类来源（课程/每日/任务/到期）',
-    remSrc.indexOf('daily-') >= 0 && remSrc.indexOf('task-') >= 0 && remSrc.indexOf('due-') >= 0
+  ok('C153 提醒调度支持四类来源（课程/每日/任务/作业）',
+    remSrc.indexOf('daily-') >= 0 && remSrc.indexOf('task-') >= 0 && remSrc.indexOf('hw-') >= 0
     && remSrc.indexOf('courseLeadMin') >= 0);
   ok('C154 提醒条目带 channel 字段（原生双渠道）',
     remSrc.indexOf("channel: 'class'") >= 0 && remSrc.indexOf("channel: 'daily'") >= 0);

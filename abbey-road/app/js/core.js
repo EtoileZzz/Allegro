@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.5.1b';
+var APP_VERSION = '0.5.1c';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -301,7 +301,12 @@ var APP_VERSION = '0.5.1b';
           mode: 'pending',
           skipWhenDone: true,
           includeEvents: true,
-          weekdaysOnly: false
+          weekdaysOnly: false,
+          /* v0.5.1c：通知形式 + 无计划任务 + 条数上限 */
+          form: 'summary',        /* summary | byType | each */
+          includeUnplanned: false,
+          maxPerNotify: 3,
+          maxEachItems: 8
         },
         /* v0.5.1：个性化覆盖（只存与全局不同的部分） */
         overrides: { v: 1, courses: {}, tasks: {}, taskDates: {}, eventTypes: {} }
@@ -790,7 +795,11 @@ function todoLongList() { return todoDailyList(); }
       mode: d.mode === 'always' ? 'always' : 'pending',
       skipWhenDone: d.skipWhenDone !== false,
       includeEvents: d.includeEvents !== false,
-      weekdaysOnly: d.weekdaysOnly === true
+      weekdaysOnly: d.weekdaysOnly === true,
+      form: (d.form === 'byType' || d.form === 'each') ? d.form : 'summary',
+      includeUnplanned: d.includeUnplanned === true,
+      maxPerNotify: (Number(d.maxPerNotify) > 0) ? Math.round(Number(d.maxPerNotify)) : 3,
+      maxEachItems: (Number(d.maxEachItems) > 0) ? Math.round(Number(d.maxEachItems)) : 8
     };
   }
 
@@ -859,6 +868,11 @@ function todoLongList() { return todoDailyList(); }
         skipWhenDone: true, includeEvents: true, weekdaysOnly: false };
     } else {
       if (!Array.isArray(nn.daily.times)) { nn.daily.times = ['07:30', '21:00']; }
+      /* v0.5.1c：老存档补通知形式相关字段 */
+      if (nn.daily.form !== 'byType' && nn.daily.form !== 'each') { nn.daily.form = 'summary'; }
+      if (typeof nn.daily.includeUnplanned !== 'boolean') { nn.daily.includeUnplanned = false; }
+      if (!(Number(nn.daily.maxPerNotify) > 0)) { nn.daily.maxPerNotify = 3; }
+      if (!(Number(nn.daily.maxEachItems) > 0)) { nn.daily.maxEachItems = 8; }
       if (typeof nn.daily.skipWhenDone !== 'boolean') { nn.daily.skipWhenDone = true; }
       if (typeof nn.daily.includeEvents !== 'boolean') { nn.daily.includeEvents = true; }
       if (typeof nn.daily.weekdaysOnly !== 'boolean') { nn.daily.weekdaysOnly = false; }

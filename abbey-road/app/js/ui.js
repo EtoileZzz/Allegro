@@ -11151,12 +11151,23 @@ var AR = window.AR || (window.AR = {});
    *   mode = 'todo' → 行上带 data-rec-day，展开这一天的每一笔（含软删除的，方便排障）
    *   mode = 'long' → 行上带 data-rec-id（老数据退回 row.__entry），只展开这一笔
    */
-  function tkRecExpandBind(container, mode, getTask, getUnit) {
+  function tkRecExpandBind(container, mode, getTask, getUnit, onToggleAll) {
     if (!container || container.__tkRecExpandBound) { return; }
     container.__tkRecExpandBound = true;
     container.addEventListener('click', function (ev) {
       var target = ev.target;
       if (!target || !target.closest) { return; }
+      /* v0.5.1c：展开 / 收起「全部记录」——和单条展开是两件事 */
+      var allBtn = target.closest('[data-rec-all]');
+      var cutBtn = target.closest('[data-rec-collapse]');
+      if (allBtn || cutBtn) {
+        var taskA = getTask();
+        if (taskA && taskA.id) {
+          TK_REC_SHOW_ALL[taskA.id] = !!allBtn;
+          if (typeof onToggleAll === 'function') { onToggleAll(); }
+        }
+        return;
+      }
       if (target.closest('button')) { return; }   /* 撤销 / ✕ 删掉不触发展开 */
       var row = target.closest('[data-rec-expand]');
       if (!row || row.parentNode !== container) { return; }
@@ -11193,7 +11204,10 @@ var AR = window.AR || (window.AR = {});
     });
   }
 
-  /** 最近记录（按天倒序，最多 3 行；点一行展开当天的每一笔详情，撤销逻辑不变） */
+  /** v0.5.1c：哪些任务点了「展开全部记录」（只存内存，弹窗关掉就复位） */
+  var TK_REC_SHOW_ALL = {};
+
+  /** 最近记录（按天倒序，默认 3 行；点一行展开当天详情；底部可展开全部） */
   function tkRecList(t) {
     /* 按天聚合：同时记条数与金额 —— 有目标单位的任务要显示 +1.6 小时，而不是 +1 次 */
     var hasUnit = !!(t && t.goal && t.goal.unit);
@@ -11214,13 +11228,24 @@ var AR = window.AR || (window.AR = {});
       if (!hasUnit) { return '+' + d.n + ' 次'; }
       return '+' + a + ' ' + U.escapeHtml(unit);
     }
-    return days.slice(0, 3).map(function (k) {
+    var showAll = !!TK_REC_SHOW_ALL[t.id];
+    var shownDays = showAll ? days : days.slice(0, 3);
+    var totalEntries = 0;
+    days.forEach(function (k) { totalEntries += byDay[k].n; });
+    var html = shownDays.map(function (k) {
       return '<div class="tk-rec" data-rec-expand="1" data-rec-day="' + U.escapeHtml(k)
         + '" style="cursor:pointer">'
         + tkRecArrowSpan()
         + '<span class="tk-rn">' + tkRelDay(k) + ' · ' + amtText(byDay[k]) + '</span>'
         + '<button class="tk-rx undo" data-reck="' + U.escapeHtml(k) + '">撤销</button></div>';
-    }).join('') + (days.length > 3 ? '<div class="tk-rech-more">还有 ' + (days.length - 3) + ' 天有记录…</div>' : '');
+    }).join('');
+    if (showAll) {
+      html += '<div class="tk-rech-more" data-rec-collapse="1" style="cursor:pointer">收起（只看最近 3 天）</div>';
+    } else if (days.length > 3) {
+      html += '<div class="tk-rech-more" data-rec-all="1" style="cursor:pointer">展开全部记录（'
+        + days.length + ' 天 · ' + totalEntries + ' 笔）</div>';
+    }
+    return html;
   }
   /** 大卡里的一条任务：标题行（含编辑按钮）+ 今天/累计 + 大迷你格 + 展开区 */
   /* ---- 任务详情弹窗（点条目的「展开」） ---- */
@@ -11298,7 +11323,7 @@ var AR = window.AR || (window.AR = {});
       return (AR.Store.todoById ? AR.Store.todoById(cur.id) : null) || cur;
     }, function (task) {
       return (task && task.goal && task.goal.unit) ? String(task.goal.unit) : '';
-    });
+    }, function () { paintRecs(); });
     function paintRecs() {
       var live = (AR.Store.todoById ? AR.Store.todoById(cur.id) : null) || cur;
       recBox.innerHTML = tkRecList(live);
@@ -11678,7 +11703,7 @@ var AR = window.AR || (window.AR = {});
         return AR.Store.todoById(src.id) || src;
       }, function (task) {
         return (task && task.goal && task.goal.unit) ? String(task.goal.unit) : '';
-      });
+      }, function () { paintRecs(); });
       function paintRecs() {
         var cur = AR.Store.todoById(src.id) || src;
         recBox.innerHTML = '<div class="tk-edit-rech">最近记录</div>' + tkRecList(cur);
