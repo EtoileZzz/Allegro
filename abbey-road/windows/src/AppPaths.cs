@@ -16,7 +16,7 @@ namespace Allegro
         ///   windows/build.ps1 的 $version（0.4.5）、app/js/core.js 的 APP_VERSION（0.4.5）、本文件。
         /// 不同步的后果：界面资源会被解到旧版目录（v0.4.x），appversion 也返回旧版本。
         /// </summary>
-        public const string FallbackVersion = "0.5.1c";
+        public const string FallbackVersion = "0.5.1a";
 
         private static string _version;
 

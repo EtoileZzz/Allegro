@@ -556,6 +556,19 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   const mani = fs.readFileSync(path.join(root5, 'android/AndroidManifest.xml'), 'utf8');
   const schedJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderScheduler.java'), 'utf8');
   const recvJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderReceiver.java'), 'utf8');
+  /* ── 0.5.1a(73)：修面板误插（同步面板里混进了提醒面板的变量）── */
+  {
+    const pnlTxt = fs.readFileSync(path.join(appDir, 'js/panels.js'), 'utf8');
+    const cloudAt = pnlTxt.indexOf('function panelCloudSync()');
+    const integAt = pnlTxt.indexOf('function panelIntegration()');
+    const seg = pnlTxt.slice(cloudAt, integAt > cloudAt ? integAt : pnlTxt.length);
+    ok('C175 同步面板不再引用提醒面板的变量（查 writeDaily / dl. / reminders.）',
+      seg.indexOf('writeDaily') < 0 && !/\bdl\./.test(seg) && !/\breminders\./.test(seg),
+      'writeDaily=' + seg.indexOf('writeDaily') + ' dl.=' + seg.search(/\bdl\./) + ' reminders.=' + seg.search(/\breminders\./));
+    const notifyAt = pnlTxt.indexOf('function panelNotify()');
+    const notifySeg = pnlTxt.slice(notifyAt, cloudAt);
+    ok('C176「通知形式」只出现在提醒面板里', notifySeg.indexOf('通知形式') >= 0 && seg.indexOf('通知形式') < 0);
+  }
   /* ── 0.5.1c：通知形式 / 无计划任务 / 预览 / 展开全部记录 ── */
   const remC = fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8');
   const coreC = fs.readFileSync(path.join(appDir, 'js/core.js'), 'utf8');
