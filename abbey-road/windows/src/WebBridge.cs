@@ -7,6 +7,7 @@ using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Web.WebView2.Core;
+using Microsoft.Win32;
 
 namespace Allegro
 {
@@ -25,6 +26,10 @@ namespace Allegro
         /// 会直接把内存吃光、界面卡死，所以先看文件大小再决定读不读。
         /// </summary>
         private const long MaxImportBytes = 8L * 1024 * 1024;
+
+        /// <summary>HKCU run key used for "start Allegro on login".</summary>
+        private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string AutostartValueName = "Allegro";
 
         public WebBridge(MainForm form, CoreWebView2 core)
         {
@@ -103,6 +108,8 @@ namespace Allegro
                 case "readtexturi": return ReadTextUri(Str(a, 0));
                 case "setsystembars": SetBars(Str(a, 0), Bool(a, 1)); return "ok";
                 case "setbackdrop": _form.SetBackdropEnabled(Bool(a, 0)); return "ok";
+                case "notify": _form.ShowNotification(Str(a, 0), Str(a, 1)); return "ok";
+                case "setautostart": return SetAutostart(Bool(a, 0));
                 case "exitapp": BeginInvoke(delegate { Application.Exit(); }); return "ok";
                 default: return null;
             }
@@ -378,6 +385,61 @@ namespace Allegro
         private void SetBars(string hex, bool lightIcons)
         {
             _form.SetDark(!lightIcons);
+        }
+
+        /// <summary>
+        /// Bridge "setAutostart(on)": toggles launch-on-login by writing / deleting
+        /// HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Allegro, whose value is
+        /// the quoted full path of this exe. Returns whether the registry ended up in
+        /// the requested state (a failed write must not silently look like success).
+        /// </summary>
+        private static bool SetAutostart(bool on)
+        {
+            try
+            {
+                if (on)
+                {
+                    using (RegistryKey run = Registry.CurrentUser.CreateSubKey(RunKey))
+                    {
+                        if (run == null) { return false; }
+                        run.SetValue(AutostartValueName, QuotePath(Application.ExecutablePath),
+                            RegistryValueKind.String);
+                    }
+                }
+                else
+                {
+                    using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                    {
+                        if (run != null) { run.DeleteValue(AutostartValueName, false); }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            return IsAutostartOn() == on;
+        }
+
+        private static bool IsAutostartOn()
+        {
+            try
+            {
+                using (RegistryKey run = Registry.CurrentUser.OpenSubKey(RunKey, false))
+                {
+                    if (run == null) { return false; }
+                    object v = run.GetValue(AutostartValueName);
+                    return v != null && Convert.ToString(v).Trim().Length > 0;
+                }
+            }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>Install paths routinely contain spaces, so always quote.</summary>
+        private static string QuotePath(string path)
+        {
+            if (string.IsNullOrEmpty(path)) { return ""; }
+            return "\"" + path + "\"";
         }
 
         public void NotifyResize()

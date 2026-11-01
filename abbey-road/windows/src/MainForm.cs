@@ -20,6 +20,14 @@ namespace Allegro
         private string _selfTestPath;
         private string _webRoot;
 
+        // Tray support: the window lives in the tray by default, so the app keeps
+        // running (and keeps its sync/reminder timers alive) after the user closes it.
+        private NotifyIcon _tray;
+        private Icon _trayIcon;
+        private bool _trayIconOwned;     // false when the icon is a shared SystemIcons one
+        private bool _reallyExit;        // set by the tray "退出" item -> close for real
+        private bool _trayHintShown;     // the "minimized to tray" balloon is shown only once
+
         public MainForm(string[] args)
         {
             // --selftest <文件>：构建自检，加载界面 → 跑探针 → 写结果 → 退出
@@ -54,6 +62,153 @@ namespace Allegro
                 if (System.IO.File.Exists(ico)) { Icon = new Icon(ico); }
             }
             catch (Exception) { }
+
+            CreateTray();
+        }
+
+        /// <summary>
+        /// Tray icon + menu: open / sync now / quit. Double click also opens the window.
+        /// The icon comes from abbeyroad.ico next to the exe; SystemIcons.Application
+        /// is the fallback when the ico is missing or unreadable.
+        /// </summary>
+        private void CreateTray()
+        {
+            try
+            {
+                ContextMenuStrip menu = new ContextMenuStrip();
+                menu.Items.Add("打开", null, delegate { ShowMainWindow(); });
+                menu.Items.Add("立即同步", null, delegate { RequestSync(); });
+                menu.Items.Add("退出", null, delegate { ExitForReal(); });
+
+                _trayIcon = LoadTrayIcon(out _trayIconOwned);
+                _tray = new NotifyIcon();
+                _tray.Icon = _trayIcon;
+                _tray.Text = AppPaths.Product + " · 课表与日程";
+                _tray.ContextMenuStrip = menu;
+                _tray.Visible = true;
+                _tray.DoubleClick += delegate { ShowMainWindow(); };
+            }
+            catch (Exception ex)
+            {
+                // A tray-less app is still usable, just not resident.
+                Log.Write("托盘图标创建失败：" + ex.Message);
+            }
+        }
+
+        /// <summary>abbeyroad.ico next to the exe, otherwise the generic app icon.</summary>
+        private static Icon LoadTrayIcon(out bool owned)
+        {
+            owned = false;
+            try
+            {
+                string ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "abbeyroad.ico");
+                if (File.Exists(ico))
+                {
+                    owned = true;
+                    return new Icon(ico);
+                }
+            }
+            catch (Exception) { owned = false; }
+            return SystemIcons.Application;
+        }
+
+        /// <summary>Show, restore and activate the main window (tray "打开" / double click).</summary>
+        public void ShowMainWindow()
+        {
+            try
+            {
+                Show();
+                if (WindowState == FormWindowState.Minimized) { WindowState = FormWindowState.Normal; }
+                Activate();
+                BringToFront();
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>Tray "立即同步": ask the page to run its own sync, no reply expected.</summary>
+        private void RequestSync()
+        {
+            try
+            {
+                if (_web == null || _web.CoreWebView2 == null) { return; }
+                _web.CoreWebView2.ExecuteScriptAsync("try{AR.Sync&&AR.Sync.syncNow()}catch(e){}");
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>Tray "退出": really terminate instead of hiding to the tray.</summary>
+        private void ExitForReal()
+        {
+            _reallyExit = true;
+            try { Close(); }
+            catch (Exception) { Application.Exit(); }
+        }
+
+        /// <summary>Bridge "notify(title, text)" -> tray balloon.</summary>
+        public void ShowNotification(string title, string text)
+        {
+            try
+            {
+                if (_tray == null) { return; }
+                if (string.IsNullOrEmpty(title)) { title = AppPaths.Product; }
+                _tray.ShowBalloonTip(8000, title, text ?? "", ToolTipIcon.Info);
+            }
+            catch (Exception) { }
+        }
+
+        /// <summary>
+        /// Closing the window hides it to the tray instead of quitting, so sync and
+        /// reminders keep running. Only a user initiated close (X / Alt+F4) is turned
+        /// into that: Application.Exit (--selftest, bridge "exitapp"), Windows shutdown
+        /// and the forced quit must still end the process.
+        /// </summary>
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (!_reallyExit && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;
+                Hide();
+                if (!_trayHintShown)
+                {
+                    _trayHintShown = true;
+                    try
+                    {
+                        if (_tray != null)
+                        {
+                            _tray.ShowBalloonTip(4000, AppPaths.Product,
+                                "Allegro 已最小化到托盘，右键图标可退出", ToolTipIcon.Info);
+                        }
+                    }
+                    catch (Exception) { }
+                }
+                return;
+            }
+            base.OnFormClosing(e);
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            try
+            {
+                if (_tray != null)
+                {
+                    ContextMenuStrip menu = _tray.ContextMenuStrip;
+                    _tray.Visible = false;
+                    _tray.ContextMenuStrip = null;
+                    _tray.Dispose();
+                    _tray = null;
+                    if (menu != null) { menu.Dispose(); }
+                }
+                // SystemIcons.Application is a shared icon, never dispose it.
+                if (_trayIcon != null && _trayIconOwned)
+                {
+                    _trayIcon.Dispose();
+                }
+                _trayIcon = null;
+                _trayIconOwned = false;
+            }
+            catch (Exception) { }
+            base.OnFormClosed(e);
         }
 
         public void SetDark(bool dark)
@@ -206,6 +361,8 @@ namespace Allegro
                 + "如提示缺失，请安装「Microsoft Edge WebView2 Runtime」后重试。\n\n"
                 + "详细信息：" + ex.Message,
                 "Allegro", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            // A broken WebView2 must not leave an invisible tray-only app behind.
+            _reallyExit = true;
             Close();
         }
 

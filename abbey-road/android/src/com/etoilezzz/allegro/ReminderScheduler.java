@@ -14,6 +14,7 @@ import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 课前提醒的「排」的那一端。
@@ -25,6 +26,11 @@ import java.util.List;
  *   ① 先取消上一轮排的全部闹钟（课表改过之后不能留下「幽灵通知」）；
  *   ② 逐条用 id 的 hashCode 当 requestCode（同一个 id 天然可覆盖）；
  *   ③ 精确闹钟拿得到就用 setExactAndAllowWhileIdle，拿不到退成 setAndAllowWhileIdle。
+ *
+ * 另外两条和「活过重启」有关的约定：
+ *   · 每条 Intent 带上 channel（class / daily），由 ReminderReceiver 决定用哪个渠道；
+ *   · 成功的 payload 原文存进 SharedPreferences（reminders.last），
+ *     开机或覆盖安装后由 BootReceiver 读回来调用同一个 schedule()。
  *
  * 约束（都是为了让网页传坏数据时进程不死）：
  *   · json 超过 256KB 直接拒绝，不进 JSON 解析；
@@ -42,9 +48,17 @@ final class ReminderScheduler {
     static final String EXTRA_TITLE = "reminder_title";
     static final String EXTRA_TEXT = "reminder_text";
     static final String EXTRA_AT_MS = "reminder_at_ms";
+    /** 这条提醒该进哪个通知渠道：class / daily（老 payload 没有这个字段，按 class 处理）。 */
+    static final String EXTRA_CHANNEL = "reminder_channel";
+
+    /** 和 ReminderReceiver 的渠道 id 一一对应；这里只存「逻辑名字」，不直接存渠道 id。 */
+    static final String CHANNEL_CLASS = "class";
+    static final String CHANNEL_DAILY = "daily";
 
     private static final String PREFS = "abbeyroad_reminders";
     private static final String KEY_CODES = "codes";
+    /** 最后一次成功下发的 JSON：开机后 BootReceiver 靠它把闹钟补回来。 */
+    private static final String KEY_LAST_JSON = "reminders.last";
 
     /** 网页一次性传过来的 JSON 上限（按 UTF-8 字节算） */
     private static final int MAX_JSON_BYTES = 256 * 1024;
@@ -77,6 +91,10 @@ final class ReminderScheduler {
             return "error: invalid json (" + t.getClass().getSimpleName() + ")";
         }
 
+        // 能解析成数组就算「成功收到」：先留档，之后每次开机/更新都由 BootReceiver 重放。
+        // 坏 JSON / 超限的 payload 在上面已经 return，不会覆盖上一份好数据。
+        saveLastJson(ctx, json);
+
         // 先清空上一轮，保证「改了课表 → 旧的提醒不会还在」
         cancelAllInternal(ctx);
 
@@ -104,6 +122,8 @@ final class ReminderScheduler {
                 }
                 String text = o.optString("text", "");
                 if (text == null || "null".equals(text)) { text = ""; }
+                // 老 payload 没有 channel → class；未知值也按 class（保住「课前提醒」的老行为）
+                String channel = normalizeChannel(o.optString("channel", ""));
                 String key = (id == null || id.trim().length() == 0) ? ("reminder-" + atMs) : id.trim();
                 int code = key.hashCode();
 
@@ -113,6 +133,7 @@ final class ReminderScheduler {
                 intent.putExtra(EXTRA_TITLE, clamp(title, 120));
                 intent.putExtra(EXTRA_TEXT, clamp(text, 800));
                 intent.putExtra(EXTRA_AT_MS, atMs);
+                intent.putExtra(EXTRA_CHANNEL, channel);
 
                 if (setAlarm(ctx, code, atMs, intent)) {
                     codes.add(code);
@@ -136,10 +157,29 @@ final class ReminderScheduler {
         if (ctx == null) { return "error: no context"; }
         try {
             cancelAllInternal(ctx);
+            // 用户主动关掉提醒：存档一起清掉，否则重启后 BootReceiver 会把它们又排回来。
+            clearLastJson(ctx);
             return "ok";
         } catch (Throwable t) {
             Log.w(TAG, "取消提醒失败", t);
             return "error: " + t.getClass().getSimpleName();
+        }
+    }
+
+    /**
+     * 读回最后一次成功下发的 JSON（给 BootReceiver 用）。
+     * 没有存档 / 存档损坏 / 读取异常都返回 null，调用方据此「什么也不做」。
+     */
+    static String getLastJson(Context ctx) {
+        if (ctx == null) { return null; }
+        try {
+            String json = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_LAST_JSON, null);
+            if (json == null || json.trim().length() == 0) { return null; }
+            return json;
+        } catch (Throwable t) {
+            Log.w(TAG, "读取提醒存档失败", t);
+            return null;
         }
     }
 
@@ -236,6 +276,32 @@ final class ReminderScheduler {
         } catch (Throwable t) {
             Log.w(TAG, "保存提醒索引失败", t);
         }
+    }
+
+    /** 覆盖上次的 payload 原文（只在 schedule() 解析成功后调用）。 */
+    private static void saveLastJson(Context ctx, String json) {
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString(KEY_LAST_JSON, json).apply();
+        } catch (Throwable t) {
+            Log.w(TAG, "保存提醒存档失败", t);
+        }
+    }
+
+    private static void clearLastJson(Context ctx) {
+        try {
+            ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().remove(KEY_LAST_JSON).apply();
+        } catch (Throwable t) {
+            Log.w(TAG, "清除提醒存档失败", t);
+        }
+    }
+
+    /** "daily" → daily，其余（含 null / 空 / 未知值）→ class。 */
+    private static String normalizeChannel(String raw) {
+        if (raw == null) { return CHANNEL_CLASS; }
+        String v = raw.trim().toLowerCase(Locale.US);
+        return CHANNEL_DAILY.equals(v) ? CHANNEL_DAILY : CHANNEL_CLASS;
     }
 
     private static String clamp(String s, int max) {

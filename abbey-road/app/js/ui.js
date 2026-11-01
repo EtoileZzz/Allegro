@@ -4778,6 +4778,40 @@ var AR = window.AR || (window.AR = {});
   }
 
   /**
+   * v0.5.1：提前量 chips（课程详情 / 日程类型共用）。
+   *   get() → 当前覆盖值，null = 跟随全局
+   *   set(v) → v === null 表示「跟随全局」（由调用方删掉覆盖项）
+   * 写回一律走 AR.Store.notifOverrides() 交出来的对象，不自己读 settings 再整体替换。
+   */
+  function leadChipsRow(label, items, get, set) {
+    var box = el('<div class="field" style="margin-top:14px">'
+      + '<div class="field-label">' + U.escapeHtml(label) + '</div></div>');
+    var row = el('<div class="row gap" style="flex-wrap:wrap;margin-top:4px"></div>');
+    box.appendChild(row);
+    function tag(v) { return (v === null || typeof v === 'undefined') ? 'none' : String(v); }
+    function paint() {
+      var now = tag(get());
+      var bs = row.querySelectorAll('button');
+      for (var i = 0; i < bs.length; i++) {
+        bs[i].classList.toggle('active', bs[i].getAttribute('data-lead') === now);
+      }
+    }
+    for (var i = 0; i < items.length; i++) {
+      (function (o) {
+        var b = el('<button class="chip-btn" type="button" data-lead="' + tag(o.k) + '">'
+          + U.escapeHtml(o.t) + '</button>');
+        b.addEventListener('click', function () {
+          AR.Bridge.haptic('light', b);
+          set(o.k);
+          paint();
+        });
+        row.appendChild(b);
+      })(items[i]);
+    }
+    paint();
+    return box;
+  }
+  /**
    * 新建 / 编辑日程类型（名称 + 颜色）。
    * opts.onClose：被 ✕ / 点遮罩 / 系统返回关掉时调用（U9）。
    *   "保存 / 取消"按钮有自己的回调（onDone），不算 onClose —— 用 settled 区分，
@@ -4833,6 +4867,25 @@ var AR = window.AR || (window.AR = {});
         function (hex) { picked = hex; syncTyColors(); });
     });
     syncTyColors();
+    /* 默认提前（v0.5.1）：只有已存在的类型才有 rec.key；新建的还没落库 → 不显示这一行 */
+    if (rec && rec.key) {
+      var tyKey = rec.key;
+      body.appendChild(leadChipsRow('默认提前', [
+        { k: null, t: '跟随全局' },
+        { k: 0, t: '准时' },
+        { k: 15, t: '15 分' },
+        { k: 60, t: '1 小时' },
+        { k: 1440, t: '1 天' }
+      ], function () {
+        return AR.Store.eventTypeLeadMin(tyKey);
+      }, function (v) {
+        var o = AR.Store.notifOverrides();
+        if (v === null) { delete o.eventTypes[tyKey]; }
+        else { o.eventTypes[tyKey] = { leadMin: v }; }
+        AR.Store.save(true);
+        if (AR.Reminders && AR.Reminders.sync) { AR.Reminders.sync(); }
+      }));
+    }
     openModal({
       title: isEdit ? '编辑类型' : '新建类型', body: body,
       actions: [
@@ -6624,10 +6677,35 @@ var AR = window.AR || (window.AR = {});
         { label: '关闭', onClick: function (close) { close(); } }
       );
     }
+    /* 提醒（v0.5.1）：这门课的上课提前量。课程 id 拿不到就不显示这一行；
+       只读视图是"只列字段"的，编辑控件一律不放。 */
+    var courseId = item.courseId || (item.course && item.course.id);
+    var bodyBox = el('<div>' + body + '</div>');
+    if (courseId && !opts.readOnly) {
+      bodyBox.appendChild(leadChipsRow('提醒', [
+        { k: null, t: '跟随全局' },
+        { k: 5, t: '提前 5' },
+        { k: 10, t: '提前 10' },
+        { k: 20, t: '提前 20' },
+        { k: 30, t: '提前 30' },
+        { k: -1, t: '关闭' }
+      ], function () {
+        var o = AR.Store.notifOverrides();
+        var rec = o.courses[courseId];
+        if (rec && typeof rec.leadMin === 'number' && isFinite(rec.leadMin)) { return rec.leadMin; }
+        return null;
+      }, function (v) {
+        var o = AR.Store.notifOverrides();
+        if (v === null) { delete o.courses[courseId]; }
+        else { o.courses[courseId] = { leadMin: v }; }
+        AR.Store.save(true);
+        if (AR.Reminders && AR.Reminders.sync) { AR.Reminders.sync(); }
+      }));
+    }
     openModal({
       title: item.course.name,
       sub: opts.readOnly ? '课程详情 · 只读' : '课程详情',
-      body: body,
+      body: bodyBox,
       actions: actions
     });
   }
@@ -10338,21 +10416,71 @@ var AR = window.AR || (window.AR = {});
     }
     return '<div class="tk-cells">' + out + '</div>';
   }
+  /**
+   * v0.5.1：分位阈值（纯下标法，不引库）。
+   * 位置 = floor((n-1) * p)：n=1 恒取第 0 个，n=4、p=0.5 时取第 2 个（下标 1）。
+   * arr 必须已从小到大排好序。
+   */
+  function tkPctl(arr, p) {
+    if (!arr || !arr.length) { return 0; }
+    var i = Math.floor((arr.length - 1) * p);
+    if (!(i >= 0)) { i = 0; }                       // 防 NaN
+    if (i > arr.length - 1) { i = arr.length - 1; }
+    return arr[i];
+  }
   /* ── 贡献图：12 周 × 7 天，配色随主题色 ── */
   function tkGhGrid(t) {
     var mon = U.addDays(U.mondayOf(new Date()), -(TK_GH_WEEKS - 1) * 7);
     var cols = '', months = '', lastM = '';
+    var unit = (t.goal && t.goal.unit) || '';
+    var goal = (t.goal && Number(t.goal.target)) || 0;
+    /**
+     * v0.5.1：格子按**量**上色（todoDaySum），不再按次数 —— 记 1 次 50 页和
+     * 记 4 次 1 页不该看起来一样。
+     * 无目标的任务没有"达标"这回事，于是先扫这 12 周里所有**非零日**的量，
+     * 排序后取 p25/p50/p75 当四档的分界。
+     */
+    var vals = [];
+    var w0, wd0, d0, k0, s0;
+    for (w0 = 0; w0 < TK_GH_WEEKS; w0++) {
+      for (wd0 = 0; wd0 < 7; wd0++) {
+        d0 = U.addDays(mon, w0 * 7 + wd0);
+        k0 = U.dateKey(d0);
+        s0 = AR.Store.todoDaySum(t, k0);
+        if (isFinite(s0) && s0 > 0) { vals.push(s0); }
+      }
+    }
+    vals.sort(function (a, b) { return a - b; });
+    var p25 = tkPctl(vals, 0.25), p50 = tkPctl(vals, 0.5), p75 = tkPctl(vals, 0.75);
     for (var w = 0; w < TK_GH_WEEKS; w++) {
       var cells = '';
       for (var wd = 0; wd < 7; wd++) {
         var day = U.addDays(mon, w * 7 + wd);
         var k = U.dateKey(day);
-        var n = AR.Store.todoDayCount(t, k);
+        var sum = AR.Store.todoDaySum(t, k);        // 量：当天未删除记录的 amount 之和（可能为负 = 打卡回退）
+        var cnt = AR.Store.todoDayCount(t, k);      // 次数：只进 tooltip
         var req = AR.Store.todoRequired(t, day);
-        var lv = n === 0 ? 0 : (n === 1 ? 1 : (n === 2 ? 2 : (n === 3 ? 3 : 4)));
-        var cls = n === 0 ? '' : (' l' + lv);
-        if (n === 0 && req === 0) { cls += ' none'; }
-        cells += '<i class="tk-gh-cell' + cls + '" title="' + k + ' · ' + (n ? n + ' 次' : '未记录') + '"></i>';
+        var lv = 0;
+        if (sum > 0) {
+          if (goal > 0 && isFinite(req) && req > 0) {
+            /* 有目标：按今天的完成比例分四档，夹到 1..4（sum 再大也不越界） */
+            lv = Math.max(1, Math.min(4, Math.ceil(Math.min(1, sum / goal) * 4)));
+          } else {
+            /* 无目标（或今天本来就不要求做）：用 12 周内的分位阈值 */
+            lv = sum <= p25 ? 1 : (sum <= p50 ? 2 : (sum <= p75 ? 3 : 4));
+          }
+        } else if (cnt > 0) {
+          /* 净增 ≤ 0 但有记录（回退 / 记了 0）→ 最浅一档，且**不加** none */
+          lv = 1;
+        }
+        var cls = lv > 0 ? (' l' + lv) : '';
+        /* 保住原来的灰底：这天既不要求做、也一条记录都没有 */
+        if (lv === 0 && cnt === 0 && req === 0) { cls += ' none'; }
+        var sumTxt = Math.round(sum * 100) / 100;
+        var tip = k + ' · ' + cnt + ' 次' + (sum ? (' · 共 ' + sumTxt + unit) : '');
+        /* 有记录但净增为 0（回退平账 / 记了 0）：tooltip 说清楚，别让用户以为没记上 */
+        if (sum === 0 && cnt > 0) { tip += '（净增 0）'; }
+        cells += '<i class="tk-gh-cell' + cls + '" title="' + U.escapeHtml(tip) + '"></i>';
       }
       var mk = (function (dd) { var p = U.dateKey(dd).split('-'); return Number(p[1]) + '月'; })(U.addDays(mon, w * 7));
       if (w === 0 || mk !== lastM) { months += '<span>' + mk + '</span>'; lastM = mk; }
@@ -11153,6 +11281,92 @@ var AR = window.AR || (window.AR = {});
     };
     if (typeof requestAnimationFrame === 'function') { requestAnimationFrame(go); } else { go(); }
   }
+  /* ══════════ 任务的提醒设置（v0.5.1） ══════════
+     静音 / 只在没完成时提醒 / 自定义时间点（最多 3 个）。
+     写回**一律**走 AR.Store.notifOverrides() 交出来的那个对象：
+     它已补齐 courses / tasks / taskDates / eventTypes，往 .tasks[id] 上挂字段，
+     别的任务、别的课程类型的覆盖项一个都不会丢。
+     不要自己读 settings 再整体替换 —— 那样会把别人的覆盖项覆盖成空。 */
+  var TK_TASK_TIMES_MAX = 3;
+  function tkTaskNotifBlock(t) {
+    var box = el('<div></div>');
+    /* el() 只取第一个根节点，所以标题和说明分两次 append */
+    box.appendChild(el('<div class="field-label" style="margin-top:16px">提醒</div>'));
+    box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">'
+      + '不设时间点 = 跟着「每日提醒」的汇总走；设了就额外在这些点单独提醒这个任务。</p>'));
+    var nf = AR.Store.taskNotif(t.id);
+    var mute = nf.mute === true;
+    var only = nf.onlyWhenPending !== false;
+    function normTimes(list) {
+      var out = (AR.Reminders && AR.Reminders.normTimes) ? AR.Reminders.normTimes(list) : list;
+      return (out || []).slice(0, TK_TASK_TIMES_MAX);
+    }
+    var draft = normTimes(nf.times);
+    /* 存盘：只碰 .tasks[t.id] 这一个格子 */
+    function save() {
+      var o = AR.Store.notifOverrides();
+      var rec = o.tasks[t.id] || (o.tasks[t.id] = {});
+      rec.times = normTimes(draft);
+      rec.mute = !!mute;
+      rec.onlyWhenPending = !!only;
+      AR.Store.save(true);
+      if (AR.Reminders && AR.Reminders.sync) { AR.Reminders.sync(); }
+    }
+    function switchRow(label, checked, onChange) {
+      var row = el('<div class="row gap" style="align-items:center;justify-content:space-between;margin-top:8px">'
+        + '<span style="font-size:13px">' + U.escapeHtml(label) + '</span>'
+        + '<label class="switch sm"><input type="checkbox"' + (checked ? ' checked' : '') + '>'
+        + '<span class="track"></span><span class="knob"></span></label></div>');
+      row.querySelector('input').addEventListener('change', function (ev) {
+        AR.Bridge.haptic('light', row);
+        onChange(ev.currentTarget.checked);
+      });
+      return row;
+    }
+    box.appendChild(switchRow('静音这个任务的提醒', mute, function (v) { mute = v; save(); }));
+    box.appendChild(switchRow('只在没完成时提醒', only, function (v) { only = v; save(); }));
+    box.appendChild(el('<div class="field-label" style="margin-top:12px">自定义时间点</div>'));
+    var listBox = el('<div></div>');
+    function paintTimes() {
+      listBox.innerHTML = '';
+      for (var i = 0; i < draft.length; i++) {
+        (function (idx) {
+          var row = el('<div class="row gap" style="align-items:center;margin-top:6px">'
+            + '<input class="input" type="time" style="flex:0 0 118px">'
+            + '<button class="chip-btn" type="button">×</button></div>');
+          var inp = row.querySelector('input');
+          inp.value = draft[idx] || '';
+          inp.addEventListener('change', function () {
+            draft[idx] = inp.value || '';
+            save();
+          });
+          row.querySelector('button').addEventListener('click', function () {
+            AR.Bridge.haptic('light', listBox);
+            draft.splice(idx, 1);
+            save();
+            paintTimes();
+          });
+          listBox.appendChild(row);
+        })(i);
+      }
+      var foot = el('<div class="row gap" style="align-items:center;margin-top:8px"></div>');
+      var addBtn = el('<button class="chip-btn" type="button">+ 添加时间</button>');
+      addBtn.addEventListener('click', function () {
+        if (draft.length >= TK_TASK_TIMES_MAX) { toast('最多 ' + TK_TASK_TIMES_MAX + ' 个时间点'); return; }
+        AR.Bridge.haptic('light', addBtn);
+        draft.push('');
+        paintTimes();
+      });
+      foot.appendChild(addBtn);
+      if (draft.length >= TK_TASK_TIMES_MAX) {
+        foot.appendChild(el('<span class="muted" style="font-size:12px">最多 ' + TK_TASK_TIMES_MAX + ' 个</span>'));
+      }
+      listBox.appendChild(foot);
+    }
+    paintTimes();
+    box.appendChild(listBox);
+    return box;
+  }
   function openTaskEdit(t) {
     var isNew = !t;
     var src = t || { text: '', colorKey: '#5B8DEF', cadence: null, goal: null };
@@ -11323,6 +11537,8 @@ var AR = window.AR || (window.AR = {});
       }
       paintRecs();
       body.appendChild(recBox);
+      /* 提醒放在弹窗内容最末（新建时还没有 id，存不了覆盖项，所以只在编辑时出现） */
+      body.appendChild(tkTaskNotifBlock(src));
     }
     var acts = [{
       label: isNew ? '创建' : '保存', kind: 'primary',

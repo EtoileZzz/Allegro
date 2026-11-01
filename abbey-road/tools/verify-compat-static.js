@@ -550,6 +550,50 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C139 未连接时也能看到「自动同步」（两种状态都渲染）',
     (panelsSync.match(/appendAutoSync\(\);/g) || []).length >= 2);
   const bootSync = fs.readFileSync(path.join(appDir, 'js/boot.js'), 'utf8');
+  /* ── 0.5.1：提醒个性化 / 每日提醒 / 同步范围 ── */
+  const core51 = coreSync;
+  /* ── 0.5.1 原生 / 界面接线 ── */
+  const mani = fs.readFileSync(path.join(root5, 'android/AndroidManifest.xml'), 'utf8');
+  const schedJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderScheduler.java'), 'utf8');
+  const recvJava = fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/ReminderReceiver.java'), 'utf8');
+  ok('C156 开机后会重排闹钟（BOOT_COMPLETED + BootReceiver）',
+    mani.indexOf('RECEIVE_BOOT_COMPLETED') >= 0 && mani.indexOf('BootReceiver') >= 0
+    && fs.existsSync(path.join(root5, 'android/src/com/etoilezzz/allegro/BootReceiver.java')));
+  ok('C157 通知双渠道（课前 / 每日）',
+    recvJava.indexOf('class_reminders') >= 0 && recvJava.indexOf('daily_reminders') >= 0
+    && schedJava.indexOf('reminder_channel') >= 0);
+  ok('C158 每日提醒条目会带 channel 字段',
+    fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8').indexOf("channel: 'daily'") >= 0,
+    'reminders.js 未找到 channel: daily');
+  ok('C159 热力图按「量」上色（用 todoDaySum，不再按次数）',
+    fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8').indexOf('todoDaySum(t, k)') >= 0);
+  ok('C160 设置面板有每日提醒 / 静默同步 / 仅数据三项',
+    panelsSync.indexOf('每日提醒') >= 0 && panelsSync.indexOf('静默同步') >= 0 && panelsSync.indexOf('仅数据') >= 0);
+  const winForm = fs.readFileSync(path.join(root5, 'windows/src/MainForm.cs'), 'utf8');
+  const instCs = fs.readFileSync(path.join(root5, 'windows/installer/Installer.cs'), 'utf8');
+  ok('C161 Windows 托盘常驻 + 关闭到托盘',
+    winForm.indexOf('NotifyIcon') >= 0 && winForm.indexOf('Hide()') >= 0);
+  ok('C162 Windows 系统通知 + 开机自启（Run 注册表）',
+    fs.readFileSync(path.join(root5, 'windows/src/WebBridge.cs'), 'utf8').indexOf('CurrentVersion\\Run') >= 0
+    && instCs.indexOf('Autostart') >= 0);
+  ok('C149 core 暴露通知个性化 API',
+    ['notifDaily', 'notifOverrides', 'courseLeadMin', 'taskNotif', 'legacyTaskLeadHours', 'eventTypeLeadMin', 'todoDaySum']
+      .every((k) => core51.indexOf(k + ': ' + k) >= 0 || core51.indexOf('function ' + k) >= 0));
+  ok('C150 默认设置含 daily + overrides',
+    core51.indexOf('daily: {') >= 0 && core51.indexOf('overrides: { v: 1') >= 0);
+  ok('C151 老存档会补默认（migrate 调 ensureNotifExtras）',
+    core51.indexOf('ensureNotifExtras(s)') >= 0);
+  ok('C152 合并后重映射课程覆盖 + 清孤儿',
+    core51.indexOf('remapCourseOverrides(plan.maps.course)') >= 0 && core51.indexOf('cleanOrphanOverrides()') >= 0);
+  const remSrc = fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8');
+  ok('C153 提醒调度支持四类来源（课程/每日/任务/到期）',
+    remSrc.indexOf('daily-') >= 0 && remSrc.indexOf('task-') >= 0 && remSrc.indexOf('due-') >= 0
+    && remSrc.indexOf('courseLeadMin') >= 0);
+  ok('C154 提醒条目带 channel 字段（原生双渠道）',
+    remSrc.indexOf("channel: 'class'") >= 0 && remSrc.indexOf("channel: 'daily'") >= 0);
+  ok('C155 云同步有静默 + 仅数据范围',
+    syncSrc.indexOf('silent') >= 0 && syncSrc.indexOf("cfg.scope !== 'data'") >= 0
+    && syncSrc.indexOf("delete payload.settings") >= 0);
   ok('C146 打卡记录用自分时间戳合并（否则删除/撤销同步不出去）',
     coreSync.indexOf('function entryStamp') >= 0 && coreSync.indexOf('entryStamp(e) > entryStamp(out[at])') >= 0);
   ok('C147 删除/撤销打卡都会写条目自己的 updatedAt',

@@ -89,10 +89,13 @@ function makeStore(seed) {
       }
     }
   }
+  const meta = { lastOpts: null };
   return {
     data: st,
-    exportPayload() { return JSON.parse(JSON.stringify(st)); },
-    planMerge(incoming) {
+    meta: meta,
+    exportPayload() { const out = JSON.parse(JSON.stringify(st)); meta.lastPayload = out; return out; },
+    planMerge(incoming, opts) {
+      meta.lastOpts = opts || {};
       const plan = { additions: [], updates: [], conflicts: [] };
       TABLES.forEach(t => {
         (incoming[t] || []).forEach(rec => {
@@ -130,10 +133,11 @@ function makeDevice(name, store, server, opts) {
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  const AR = { Store: store, Const: { APP_VERSION: '0.4.6' } };
+  const toasts = [];
+  const AR = { Store: store, Const: { APP_VERSION: '0.5.1' }, UI: { toast: (m) => toasts.push(String(m)) } };
   sandbox.window.AR = AR;
   vm.runInContext(SRC, sandbox, { filename: 'sync.js' });
-  return { name, AR, Sync: AR.Sync, ls: lsData };
+  return { name, AR, Sync: AR.Sync, ls: lsData, toasts: toasts, meta: store.meta || { lastOpts: null } };
 }
 
 function configure(dev, opts) {
@@ -340,6 +344,40 @@ function configure(dev, opts) {
     configure(dev);
     const j = await dev.Sync.ping('https://sync.test');
     ok('S30 health 自检通过', j && j.ok === true && j.db === true, JSON.stringify(j));
+  }
+
+  /* ── 12. 静默同步 / 仅数据范围（v0.5.1）── */
+  {
+    const srv = makeServer();
+    const store = makeStore({ tasks2: [], settings: { appearance: { theme: 'dark' } } });
+    const dev = makeDevice('S1', store, srv);
+    configure(dev);
+    dev.Sync.setConfig({ silent: false });
+    dev.toasts.length = 0;
+    await dev.Sync.syncNow();
+    ok('S31 非静默：同步成功会提示一次', dev.toasts.length === 1, JSON.stringify(dev.toasts));
+
+    dev.toasts.length = 0;
+    dev.Sync.setConfig({ silent: true });
+    await dev.Sync.syncNow();
+    ok('S32 静默：同步成功不提示', dev.toasts.length === 0, JSON.stringify(dev.toasts));
+
+    /* 仅数据：payload 不含 settings，且拉取时不合并设置 */
+    dev.Sync.setConfig({ scope: 'data', silent: true });
+    await dev.Sync.syncNow();
+    ok('S33 仅数据：上传的 payload 里没有 settings',
+      store.meta.lastPayload && store.meta.lastPayload.settings === undefined,
+      JSON.stringify(Object.keys(store.meta.lastPayload || {})));
+    await dev.Sync.pullOnly();
+    ok('S34 仅数据：拉取时 mergeSettings === false',
+      store.meta.lastOpts && store.meta.lastOpts.mergeSettings === false,
+      JSON.stringify(store.meta.lastOpts));
+
+    dev.Sync.setConfig({ scope: 'all' });
+    await dev.Sync.pullOnly();
+    ok('S35 全部范围：mergeSettings 恢复为 true',
+      store.meta.lastOpts && store.meta.lastOpts.mergeSettings === true,
+      JSON.stringify(store.meta.lastOpts));
   }
 
   console.log('');

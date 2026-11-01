@@ -2928,6 +2928,22 @@ function renderLongTaskList(host) {
   function panelNotify() {
     var box = el('<div></div>');
     var n = S.settings.notifications;
+    var reminders = AR.Reminders || null;
+    var maxTimes = (reminders && reminders.MAX_DAILY_TIMES) || 4;
+
+    /**
+     * 写下 daily 的某个字段 → 落盘 → 重排系统闹钟。
+     * 每日提醒的所有改动都走这里，免得每处各写一遍（sync 是防抖的，多点几下也只排一次）。
+     */
+    function writeDaily(patch) {
+      if (!n.daily || typeof n.daily !== 'object') { n.daily = {}; }
+      for (var k in patch) {
+        if (Object.prototype.hasOwnProperty.call(patch, k)) { n.daily[k] = patch[k]; }
+      }
+      AR.Store.save(true);
+      if (reminders && reminders.sync) { reminders.sync(); }
+    }
+
     box.appendChild(rowSwitch('课前提醒', '在每节课开始前提醒（需要系统通知权限）', n.enabled, function (v) {
       n.enabled = v; AR.Store.save(true);
     }));
@@ -2936,6 +2952,102 @@ function renderLongTaskList(host) {
       n.defaultOffset = v; AR.Store.save();
     }));
     box.appendChild(el('<p class="muted">提醒依赖系统日历 / 通知；在 OPPO 等机型上需要在系统设置里允许后台运行。</p>'));
+
+    /* ── 每日提醒（v0.5.1）── */
+    var dl = AR.Store.notifDaily();
+    var times = dl.times;
+    box.appendChild(el('<div class="field-label" style="margin-top:16px">每日定时</div>'));
+    box.appendChild(rowSwitch('每日提醒', '每天在固定时间点提醒今天还差什么', dl.enabled, function (v) {
+      if (!n.daily || typeof n.daily !== 'object') { n.daily = {}; }
+      n.daily.enabled = v;
+      /* 打开时先要通知权限（enable 会顺带排一次），再手动排一次，最后落盘 */
+      if (v && reminders && reminders.enable) { reminders.enable(); }
+      if (reminders && reminders.sync) { reminders.sync(); }
+      AR.Store.save(true);
+      AR.Bridge.haptic('medium', box);
+      renderSettings();
+    }));
+
+    /* 时间点列表：一行一个 HH:MM + 删除 */
+    for (var ti = 0; ti < times.length; ti++) {
+      (function (hm) {
+        var row = el('<div class="row gap" style="align-items:center;justify-content:space-between;padding:6px 0">'
+          + '<span style="font-variant-numeric:tabular-nums">' + esc(hm) + '</span></div>');
+        var del = el('<button class="chip-btn" type="button" title="删掉这个时间点">×</button>');
+        del.disabled = times.length <= 1;   /* 至少留一个，不然开了也不会响 */
+        del.addEventListener('click', function () {
+          var left = [];
+          for (var k = 0; k < times.length; k++) { if (times[k] !== hm) { left.push(times[k]); } }
+          writeDaily({ times: reminders ? reminders.normTimes(left) : left });
+          AR.Bridge.haptic('light', del);
+          renderSettings();
+        });
+        row.appendChild(del);
+        box.appendChild(row);
+      })(times[ti]);
+    }
+
+    /* 添加：type=time 在 Android WebView 里会调起原生时间选择，不用自己写键盘 */
+    if (times.length < maxTimes) {
+      var addRow = el('<div class="row gap" style="align-items:center;margin-top:6px"></div>');
+      var addInput = el('<input class="input" type="time" style="flex:1 1 auto;min-width:0">');
+      var addBtn = el('<button class="btn sm" type="button">＋ 添加时间</button>');
+      addRow.appendChild(addInput);
+      addRow.appendChild(addBtn);
+      box.appendChild(addRow);
+      addBtn.addEventListener('click', function () {
+        var raw = String(addInput.value || '').trim();
+        /* 有的浏览器会给到 HH:MM:SS，取前两段就够，规范化交给 normTimes */
+        var m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(raw);
+        if (!m) { AR.UI.toast('先选一个时间（HH:MM）'); return; }
+        raw = m[1] + ':' + m[2];
+        var next = reminders ? reminders.normTimes(times.concat([raw])) : times.concat([raw]);
+        if (next.length === times.length) { AR.UI.toast('这个时间点已经有了'); return; }
+        writeDaily({ times: next });
+        AR.Bridge.haptic('light', addBtn);
+        renderSettings();
+      });
+    } else {
+      box.appendChild(el('<p class="muted">最多 ' + maxTimes + ' 个时间点。</p>'));
+    }
+
+    /* 提醒方式 */
+    box.appendChild(el('<div class="field-label" style="margin-top:12px">提醒方式</div>'));
+    var modeRow = el('<div class="row gap wrap"></div>');
+    var MODES = [{ v: 'pending', t: '只报未完成' }, { v: 'always', t: '每天都提醒' }];
+    for (var mi = 0; mi < MODES.length; mi++) {
+      (function (m) {
+        var b = el('<button class="chip-btn' + (dl.mode === m.v ? ' active' : '') + '" type="button">' + esc(m.t) + '</button>');
+        b.addEventListener('click', function () {
+          var sibs = modeRow.querySelectorAll('.chip-btn');
+          for (var k = 0; k < sibs.length; k++) { sibs[k].classList.remove('active'); }
+          b.classList.add('active');
+          AR.Bridge.haptic('light', b);
+          writeDaily({ mode: m.v });
+        });
+        modeRow.appendChild(b);
+      })(MODES[mi]);
+    }
+    box.appendChild(modeRow);
+
+    /* 三个小开关 */
+    box.appendChild(rowSwitch('全部完成就不提醒', '今天的任务都做完了，到点也别打扰', dl.skipWhenDone, function (v) {
+      writeDaily({ skipWhenDone: v });
+    }));
+    box.appendChild(rowSwitch('顺带报今天有几节课', '文案里带上当天上几节课', dl.includeEvents, function (v) {
+      writeDaily({ includeEvents: v });
+      renderSettings();   /* 预览那句文案跟着 includeEvents 变 */
+    }));
+    box.appendChild(rowSwitch('只在周一到周五', '周末不提醒', dl.weekdaysOnly, function (v) {
+      writeDaily({ weekdaysOnly: v });
+    }));
+
+    /* 预览：下次提醒 */
+    var sum = null;
+    try { sum = (reminders && reminders.summary) ? reminders.summary(new Date()) : null; } catch (e) { sum = null; }
+    box.appendChild(el('<p class="muted">下次提醒：今天 ' + esc(times[0] || '—')
+      + ' · ' + esc((sum && sum.title) || '今天没有待办') + '</p>'));
+
     return panel('提醒与通知', box, 'notify');
   }
 
@@ -2977,7 +3089,7 @@ function renderLongTaskList(host) {
   function panelCloudSync() {
     var box = el('<div></div>');
     var synced = !!(AR.Sync && AR.Sync.isConfigured && AR.Sync.isConfigured());
-    var cfg = (AR.Sync && AR.Sync.config) ? AR.Sync.config() : { baseUrl: '', token: '', hasPass: false, autoMode: 'open', autoMin: 5, rememberPass: true };
+    var cfg = (AR.Sync && AR.Sync.config) ? AR.Sync.config() : { baseUrl: '', token: '', hasPass: false, autoMode: 'open', autoMin: 5, rememberPass: true, silent: false, scope: 'all' };
     var st = (AR.Sync && AR.Sync.status) ? AR.Sync.status() : {};
 
     function fmtTime(ms) {
@@ -3063,6 +3175,38 @@ function renderLongTaskList(host) {
         box.appendChild(minRow);
       }
     }
+
+    /**
+     * 静默同步 + 同步范围（v0.5.1）。
+     * 和 appendAutoSync 一样：未连接时也能先选，连接后生效。
+     */
+    function appendSyncPrefs() {
+      box.appendChild(rowSwitch('静默同步', '开启后同步成功不弹提示（失败仍会提示）',
+        cfg.silent === true, function (v) {
+          AR.Sync.setConfig({ silent: v });
+          renderSettings();
+        }));
+      box.appendChild(el('<div class="field-label" style="margin-top:12px">同步范围</div>'));
+      var SCOPES = [
+        { v: 'all', t: '全部（含设置）' },
+        { v: 'data', t: '仅数据' }
+      ];
+      var curScope = cfg.scope === 'data' ? 'data' : 'all';
+      var scopeRow = el('<div class="row gap wrap"></div>');
+      for (var si = 0; si < SCOPES.length; si++) {
+        (function (m) {
+          var b = el('<button class="chip-btn' + (curScope === m.v ? ' active' : '') + '" type="button">'
+            + esc(m.t) + '</button>');
+          b.addEventListener('click', function () {
+            AR.Sync.setConfig({ scope: m.v });
+            renderSettings();
+          });
+          scopeRow.appendChild(b);
+        })(SCOPES[si]);
+      }
+      box.appendChild(scopeRow);
+      box.appendChild(el('<p class="muted">仅数据：课表/任务/日程会同步，主题、提醒等设置留在本机</p>'));
+    }
     if (!synced) {
       /* ── 未配置：引导表单 ── */
       box.appendChild(el('<p class="muted">填好这三项就能同步。数据在设备上加密（AES-256-GCM，PBKDF2 310k 轮），'
@@ -3104,6 +3248,7 @@ function renderLongTaskList(host) {
         });
       });
       appendAutoSync();
+      appendSyncPrefs();
       box.appendChild(el('<p class="muted">口令请自己存进密码管理器。它默认只保存在本机（上面那个开关可以关掉）。</p>'));
       return panel('云同步', box, 'cloud');
     }
@@ -3123,6 +3268,7 @@ function renderLongTaskList(host) {
       + '</p>'));
 
     appendAutoSync();
+    appendSyncPrefs();
 
     /* 动作按钮 */
     var row = el('<div class="row gap"></div>');

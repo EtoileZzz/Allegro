@@ -23,9 +23,12 @@ namespace AllegroSetup
         // 安装器是单独编译的（只编 installer/Installer.cs，拿不到 AppPaths），
         // 所以这里是独立的版本来源 —— 发布时与 windows/build.ps1 的 $version、
         // app/js/core.js 的 APP_VERSION、windows/src/AppPaths.cs 的 FallbackVersion 手工同步。
-        internal const string Version = "0.5.0";
+        internal const string Version = "0.5.1";
         private const string ExeName = "Allegro.exe";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Allegro";
+        // Same key / value name the app itself uses for bridge "setAutostart".
+        private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+        private const string AutostartValueName = "Allegro";
 
         private static string DefaultDir
         {
@@ -86,6 +89,12 @@ namespace AllegroSetup
 
         public static string DoInstall(string targetDir)
         {
+            // Silent install has no UI, so it counts as "autostart unchecked".
+            return DoInstall(targetDir, false);
+        }
+
+        public static string DoInstall(string targetDir, bool autostart)
+        {
             Directory.CreateDirectory(targetDir);
             ExtractPayload(targetDir);
             string exe = Path.Combine(targetDir, ExeName);
@@ -94,6 +103,7 @@ namespace AllegroSetup
             CreateShortcut(Path.Combine(StartMenuDir(), Product + ".lnk"), exe, targetDir);
             CreateShortcut(Path.Combine(DesktopDir(), Product + ".lnk"), exe, targetDir);
             WriteUninstallInfo(targetDir, exe);
+            ApplyAutostart(exe, autostart);
             return exe;
         }
 
@@ -145,6 +155,7 @@ namespace AllegroSetup
 
             TryDelete(Path.Combine(StartMenuDir(), Product + ".lnk"));
             TryDelete(Path.Combine(DesktopDir(), Product + ".lnk"));
+            RemoveAutostart();
             try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch (Exception) { }
 
             // 安装目录可能被占用，重试几次
@@ -241,6 +252,38 @@ namespace AllegroSetup
             catch (Exception) { }
         }
 
+        /// <summary>
+        /// Writes or removes HKCU\...\Run\Allegro. Checked -> quoted path of the
+        /// installed exe; unchecked -> make sure no stale entry is left behind.
+        /// </summary>
+        private static void ApplyAutostart(string exe, bool on)
+        {
+            if (!on) { RemoveAutostart(); return; }
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKey))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue(AutostartValueName, "\"" + exe + "\"", RegistryValueKind.String);
+                    }
+                }
+            }
+            catch (Exception) { }
+        }
+
+        private static void RemoveAutostart()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, true))
+                {
+                    if (key != null) { key.DeleteValue(AutostartValueName, false); }
+                }
+            }
+            catch (Exception) { }
+        }
+
         public static string DefaultInstallDir { get { return DefaultDir; } }
     }
 
@@ -254,6 +297,7 @@ namespace AllegroSetup
         private Button _uninstall;
         private Button _close;
         private CheckBox _launch;
+        private CheckBox _autostart;
 
         public SetupForm()
         {
@@ -264,7 +308,7 @@ namespace AllegroSetup
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) { s = g.DpiX / 96f; }
             Func<int, int> B = v => (int)Math.Round(v * s);
             Width = B(560);
-            Height = B(330);
+            Height = B(360);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -325,15 +369,22 @@ namespace AllegroSetup
             _launch.SetBounds(B(24), B(212), B(300), B(24));
             Controls.Add(_launch);
 
+            // Autostart is opt-in: it writes HKCU\...\Run\Allegro only when ticked.
+            _autostart = new CheckBox();
+            _autostart.Text = "开机时自动启动 Allegro";
+            _autostart.Checked = false;
+            _autostart.SetBounds(B(24), B(240), B(340), B(24));
+            Controls.Add(_autostart);
+
             _install = new Button();
             _install.Text = "安装";
-            _install.SetBounds(B(250), B(248), B(90), B(32));
+            _install.SetBounds(B(250), B(278), B(90), B(32));
             _install.Click += delegate { RunInstall(); };
             Controls.Add(_install);
 
             _uninstall = new Button();
             _uninstall.Text = "卸载";
-            _uninstall.SetBounds(B(346), B(248), B(90), B(32));
+            _uninstall.SetBounds(B(346), B(278), B(90), B(32));
             _uninstall.Click += delegate
             {
                 _status.Text = "正在卸载…";
@@ -345,7 +396,7 @@ namespace AllegroSetup
 
             _close = new Button();
             _close.Text = "退出";
-            _close.SetBounds(B(442), B(248), B(80), B(32));
+            _close.SetBounds(B(442), B(278), B(80), B(32));
             _close.Click += delegate { Close(); };
             Controls.Add(_close);
         }
@@ -358,7 +409,7 @@ namespace AllegroSetup
                 _status.Text = "正在复制文件…";
                 _bar.Value = 30;
                 Application.DoEvents();
-                string exe = Program.DoInstall(_path.Text);
+                string exe = Program.DoInstall(_path.Text, _autostart.Checked);
                 _bar.Value = 100;
                 _status.Text = "安装完成：" + exe;
                 if (_launch.Checked)

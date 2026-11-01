@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.5.0';
+var APP_VERSION = '0.5.1';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -291,7 +291,21 @@ var APP_VERSION = '0.5.0';
         colors: { near: '#E5484D', soon: '#D9A22B', live: '#5B8DEF' }
       },
       haptics: { enabled: true, intensity: 'medium' },
-      notifications: { enabled: false, defaultOffset: 15 },
+      notifications: {
+        enabled: false,
+        defaultOffset: 15,
+        /* v0.5.1：每日定时提醒 */
+        daily: {
+          enabled: false,
+          times: ['07:30', '21:00'],
+          mode: 'pending',
+          skipWhenDone: true,
+          includeEvents: true,
+          weekdaysOnly: false
+        },
+        /* v0.5.1：个性化覆盖（只存与全局不同的部分） */
+        overrides: { v: 1, courses: {}, tasks: {}, taskDates: {}, eventTypes: {} }
+      },
       /**
        * 实验性功能（开关和设置都在 开发者模式 里，普通设置页看不到）。
        * customTab：导入完课表后，把底栏 / 左侧栏的「导入」标签换成「模块」页 ——
@@ -764,6 +778,152 @@ function todoLongList() { return todoDailyList(); }
     return out;
   }
   /** 某天完成几次（一笔算一次；amount 只用于累计量） */
+  /* ══ v0.5.1 通知个性化 / 每日提醒 的读取与清理 ══ */
+
+  /** 每日提醒设置（补全默认值，永不返回 null） */
+  function notifDaily() {
+    var st = (state && state.settings && state.settings.notifications) || {};
+    var d = st.daily || {};
+    return {
+      enabled: d.enabled === true,
+      times: Array.isArray(d.times) ? d.times.slice() : ['07:30', '21:00'],
+      mode: d.mode === 'always' ? 'always' : 'pending',
+      skipWhenDone: d.skipWhenDone !== false,
+      includeEvents: d.includeEvents !== false,
+      weekdaysOnly: d.weekdaysOnly === true
+    };
+  }
+
+  /** 个性化覆盖表（补齐 shape） */
+  function notifOverrides() {
+    var st = (state && state.settings && state.settings.notifications) || null;
+    if (!st) { return { v: 1, courses: {}, tasks: {}, taskDates: {}, eventTypes: {} }; }
+    if (!st.overrides || typeof st.overrides !== 'object') {
+      st.overrides = { v: 1, courses: {}, tasks: {}, taskDates: {}, eventTypes: {} };
+    }
+    var o = st.overrides;
+    if (!o.courses || typeof o.courses !== 'object') { o.courses = {}; }
+    if (!o.tasks || typeof o.tasks !== 'object') { o.tasks = {}; }
+    if (!o.taskDates || typeof o.taskDates !== 'object') { o.taskDates = {}; }
+    if (!o.eventTypes || typeof o.eventTypes !== 'object') { o.eventTypes = {}; }
+    if (!o.v) { o.v = 1; }
+    return o;
+  }
+
+  /** 某门课实际生效的提前量；-1 = 该课不提醒 */
+  function courseLeadMin(courseId) {
+    var o = notifOverrides();
+    var rec = o.courses[courseId];
+    if (rec && typeof rec.leadMin === 'number' && isFinite(rec.leadMin)) { return rec.leadMin; }
+    var st = (state.settings && state.settings.notifications) || {};
+    var d = Number(st.defaultOffset);
+    return isFinite(d) && d >= 0 ? d : 15;
+  }
+
+  /** 某个统一任务的提醒设置 */
+  function taskNotif(taskId) {
+    var o = notifOverrides();
+    var rec = o.tasks[taskId] || {};
+    return {
+      times: Array.isArray(rec.times) ? rec.times.slice() : [],
+      mute: rec.mute === true,
+      onlyWhenPending: rec.onlyWhenPending !== false
+    };
+  }
+
+  /** 旧作业条目的到期提前小时数；null = 未设置 */
+  function legacyTaskLeadHours(taskId) {
+    var o = notifOverrides();
+    var rec = o.taskDates[taskId];
+    if (rec && typeof rec.leadHours === 'number' && isFinite(rec.leadHours)) { return rec.leadHours; }
+    return null;
+  }
+
+  /** 日程类型默认提前量；null = 未设置 */
+  function eventTypeLeadMin(typeKey) {
+    var o = notifOverrides();
+    var rec = o.eventTypes[typeKey];
+    if (rec && typeof rec.leadMin === 'number' && isFinite(rec.leadMin)) { return rec.leadMin; }
+    return null;
+  }
+
+  /** 老存档补默认：给 s 补齐 notifications.daily / overrides */
+  function ensureNotifExtras(s) {
+    if (!s || !s.settings) { return s; }
+    if (!s.settings.notifications || typeof s.settings.notifications !== 'object') {
+      s.settings.notifications = { enabled: false, defaultOffset: 15 };
+    }
+    var nn = s.settings.notifications;
+    if (!nn.daily || typeof nn.daily !== 'object') {
+      nn.daily = { enabled: false, times: ['07:30', '21:00'], mode: 'pending',
+        skipWhenDone: true, includeEvents: true, weekdaysOnly: false };
+    } else {
+      if (!Array.isArray(nn.daily.times)) { nn.daily.times = ['07:30', '21:00']; }
+      if (typeof nn.daily.skipWhenDone !== 'boolean') { nn.daily.skipWhenDone = true; }
+      if (typeof nn.daily.includeEvents !== 'boolean') { nn.daily.includeEvents = true; }
+      if (typeof nn.daily.weekdaysOnly !== 'boolean') { nn.daily.weekdaysOnly = false; }
+      if (nn.daily.mode !== 'always') { nn.daily.mode = 'pending'; }
+      nn.daily.enabled = nn.daily.enabled === true;
+    }
+    if (!nn.overrides || typeof nn.overrides !== 'object') {
+      nn.overrides = { v: 1, courses: {}, tasks: {}, taskDates: {}, eventTypes: {} };
+    } else {
+      var o = nn.overrides;
+      if (!o.v) { o.v = 1; }
+      ['courses', 'tasks', 'taskDates', 'eventTypes'].forEach(function (k) {
+        if (!o[k] || typeof o[k] !== 'object') { o[k] = {}; }
+      });
+    }
+    return s;
+  }
+
+  /** 清理指向不存在/已删除记录的覆盖项 */
+  function cleanOrphanOverrides() {
+    var o = notifOverrides();
+    var removed = 0;
+    function alive(table, id) {
+      var list = state[table] || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id && !isDeleted(list[i])) { return true; }
+      }
+      return false;
+    }
+    var k;
+    for (k in o.courses) {
+      if (Object.prototype.hasOwnProperty.call(o.courses, k) && !alive('courses', k)) { delete o.courses[k]; removed++; }
+    }
+    for (k in o.tasks) {
+      if (Object.prototype.hasOwnProperty.call(o.tasks, k) && !alive('tasks2', k)) { delete o.tasks[k]; removed++; }
+    }
+    for (k in o.taskDates) {
+      if (Object.prototype.hasOwnProperty.call(o.taskDates, k) && !alive('tasks', k)) { delete o.taskDates[k]; removed++; }
+    }
+    return removed;
+  }
+
+  /** 课程被重映射时，把覆盖项的 key 一起搬过去 */
+  function remapCourseOverrides(map) {
+    if (!map) { return; }
+    var o = notifOverrides();
+    var keys = Object.keys(o.courses);
+    for (var i = 0; i < keys.length; i++) {
+      var from = keys[i];
+      var to = map[from];
+      if (to && to !== from) { o.courses[to] = o.courses[from]; delete o.courses[from]; }
+    }
+  }
+
+  /** 当天累计的「量」（只算未删除记录） */
+  function todoDaySum(t, dayKey) {
+    var es = todoLiveEntries(t), sum = 0;
+    for (var i = 0; i < es.length; i++) {
+      if (todoEntryDay(es[i]) !== dayKey) { continue; }
+      var a = Number(es[i].amount);
+      if (isFinite(a)) { sum += a; }
+    }
+    return sum;
+  }
+
   function todoDayCount(t, dayKey) {
     var es = todoLiveEntries(t), n = 0;
     for (var i = 0; i < es.length; i++) { if (todoEntryDay(es[i]) === dayKey) { n++; } }
@@ -1361,6 +1521,7 @@ function todoLongList() { return todoDailyList(); }
   function migrate(s, opts) {
     opts = opts || {};
     if (!s.settings) { s.settings = defaultSettings((s.semesters && s.semesters[0] && s.semesters[0].id) || uid()); }
+    ensureNotifExtras(s);   // v0.5.1：每日提醒 / 个性化覆盖补默认
     if (!s.settings.layout) { s.settings.layout = { preset: 'dual-horizontal', followDeviceSuggestion: true }; }
     // v0.1.8：布局只保留「左右 / 上中下」，旧的「自动」「左中右」统一折算成「左右」
     s.settings.layout.preset = (s.settings.layout.preset === 'stacked-vertical') ? 'stacked-vertical' : 'dual-horizontal';
@@ -3385,6 +3546,11 @@ function todoLongList() { return todoDailyList(); }
     ensureCurrentSemesterHasData(prefer);
     save(true);
     return state;
+    /* v0.5.1：合并可能给记录换 id（冲突副本），个性化通知的 key 要跟着搬，并清掉孤儿 */
+    try {
+      if (plan.maps && plan.maps.course) { remapCourseOverrides(plan.maps.course); }
+      cleanOrphanOverrides();
+    } catch (e) { }
   }
 
   function applyTombstone(tomb) {
@@ -3707,6 +3873,12 @@ function todoLongList() { return todoDailyList(); }
     previewMerge: previewMerge, applyMerge: applyMerge, markDeleted: markDeleted,
     /* v0.4.6：云同步要拿到精确的 additions/updates/conflicts 计数 */
     planMerge: planMerge,
+    /* v0.5.1 通知个性化 */
+    notifDaily: notifDaily, notifOverrides: notifOverrides,
+    courseLeadMin: courseLeadMin, taskNotif: taskNotif,
+    legacyTaskLeadHours: legacyTaskLeadHours, eventTypeLeadMin: eventTypeLeadMin,
+    cleanOrphanOverrides: cleanOrphanOverrides, ensureNotifExtras: ensureNotifExtras,
+    todoDaySum: todoDaySum,
     /* v0.4.1 软删除 + 回收站 */
     isDeleted: isDeleted, softDelete: softDelete, restore: restore, trashList: trashList,
     emptyTrash: emptyTrash, liveOnly: liveOnly, courseList: courseList, stampOf: stampOf,

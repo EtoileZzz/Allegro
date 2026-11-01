@@ -141,7 +141,11 @@
 
   /* ─────────────── 配置与运行态 ─────────────── */
 
-  var cfg = readJSON(CFG_KEY, { baseUrl: '', token: '', autoMode: 'open', autoMin: 0, rememberPass: true });
+  var cfg = readJSON(CFG_KEY, {
+    baseUrl: '', token: '', autoMode: 'open', autoMin: 0, rememberPass: true,
+    silent: false,      // v0.5.1：静默同步（成功不提示，失败仍提示）
+    scope: 'all'        // v0.5.1：'all' 全部 | 'data' 只同步数据（不含设置）
+  });
   var run = readJSON(RUN_KEY, { lastRev: 0, lastSyncAt: 0, lastConflicts: 0, dirty: false });
   var memPass = '';          // rememberPass=false 时只在内存里
   var keyCache = null;       // { pass, salt, iter, key }
@@ -163,6 +167,8 @@
       baseUrl: cfg.baseUrl || '', token: cfg.token || '',
       autoMode: cfg.autoMode || 'open', autoMin: cfg.autoMin || 0,
       rememberPass: cfg.rememberPass !== false,
+      silent: cfg.silent === true,
+      scope: cfg.scope === 'data' ? 'data' : 'all',
       hasPass: !!getPass()
     };
   }
@@ -192,6 +198,8 @@
     if (next.autoMode !== undefined) { cfg.autoMode = next.autoMode; }
     if (next.autoMin !== undefined) { cfg.autoMin = Number(next.autoMin) || 0; }
     if (next.rememberPass !== undefined) { cfg.rememberPass = next.rememberPass !== false; }
+    if (next.silent !== undefined) { cfg.silent = next.silent === true; }
+    if (next.scope !== undefined) { cfg.scope = next.scope === 'data' ? 'data' : 'all'; }
     if (next.passphrase !== undefined) { setPass(String(next.passphrase || '')); keyCache = null; }
     writeJSON(CFG_KEY, cfg);
     emit('config', config());
@@ -199,7 +207,10 @@
   }
 
   function clearConfig(keepPass) {
-    cfg = { baseUrl: '', token: '', autoMode: 'open', autoMin: 0, rememberPass: cfg.rememberPass };
+    cfg = {
+      baseUrl: '', token: '', autoMode: 'open', autoMin: 0, rememberPass: cfg.rememberPass,
+      silent: cfg.silent === true, scope: cfg.scope === 'data' ? 'data' : 'all'
+    };
     writeJSON(CFG_KEY, cfg);
     if (!keepPass) { setPass(''); }
     keyCache = null;
@@ -322,7 +333,8 @@
 
   /** 把远端状态合进本机（不推送） */
   function applyRemote(remoteState, rev) {
-    var opts = { mergeSettings: true };
+    /* v0.5.1「仅数据」范围：不把对方的个性化设置合进来 */
+    var opts = { mergeSettings: cfg.scope !== 'data' };
     var plan = AR.Store.planMerge(remoteState, opts);
     applying = true;
     try { AR.Store.applyMerge(remoteState, opts); } finally { applying = false; }
@@ -343,6 +355,8 @@
         var payload = AR.Store.exportPayload();
         delete payload.device;          // 设备名是本机属性，不该互相覆盖（合并时本来也会忽略）
         delete payload.exportedAt;
+        /* v0.5.1「仅数据」范围：设置不上传（每台设备各自保留） */
+        if (cfg.scope === 'data') { delete payload.settings; }
         return encryptState(key, payload, matchRev + 1).then(function (env) {
           var envelope = JSON.stringify(env);
           if (envelope.length > MAX_ENVELOPE) {
@@ -392,7 +406,7 @@
      * 以前只有手动按钮才 toast，自动同步静默跑完，用户不知道到底同没同。
      */
     try {
-      if (AR.UI && AR.UI.toast) {
+      if (AR.UI && AR.UI.toast && cfg.silent !== true) {
         var msg = (info.pushed === false)
           ? ('已合并云端内容 · rev ' + (info.rev || 0))
           : ('已同步 · 云端 rev ' + (info.rev || 0));
@@ -416,6 +430,8 @@
       lastRev: Number(run.lastRev) || 0, lastSyncAt: Number(run.lastSyncAt) || 0,
       lastConflicts: Number(run.lastConflicts) || 0,
       lastBytes: Number(run.lastBytes) || 0,
+      silent: cfg.silent === true,
+      scope: cfg.scope === 'data' ? 'data' : 'all',
       dirty: !!run.dirty, busy: !!busy
     };
   }

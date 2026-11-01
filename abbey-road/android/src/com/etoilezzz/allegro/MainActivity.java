@@ -22,6 +22,7 @@ import android.os.Vibrator;
 import android.provider.AlarmClock;
 import android.provider.CalendarContract;
 import android.provider.MediaStore;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
 import android.view.Window;
@@ -693,6 +694,48 @@ public class MainActivity extends Activity {
             if (Build.VERSION.SDK_INT < 33) { return "ok"; }
             ensureNotificationPermission(true);
             return "ok";
+        }
+
+        /**
+         * 跳「电池优化」设置：提醒被系统杀掉时（国产 ROM 尤其常见），
+         * 这是让用户把 Allegro 加进后台白名单的最快入口。
+         *
+         * 阶梯：① 只针对本应用的「忽略电池优化」请求 → ② 电池优化列表页 → ③ toast 引导。
+         * 整段在 UI 线程执行但全部 catch：任何一步系统不认，都不能把 App 崩掉。
+         * 注意：① 在部分 ROM / 未声明 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 时
+         * 可能被系统忽略，所以仍然按顺序保留②③兜底。
+         */
+        @JavascriptInterface
+        public void openBatterySettings() {
+            runOnUiThread(new Runnable() {
+                public void run() {
+                    // ① 直接对本应用发起「忽略电池优化」请求
+                    try {
+                        Intent direct = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                        direct.setData(Uri.parse("package:" + getPackageName()));
+                        direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(direct);
+                        return;
+                    } catch (Throwable t) {
+                        Log.w(TAG, "ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 失败", t);
+                    }
+                    // ② 退到电池优化列表页（Android 6+ 都有）
+                    try {
+                        Intent list = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                        list.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(list);
+                        return;
+                    } catch (Throwable t) {
+                        Log.w(TAG, "ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS 失败", t);
+                    }
+                    // ③ 都打不开：至少给一句可执行的提示
+                    try {
+                        Toast.makeText(MainActivity.this,
+                                "请到系统设置 → 电池 → 应用耗电管理，允许 Allegro 后台运行",
+                                Toast.LENGTH_LONG).show();
+                    } catch (Throwable ignored) { }
+                }
+            });
         }
 
         /**

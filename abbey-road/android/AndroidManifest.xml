@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.etoilezzz.allegro"
-    android:versionCode="68"
-    android:versionName="0.5.0">
+    android:versionCode="69"
+    android:versionName="0.5.1">
 
     <!-- 震动反馈：重要操作触发 -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 课前提醒：允许排「精确闹钟」。Android 12+ 没有这个授权时退化为非精确（不崩、不静默不排） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Re-arm pending reminders after a reboot (BootReceiver replays the last payload) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <uses-sdk
         android:minSdkVersion="26"
@@ -101,6 +104,17 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+
+        <!-- Re-arm reminders after reboot or app upgrade. The payload is read back
+             from SharedPreferences (reminders.last) by BootReceiver. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- ── 桌面卡片（5 种样式）─────────────────────────────── -->
         <receiver
