@@ -313,9 +313,13 @@
    * 所以用一个 20 秒的前台轮询：到点的条目直接调系统通知桥弹出来。
    * —— v0.5.1 之前 Windows 完全没有提醒引擎，这也是「提醒不响」的一个原因。
    */
-  function tickWindows(now) {
-    if (!AR.Bridge || !AR.Bridge.hasWebView2) { return 0; }
-    if (!AR.Bridge.notifyNow) { return 0; }
+  /**
+   * v0.5.1b：把「到点补发」抽成与平台无关的 tickNow。
+   * Windows 自动轮询它（没有 AlarmManager）；Android 只在用户手动点「立即检查并补发」时调它，
+   * 避免和系统闹钟重复弹同一条。
+   */
+  function tickNow(now) {
+    if (!AR.Bridge || !AR.Bridge.notifyNow) { return 0; }
     now = now || Date.now();
     var list = [];
     /**
@@ -338,6 +342,12 @@
     }
     if (hit) { saveFired(fired); }
     return hit;
+  }
+
+  /** 只在 Windows 自动跑（Android 用系统闹钟，不自动补发，免得重复） */
+  function tickWindows(now) {
+    if (!AR.Bridge || !AR.Bridge.hasWebView2) { return 0; }
+    return tickNow(now);
   }
 
   /** 前台轮询启停（只在 Windows 用；重复调用安全） */
@@ -416,6 +426,7 @@
     MAX_DAILY_TIMES: MAX_DAILY_TIMES,
     lastResult: function () { return { result: lastResult, at: lastResultAt, size: (function () { try { return build().length; } catch (e) { return -1; } })() }; },
     tickWindows: tickWindows,      // 手动跑一次前台检查（排障/测试用）
+    tickNow: tickNow,              // 平台无关的「到点补发」，Android 手动排障用
     ensureTick: ensureTick,
     stopTick: stopTick,
     clearFired: function () { try { localStorage.removeItem(FIRED_KEY); } catch (e) { } }

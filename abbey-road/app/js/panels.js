@@ -3048,7 +3048,12 @@ function renderLongTaskList(host) {
     box.appendChild(el('<p class="muted">下次提醒：今天 ' + esc(times[0] || '—')
       + ' · ' + esc((sum && sum.title) || '今天没有待办') + '</p>'));
 
-    /* ── v0.5.2：通知自检 / 后台保护 ─────────────────────────── */
+    return panel('提醒与通知', box, 'notify');
+  }
+
+  /* ── v0.5.2：通知自检 / 后台保护 ─────────────────────────── */
+  function notifDiagBlock(host) {
+    var box = host;
     var platform = 'web';
     try { platform = AR.Bridge.platform() || 'web'; } catch (e) { platform = 'web'; }
 
@@ -3289,6 +3294,14 @@ function renderLongTaskList(host) {
       var testRow = el('<div class="row gap wrap"></div>');
       testRow.appendChild(actionBtn('发送测试通知', sendTestNotify));
       testRow.appendChild(actionBtn('10 秒后测试闹钟', sendTestAlarm));
+      /* v0.5.1b：闹钟被系统拦掉时的前台保底 —— 手动补发最近 2 分钟到点的提醒 */
+      testRow.appendChild(actionBtn('立即检查并补发', function () {
+        var hits = -1;
+        try { hits = (AR.Reminders && AR.Reminders.tickNow) ? AR.Reminders.tickNow() : -1; } catch (e) { hits = -1; }
+        if (hits > 0) { toastSafe('已补发 ' + hits + ' 条到点提醒'); }
+        else if (hits === 0) { toastSafe('最近 2 分钟没有到点的提醒'); }
+        else { toastSafe('补发检查失败'); }
+      }));
       box.appendChild(testRow);
 
       var jumpRow = el('<div class="row gap wrap"></div>');
@@ -3356,8 +3369,7 @@ function renderLongTaskList(host) {
         });
       }
     }
-
-    return panel('提醒与通知', box, 'notify');
+    return host;
   }
 
   /* 5 · 导入与同步 */
@@ -3982,6 +3994,9 @@ function renderLongTaskList(host) {
       checkUpdate(true);
     });
     box.appendChild(chkBtn);
+
+    /* ── 通知自检 / 后台保护（v0.5.2 从「提醒与通知」挪到关于页）── */
+    box.appendChild(notifDiagBlock(el('<div></div>')));
 
     box.appendChild(el('<p class="muted" style="margin-top:10px">本应用平时不联网、不收集数据；'
       + '只有你点「检查更新」或打开上面的自动检查时，才会去查一次发布页。'

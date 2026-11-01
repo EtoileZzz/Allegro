@@ -7863,20 +7863,29 @@ var AR = window.AR || (window.AR = {});
 
   function fillEntryRecent(node, cur) {
     if (!node) { return; }
+    /* 行点击展开详情：委托绑在容器上，refreshEntryBody 重画后不会丢 */
+    tkRecExpandBind(node, 'long', function () {
+      return (AR.Store.longTaskById && AR.Store.longTaskById(cur.id)) || cur;
+    }, function (task) {
+      return (task && task.unit) ? String(task.unit) : '';
+    });
     node.innerHTML = '';
     var recents = AR.Store.longTaskRecentEntries(cur, 6);
     if (!recents.length) { return; }
-    node.appendChild(el('<div class="lt-recent-title">最近记录 · 点 ✕ 删掉记错的一笔</div>'));
+    node.appendChild(el('<div class="lt-recent-title">最近记录 · 点一行看详情 · 点 ✕ 删掉记错的一笔</div>'));
     for (var r = 0; r < recents.length; r++) {
       (function (e) {
         var day = AR.Store.longTaskEntryDay(e);
         var d = day ? U.parseDateKey(day) : null;
         var label = d ? ((d.getMonth() + 1) + '/' + d.getDate()) : '';
-        var row = el('<div class="lt-recent-row">'
+        var row = el('<div class="lt-recent-row" data-rec-expand="1" data-rec-id="'
+          + U.escapeHtml(e.id || '') + '" style="cursor:pointer">'
+          + tkRecArrowSpan()
           + '<span class="lt-recent-amt">' + ltNum(e.amount) + '</span>'
           + '<span class="lt-recent-day">' + label + '</span>'
           + '<span class="lt-recent-note">' + U.escapeHtml(e.note || '') + '</span>'
           + '<button class="lt-del" type="button" title="删掉这一笔">✕</button></div>');
+        row.__entry = e;   /* 老数据没有 id 时也能定位到这一笔 */
         row.querySelector('.lt-del').addEventListener('click', function () {
           if (!removeEntryRobust(cur.id, e)) { toast('没删掉，再试一次'); return; }
           AR.Bridge.haptic('warn', row);
@@ -11049,6 +11058,142 @@ var AR = window.AR || (window.AR = {});
     return box;
   }
 
+  /* ══════════ 「最近记录」行展开详情 ══════════
+     统一任务与长期任务的最近记录共用这一套：
+       · 行本身只加 data-rec-expand + 箭头，不动原有摘要/撤销按钮；
+       · 点击用**事件委托**绑在容器上 —— 记录刷新（innerHTML 重画）后不会丢；
+       · 展开块插在该行后面，再点该行收起；展开状态只存在 DOM 上，不持久化。 */
+  function tkRecSrcText(src) {
+    if (!src) { return '手动'; }
+    if (src === 'swipe') { return '滑动'; }
+    if (src === 'count') { return '手动添加'; }
+    if (src === 'panel') { return '快速添加'; }
+    return String(src);
+  }
+  /** 精确到秒的本地时间：优先 at，老记录退回 createdAt */
+  function tkRecExactTime(e) {
+    var raw = (e && (e.at || e.createdAt)) || '';
+    if (!raw) { return '—'; }
+    var d = new Date(raw);
+    if (isNaN(d.getTime()) && e && e.createdAt) {
+      raw = e.createdAt;
+      d = new Date(raw);
+    }
+    if (isNaN(d.getTime())) { return String(raw); }
+    return d.getFullYear() + '-' + U.pad2(d.getMonth() + 1) + '-' + U.pad2(d.getDate())
+      + ' ' + U.pad2(d.getHours()) + ':' + U.pad2(d.getMinutes()) + ':' + U.pad2(d.getSeconds());
+  }
+  /** 按 amount 的符号显示；有单位（小时/页…）就带上 */
+  function tkRecAmountText(e, unit) {
+    var a = Number(e && e.amount);
+    if (!isFinite(a)) { a = 0; }
+    var abs = Math.abs(Math.round(a * 100) / 100);
+    return (a < 0 ? '-' : '+') + abs + (unit ? (' ' + unit) : '');
+  }
+  function tkRecArrowSpan() {
+    return '<span class="tk-rec-arrow" style="flex:0 0 auto;width:10px;text-align:center;'
+      + 'font-size:10px;color:var(--text-tertiary)">▸</span>';
+  }
+  function tkRecSetArrow(row, open) {
+    var a = (row && row.querySelector) ? row.querySelector('.tk-rec-arrow') : null;
+    if (a) { a.textContent = open ? '▾' : '▸'; }
+  }
+  /** 一笔记录的详情：时间 / 数量 / 备注 / 来源 / id /（软删除提示） */
+  function tkRecDetailOne(e, unit) {
+    var one = el('<div></div>');
+    function add(label, value, style) {
+      var line = el('<div></div>');
+      if (style) { line.setAttribute('style', style); }
+      var lb = document.createElement('span');
+      lb.style.color = 'var(--text-tertiary)';
+      lb.textContent = label;
+      line.appendChild(lb);
+      var val = document.createElement('span');
+      val.textContent = value;
+      line.appendChild(val);
+      one.appendChild(line);
+      return val;
+    }
+    add('时间：', tkRecExactTime(e));
+    add('数量：', tkRecAmountText(e, unit));
+    var noteVal = add('备注：', (e && e.note) ? String(e.note) : '（无）');
+    noteVal.style.whiteSpace = 'pre-wrap';   /* 保留换行，不截断 */
+    noteVal.style.overflowWrap = 'anywhere';
+    add('来源：', tkRecSrcText(e && e.src));
+    add('记录 id：', (e && e.id) ? String(e.id) : '（无 id）',
+      'font-size:10.5px;color:var(--text-tertiary)');
+    if (e && e.deletedAt) {
+      one.appendChild(el('<div style="color:var(--danger);font-size:11px;margin-top:2px">'
+        + '这条已被删除（可在回收站恢复）</div>'));
+    }
+    return one;
+  }
+  function tkRecDetailBlock(entries, unit) {
+    var box = el('<div class="tk-rec-detail" data-rec-detail="1" style="margin:2px 0 7px;'
+      + 'padding:7px 10px 8px;border-left:2px solid var(--glass-stroke);background:var(--bg-subtle);'
+      + 'border-radius:0 8px 8px 0;font-size:11.5px;line-height:1.60;color:var(--text-secondary)"></div>');
+    for (var i = 0; i < entries.length; i++) {
+      if (i > 0) {
+        box.appendChild(el('<div style="height:1px;background:var(--divider);margin:7px 0"></div>'));
+      }
+      box.appendChild(tkRecDetailOne(entries[i], unit));
+    }
+    return box;
+  }
+  function tkRecCloseDetail(row) {
+    var d = row.__tkRecDetail;
+    if (d && d.parentNode) { d.parentNode.removeChild(d); }
+    row.__tkRecDetail = null;
+    tkRecSetArrow(row, false);
+  }
+  /**
+   * 给「最近记录」容器绑一次事件委托。
+   *   mode = 'todo' → 行上带 data-rec-day，展开这一天的每一笔（含软删除的，方便排障）
+   *   mode = 'long' → 行上带 data-rec-id（老数据退回 row.__entry），只展开这一笔
+   */
+  function tkRecExpandBind(container, mode, getTask, getUnit) {
+    if (!container || container.__tkRecExpandBound) { return; }
+    container.__tkRecExpandBound = true;
+    container.addEventListener('click', function (ev) {
+      var target = ev.target;
+      if (!target || !target.closest) { return; }
+      if (target.closest('button')) { return; }   /* 撤销 / ✕ 删掉不触发展开 */
+      var row = target.closest('[data-rec-expand]');
+      if (!row || row.parentNode !== container) { return; }
+      if (row.__tkRecDetail) { tkRecCloseDetail(row); return; }   /* 再点收起 */
+      var task = getTask();
+      if (!task) { return; }
+      var entries = [];
+      if (mode === 'long') {
+        if (row.__entry) {
+          entries.push(row.__entry);
+        } else {
+          var id = row.getAttribute('data-rec-id') || '';
+          var all = task.entries || [];
+          for (var i = 0; i < all.length; i++) {
+            if (id && all[i].id === id) { entries.push(all[i]); }
+          }
+        }
+      } else {
+        var day = row.getAttribute('data-rec-day') || '';
+        var es = task.entries || [];
+        for (var j = 0; j < es.length; j++) {
+          if (AR.Store.todoEntryDay(es[j]) === day) { entries.push(es[j]); }
+        }
+        entries.sort(function (a, b) {
+          return String(b.at || b.createdAt || '').localeCompare(String(a.at || a.createdAt || ''));
+        });
+      }
+      if (!entries.length) { return; }
+      var detail = tkRecDetailBlock(entries, getUnit(task));
+      row.__tkRecDetail = detail;
+      container.insertBefore(detail, row.nextSibling);
+      tkRecSetArrow(row, true);
+      if (AR.Bridge && AR.Bridge.haptic) { AR.Bridge.haptic('light', row); }
+    });
+  }
+
+  /** 最近记录（按天倒序，最多 3 行；点一行展开当天的每一笔详情，撤销逻辑不变） */
   function tkRecList(t) {
     /* 按天聚合：同时记条数与金额 —— 有目标单位的任务要显示 +1.6 小时，而不是 +1 次 */
     var hasUnit = !!(t && t.goal && t.goal.unit);
@@ -11070,8 +11215,11 @@ var AR = window.AR || (window.AR = {});
       return '+' + a + ' ' + U.escapeHtml(unit);
     }
     return days.slice(0, 3).map(function (k) {
-      return '<div class="tk-rec"><span class="tk-rn">' + tkRelDay(k) + ' · ' + amtText(byDay[k]) + '</span>'
-        + '<button class="tk-rx undo" data-reck="' + k + '">撤销</button></div>';
+      return '<div class="tk-rec" data-rec-expand="1" data-rec-day="' + U.escapeHtml(k)
+        + '" style="cursor:pointer">'
+        + tkRecArrowSpan()
+        + '<span class="tk-rn">' + tkRelDay(k) + ' · ' + amtText(byDay[k]) + '</span>'
+        + '<button class="tk-rx undo" data-reck="' + U.escapeHtml(k) + '">撤销</button></div>';
     }).join('') + (days.length > 3 ? '<div class="tk-rech-more">还有 ' + (days.length - 3) + ' 天有记录…</div>' : '');
   }
   /** 大卡里的一条任务：标题行（含编辑按钮）+ 今天/累计 + 大迷你格 + 展开区 */
@@ -11145,6 +11293,12 @@ var AR = window.AR || (window.AR = {});
     }));
     body.appendChild(el('<div class="tk-shead">最近记录</div>'));
     var recBox = el('<div class="tkd-recs"></div>');
+    /* 点一行展开当天每一笔的详情（事件委托：paintRecs 重画后绑定还在） */
+    tkRecExpandBind(recBox, 'todo', function () {
+      return (AR.Store.todoById ? AR.Store.todoById(cur.id) : null) || cur;
+    }, function (task) {
+      return (task && task.goal && task.goal.unit) ? String(task.goal.unit) : '';
+    });
     function paintRecs() {
       var live = (AR.Store.todoById ? AR.Store.todoById(cur.id) : null) || cur;
       recBox.innerHTML = tkRecList(live);
@@ -11519,6 +11673,12 @@ var AR = window.AR || (window.AR = {});
         if (AR.UI.refreshTasks) { AR.UI.refreshTasks(); }
       }));
       var recBox = el('<div class="tk-edit-recs"></div>');
+      /* 编辑页的最近记录同样支持点行展开（与详情弹窗共用一套委托逻辑） */
+      tkRecExpandBind(recBox, 'todo', function () {
+        return AR.Store.todoById(src.id) || src;
+      }, function (task) {
+        return (task && task.goal && task.goal.unit) ? String(task.goal.unit) : '';
+      });
       function paintRecs() {
         var cur = AR.Store.todoById(src.id) || src;
         recBox.innerHTML = '<div class="tk-edit-rech">最近记录</div>' + tkRecList(cur);
