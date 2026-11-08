@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.5.1a';
+var APP_VERSION = '0.5.2';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -270,7 +270,19 @@ var APP_VERSION = '0.5.1a';
         theme: 'system', accent: '#5B8DEF', glassLevel: 'medium',
         animationSpeed: 1,
         /** 流畅模式：full 关闭（全效果）/ lite 标准（砍光效）/ min 深度（再砍 3D 与错峰） */
-        perfMode: 'full'
+        perfMode: 'full',
+        /**
+         * 背景（v0.5.2）：
+         *   blobs    = 现在这种柔光色块（默认）
+         *   plain    = 纯色（--bg-base），最干净也最省
+         *   gradient = 用主题色的极淡渐变，避免深色下背景太"空"
+         */
+        bgStyle: 'blobs',
+        /**
+         * 作业逾期强调（v0.5.2，设置 → 外观）：
+         *   both（默认）= 红底白字 + 行左侧竖条；solid / bar / bold 只取其中一种
+         */
+        overdueStyle: 'both'
       },
       /**
        * leftHand：左手模式。「左右」布局下把两栏对调
@@ -428,14 +440,23 @@ var APP_VERSION = '0.5.1a';
   /** 作业关键词：只在「智能识别」模式下用来兜住没写列表符号的行 */
   var TASK_KEYWORDS = /(作业|练习|习题|实验|报告|论文|复习|预习|提交|截止|背诵|抄写|阅读|听力|上机|编程|画图|做完|改写|总结)/;
 
-  /** 作业设置（设置 → 课程与课表）：总开关 + 识别方式 */
+  /**
+   * 作业设置（设置 → 作业与日程）：总开关 + 识别方式 + 默认截止日。
+   * dueLeadDays（v0.5.2）：
+   *   -1 = 不自动设；0 = 下次上课当天；1 = 前一天（默认）；2 = 前两天。
+   *   只作用于「备注识别出来的新条目」，手动添加仍走留空 + 一键。
+   */
   function homeworkSettings(s) {
     var src = (s || state) || {};
     var hw = (src.settings && src.settings.schedule && src.settings.schedule.homework) || {};
+    var lead = (hw.dueLeadDays == null) ? 1 : Math.round(Number(hw.dueLeadDays));
+    if (!isFinite(lead)) { lead = 1; }
+    lead = Math.max(-1, Math.min(7, lead));
     return {
       on: hw.on !== false,
       mode: hw.mode === 'smart' ? 'smart' : 'line',
-      groupByCourse: hw.groupByCourse !== false   // v0.3.7：作业按课程分组（默认开，可在设置里关）
+      groupByCourse: hw.groupByCourse !== false,  // v0.3.7：作业按课程分组（默认开，可在设置里关）
+      dueLeadDays: lead                          // v0.5.2：默认截止日 = 下次上课日 - N 天
     };
   }
 
@@ -545,6 +566,11 @@ var APP_VERSION = '0.5.1a';
     return false;
   }
 
+  /**
+   * 按 (时段, 布置日, 文字) 找一条「还活着、而且仍然跟备注绑定」的条目。
+   * v0.5.2：删掉的（deletedAt）和脱钩的（detached）都不参与配对 ——
+   * 删掉的由 taskDeletedFor 记住，脱钩的由 override.hwSkip 记住。
+   */
   function findTask(blockId, dateK, text) {
     var key = normTaskText(text);
     /**
@@ -553,10 +579,70 @@ var APP_VERSION = '0.5.1a';
      */
     var list = taskRaw();
     for (var i = 0; i < list.length; i++) {
-      if (list[i].deletedAt) { continue; }
-      if (list[i].blockId === blockId && list[i].date === dateK && normTaskText(list[i].text) === key) { return list[i]; }
+      var t = list[i];
+      if (t.deletedAt || t.detached) { continue; }
+      if (t.blockId === blockId && t.date === dateK && normTaskText(t.text) === key) { return t; }
     }
     return null;
+  }
+
+  /**
+   * 这条备注行是不是被用户删过（v0.5.2）。
+   * 以前 findTask 跳过 deletedAt，于是「删掉一条备注作业 → 点刷新作业」会原样长回来。
+   */
+  function taskDeletedFor(blockId, dateK, text) {
+    var key = normTaskText(text);
+    var list = taskRaw();
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i];
+      if (!t.deletedAt || t.detached) { continue; }
+      if (t.blockId === blockId && t.date === dateK && normTaskText(t.text) === key) { return true; }
+    }
+    return false;
+  }
+
+  /** 某一天那节课的单次记录（备注存在它的 newNote 上，脱钩名单存在 hwSkip 上） */
+  function overrideOf(blockId, dateK) {
+    var ovs = state.overrides || [];
+    for (var i = 0; i < ovs.length; i++) {
+      if (ovs[i].deletedAt) { continue; }
+      if (ovs[i].blockId === blockId && ovs[i].date === dateK) { return ovs[i]; }
+    }
+    return null;
+  }
+
+  /** 一段备注里的一行 → 正文（和 parseNoteTasks 共用同一套前缀规则） */
+  function noteLineBody(line) {
+    var s = String(line == null ? '' : line);
+    var m = s.match(TASK_PREFIX);
+    return (m ? s.slice(m[0].length) : s).trim();
+  }
+
+  /** 只换备注行的正文：列表符号 / 缩进 / 勾选标记原样保留 */
+  function replaceNoteLineBody(line, newBody) {
+    var s = String(line == null ? '' : line);
+    var m = s.match(TASK_PREFIX);
+    return (m ? m[0] : '') + newBody;
+  }
+
+  /**
+   * 把条目从备注上「摘下来」（v0.5.2）。
+   * 之后：备注怎么改都不覆盖它、备注里删掉那一行也不会把它带走。
+   * 同时把原来那行的正文记进 override.hwSkip —— 否则重建备注时会再建一条一模一样的。
+   */
+  function unlinkTaskFromNote(t, noteText) {
+    if (!t) { return; }
+    var ov = t.blockId ? overrideOf(t.blockId, t.date) : null;
+    var key = normTaskText(noteText == null ? t.text : noteText);
+    if (ov && key) {
+      var skip = Array.isArray(ov.hwSkip) ? ov.hwSkip : (ov.hwSkip = []);
+      if (skip.indexOf(key) < 0) { skip.push(key); }
+      ov.updatedAt = new Date().toISOString();
+    }
+    if (!t.detached) {
+      t.detached = true;
+      t.updatedAt = new Date().toISOString();
+    }
   }
 
   /**
@@ -578,6 +664,15 @@ var APP_VERSION = '0.5.1a';
      */
     var raw = taskRaw();
     if (!hw.on) { return []; }
+    /**
+     * v0.5.2：被用户「接管」过的行不参与识别。
+     * 改日期 / 改课程 / 改名后条目不脱钩的话，备注里那行原文会再建一条一样的出来。
+     */
+    var ovNow = (blockId && dateK) ? overrideOf(blockId, dateK) : null;
+    var skipMap = {};
+    if (ovNow && Array.isArray(ovNow.hwSkip)) {
+      for (var s = 0; s < ovNow.hwSkip.length; s++) { skipMap[ovNow.hwSkip[s]] = true; }
+    }
     var parsed = parseNoteTasks(text, hw.mode);
     var keep = {};
     var out = [];
@@ -586,11 +681,16 @@ var APP_VERSION = '0.5.1a';
       var key = normTaskText(p.text);
       if (!key || keep[key]) { continue; }
       keep[key] = true;
+      if (skipMap[key]) { continue; }         // 已被接管：不重建，也不当它消失了
       var rec = findTask(blockId, dateK, p.text);
       if (!rec) {
+        if (taskDeletedFor(blockId, dateK, p.text)) { continue; }   // 用户删过：别长回来
+        var crs = courseId ? courseById(courseId) : null;
         rec = {
           id: uid(), courseId: courseId || '', blockId: blockId || '', date: dateK || '',
+          semesterId: (crs && crs.semesterId) || '', source: 'note',
           text: p.text, done: !!p.done, doneAt: p.done ? new Date().toISOString() : '',
+          due: defaultDueFor(courseId, dateK),      // v0.5.2：下次上课日 - N 天
           updatedAt: new Date().toISOString()
         };
         raw.push(rec);
@@ -602,7 +702,7 @@ var APP_VERSION = '0.5.1a';
     // 备注里已经删掉的行：软删除（进回收站，5 秒内可撤销）
     for (var j = raw.length - 1; j >= 0; j--) {
       var t = raw[j];
-      if (t.deletedAt) { continue; }
+      if (t.deletedAt || t.detached) { continue; }   // 脱钩的条目归自己管，备注删行带不走它
       if (t.blockId === blockId && t.date === dateK && !keep[normTaskText(t.text)]) {
         softDelete('tasks', t);
       }
@@ -643,7 +743,7 @@ var APP_VERSION = '0.5.1a';
   /**
    * 今日作业面板要显示的条目：
    *   · 今天课上识别出来的全部条目；
-   *   · 之前没划掉的（跨天挂账，带日期标签）；
+   *   · 之前没划掉的（跨天留到现在的，带日期标签）；
    *   · 今天划掉的（进「已完成」区）。
    * 更早划掉的会自动隐藏，但记录还在（点「已完成」区可以翻出来恢复）。
    */
@@ -657,7 +757,11 @@ var APP_VERSION = '0.5.1a';
       // 直接切前 10 位在晚上 8 点后会偏成前一天，今天划掉的会被算成"更早"。
       var doneDay = taskDoneDay(t);
       if (!t.done) {
-        if (!t.date || t.date <= todayK) { open.push(t); }
+        /**
+         * v0.5.2：手动添加的作业当天就要看见 —— 哪怕布置日写的是明天
+         * （以前统一按 date <= 今天过滤，手加的会被藏到未来那天）。
+         */
+        if (!t.date || t.date <= todayK || t.source === 'manual') { open.push(t); }
       } else if (doneDay === todayK) { doneToday.push(t); }
       else {
         /**
@@ -702,6 +806,422 @@ var APP_VERSION = '0.5.1a';
       if (list[i].id === id) { softDelete('tasks', list[i]); save(true); return true; }
     }
     return false;
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     作业条目编辑（v0.5.2）
+
+     以前只能从「本次备注」里长出来、只能划掉。现在可以手动添加，也能改
+     文字 / 课程 / 布置日 / 截止日、删除。三条硬规矩：
+
+       ① 改文字：还能**唯一定位**到备注里那一行 → 连备注一起改（双向）；
+          定不准（同段里有两行一样、或新文字已经存在）→ 脱钩。
+       ② 改布置日 / 改课程：备注是「那一天那节课」的，条目挪走必然对不上
+          → 直接脱钩，并记住原来那行（override.hwSkip），免得重建时又长一条。
+       ③ 手动添加写当前学期 id：否则 semesterOfTask 取不到学期，
+          切到别的学期后它会在每个学期里都冒出来。
+     ══════════════════════════════════════════════════════════════ */
+
+  /** 按 id 拿一条活着的作业条目 */
+  function taskById(id) {
+    var list = taskRaw();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id && !list[i].deletedAt) { return list[i]; }
+    }
+    return null;
+  }
+
+  /** 两个日期键相差几天（a - b，本地口径；四舍五入避开夏令时 23 小时） */
+  function dayDiff(aKey, bKey) {
+    var a = parseDateKey(aKey), b = parseDateKey(bKey);
+    if (!a || !b) { return 0; }
+    return Math.round((a.getTime() - b.getTime()) / 86400000);
+  }
+
+  /** 这门课下一次上课是哪天（从 fromKey 的第二天起、最多看 28 天；周次/单双周/调课都算好） */
+  function nextLessonOfCourse(courseId, fromKey) {
+    if (!courseId) { return null; }
+    var base = parseDateKey(fromKey || dateKey(new Date()));
+    if (!base) { return null; }
+    for (var i = 1; i <= 28; i++) {
+      var day = addDays(base, i);
+      var items = dayItems(day);
+      for (var j = 0; j < items.length; j++) {
+        if (items[j].courseId === courseId) { return { date: dateKey(day), item: items[j] }; }
+      }
+    }
+    return null;
+  }
+
+  /** 备注条目的默认截止日 = 下次上课日 - N 天（N 来自设置；算不出来 / 关掉就留空） */
+  function defaultDueFor(courseId, dateK) {
+    var hw = homeworkSettings(state);
+    if (hw.dueLeadDays < 0) { return ''; }
+    if (!courseId) { return ''; }
+    var next = nextLessonOfCourse(courseId, dateK);
+    if (!next) { return ''; }
+    var dk = dateKey(addDays(parseDateKey(next.date), -hw.dueLeadDays));
+    if (dateK && dk < dateK) { dk = dateK; }   // 不能早于布置日
+    return dk;
+  }
+
+  /**
+   * 截止日展示（v0.5.2）：逾期 / 今天 / 明天 / 剩 N 天。
+   * 没有截止日就什么都不显示（旧版这里会显示「还放着 N 天」，已按用户要求删掉）。
+   */
+  function taskDueInfo(t, todayK) {
+    var today = todayK || dateKey(new Date());
+    var due = (t && t.due) ? String(t.due) : '';
+    if (!due) { return { kind: 'none', days: 0, label: '' }; }
+    var d = dayDiff(due, today);
+    if (d < 0) { return { kind: 'overdue', days: -d, label: '逾期 ' + (-d) + ' 天' }; }
+    if (d === 0) { return { kind: 'today', days: 0, label: '今天' }; }
+    if (d === 1) { return { kind: 'soon', days: 1, label: '明天' }; }
+    return { kind: 'soon', days: d, label: '剩 ' + d + ' 天' };
+  }
+
+  /** 新建 / 修改一条作业（手动添加与编辑共用；只传要改的字段） */
+  function taskUpsert(patch) {
+    patch = patch || {};
+    var rec = patch.id ? taskById(patch.id) : null;
+    if (!rec) {
+      var sem = currentSemester();
+      rec = {
+        id: uid(), courseId: '', blockId: '', date: dateKey(new Date()),
+        semesterId: (sem && sem.id) || '', source: 'manual', detached: true,
+        text: '', due: '', done: false, doneAt: '',
+        updatedAt: new Date().toISOString()
+      };
+      taskRaw().push(rec);
+    }
+    if (patch.text != null) { rec.text = normTaskText(patch.text).slice(0, 200); }
+    if (patch.courseId != null) { rec.courseId = String(patch.courseId || ''); }
+    if (patch.date != null && parseDateKey(patch.date)) { rec.date = String(patch.date); }
+    if (patch.due != null) { rec.due = parseDateKey(patch.due) ? String(patch.due) : ''; }
+    if (patch.semesterId != null) { rec.semesterId = String(patch.semesterId || ''); }
+    if (patch.source != null) { rec.source = String(patch.source); }
+    if (patch.detached != null) { rec.detached = !!patch.detached; }
+    if (patch.done != null) {
+      rec.done = !!patch.done;
+      rec.doneAt = rec.done ? new Date().toISOString() : '';
+    }
+    rec.updatedAt = new Date().toISOString();
+    save(true);
+    return rec;
+  }
+
+  /**
+   * 改文字。能唯一定位到备注里那一行就连备注一起改，否就脱钩只改条目。
+   * 返回 { ok, mode: 'note' | 'detached' | 'entry' }。
+   */
+  function taskRename(id, newText) {
+    var t = taskById(id);
+    if (!t) { return { ok: false, mode: '' }; }
+    var nt = normTaskText(newText);
+    if (!nt) { return { ok: false, mode: '' }; }
+    var oldText = t.text;
+    if (nt === oldText) { return { ok: true, mode: t.detached ? 'entry' : 'note' }; }
+    /* 手动的 / 已经脱钩的 / 本来就没有备注来源：只改条目 */
+    if (t.detached || !t.blockId || !t.date) {
+      taskUpsert({ id: id, text: nt });
+      return { ok: true, mode: 'entry' };
+    }
+    var ov = overrideOf(t.blockId, t.date);
+    var note = (ov && typeof ov.newNote === 'string') ? ov.newNote : '';
+    if (!note) {
+      unlinkTaskFromNote(t, oldText);
+      taskUpsert({ id: id, text: nt, detached: true });
+      return { ok: true, mode: 'detached' };
+    }
+    var lines = note.split(/\r?\n/);
+    var hit = -1, oldHits = 0, newHits = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var body = noteLineBody(lines[i]);
+      if (!body) { continue; }
+      var nb = normTaskText(body);
+      if (nb === normTaskText(oldText)) { oldHits++; hit = i; }
+      if (nb === nt) { newHits++; }
+    }
+    /* 旧行唯一、新文字不重复 —— 只要有一条不满足就不猜，直接脱钩 */
+    if (oldHits !== 1 || newHits > 0) {
+      unlinkTaskFromNote(t, oldText);
+      taskUpsert({ id: id, text: nt, detached: true });
+      return { ok: true, mode: 'detached' };
+    }
+    lines[hit] = replaceNoteLineBody(lines[hit], nt);
+    var newNote = lines.join('\n');
+    /**
+     * 顺序不能反：先改条目、再改备注、最后同步。
+     * 先改备注的话，syncTasksFor 会把「还在用旧文字的那条」当成备注里删掉的行软删除，
+     * 再新建一条没勾的 —— id 和勾掉状态全丢。
+     */
+    taskUpsert({ id: id, text: nt });
+    upsertOverride(t.blockId, t.courseId, t.date, { newNote: newNote });
+    syncTasksFor(t.blockId, t.courseId, t.date, newNote);
+    var again = findTask(t.blockId, t.date, nt);
+    if (!again || again.id !== id) {
+      unlinkTaskFromNote(t, oldText);
+      taskUpsert({ id: id, detached: true });
+      return { ok: true, mode: 'detached' };
+    }
+    return { ok: true, mode: 'note' };
+  }
+
+  /**
+   * 编辑一条作业：文字 / 课程 / 布置日 / 截止日 一起改。
+   * 改课程或布置日 → 必然和备注对不上，直接脱钩（并记住原来那行）。
+   */
+  function taskEdit(id, patch) {
+    patch = patch || {};
+    var t = taskById(id);
+    if (!t) { return { ok: false, mode: '' }; }
+    var mode = 'entry';
+    var oldText = t.text;
+    if (patch.date != null && String(patch.date) !== String(t.date) && parseDateKey(patch.date)) {
+      unlinkTaskFromNote(t, oldText);
+      t.date = String(patch.date);
+      t.updatedAt = new Date().toISOString();
+      mode = 'detached';
+    }
+    if (patch.courseId != null && String(patch.courseId || '') !== String(t.courseId || '')) {
+      unlinkTaskFromNote(t, oldText);
+      t.courseId = String(patch.courseId || '');
+      var crs = t.courseId ? courseById(t.courseId) : null;
+      if (crs && crs.semesterId) { t.semesterId = crs.semesterId; }
+      t.updatedAt = new Date().toISOString();
+      mode = 'detached';
+    }
+    if (patch.due != null) {
+      t.due = parseDateKey(patch.due) ? String(patch.due) : '';
+      t.updatedAt = new Date().toISOString();
+    }
+    if (patch.text != null && normTaskText(patch.text) && normTaskText(patch.text) !== oldText) {
+      var r = taskRename(id, patch.text);
+      if (r && r.mode) { mode = r.mode; }
+    }
+    save(true);
+    return { ok: true, mode: mode };
+  }
+
+  /** 让一条条目彻底归自己管（不再跟备注配对） */
+  function taskDetach(id) {
+    var t = taskById(id);
+    if (!t) { return false; }
+    unlinkTaskFromNote(t, t.text);
+    save(true);
+    return true;
+  }
+
+  /**
+   * 作业统计（v0.5.2 起是「作业统计」弹窗的**唯一一份**实现）。
+   *
+   * 口径（都和用户对过）：
+   *   · 完成率 = 该期间**布置的**条目里已完成的比例（不按完成时间算）
+   *   · 按时完成率 = 分母「有截止日 且（已完成 或 已过截止日）」，
+   *     分子「在截止日当天或之前完成」；还没到期又没完成的不进分母（不能算人迟到）
+   *   · 热力图 = 近 84 天（12 周）：done 当天完成几条；debt 那天布置的至今没完成几条
+   *   · 积压峰值 = 逐日模拟「未完成数 += 当天布置 − 当天完成」
+   *   · 连续 / 空窗只看「有完成的天」
+   */
+  function taskStats() {
+    var list = taskList();
+    var now = new Date();
+    var today = dateKey(now);
+    var monday = dateKey(mondayOf(now));
+    var weekEnd = dateKey(addDays(mondayOf(now), 6));
+    var weekAgo = dateKey(addDays(now, -6));
+    var DAYS = 84;
+    var first = addDays(now, -(DAYS - 1));
+    var idxOf = {}, daily = [], i, t, dd, c, ck, k, d0;
+    for (i = 0; i < DAYS; i++) {
+      k = dateKey(addDays(first, i));
+      idxOf[k] = i;
+      daily.push({ day: k, done: 0, assigned: 0, debt: 0 });
+    }
+    var out = {
+      total: 0, open: 0, done: 0, overdue: 0, doneToday: 0, doneWeek: 0,
+      weekTotal: 0, weekDone: 0, weekRate: 0, semRate: 0,
+      onTime: { ok: 0, total: 0 }, onTimeRate: 0,
+      avgSpend: 0, avgHang: 0,
+      byCourse: [], trend: [], daily: daily, wd: [0, 0, 0, 0, 0, 0, 0],
+      peak: { day: '', count: 0 }, peakNow: 0,
+      busyWd: 1, busyWdCount: 0,
+      streak: { cur: 0, best: 0 }, gap: { max: 0, from: '', to: '' },
+      firstDoneDay: '', lastDoneDay: '', daysSinceLastDone: -1,
+      debtDays: 0,
+      worstHang: null, slowest: null, bestOnTime: null, worstOnTime: null
+    };
+    var byCourse = {}, order = [];
+    var spendSum = 0, spendN = 0, hangSum = 0, hangN = 0;
+    for (i = 0; i < list.length; i++) {
+      t = list[i];
+      out.total++;
+      if (t.date && idxOf[t.date] != null) { daily[idxOf[t.date]].assigned++; }
+      dd = t.done ? taskDoneDay(t) : '';
+      if (!t.done) {
+        out.open++;
+        if (t.due && String(t.due) < today) {
+          out.overdue++;
+          /* 口径：分母 = 有截止日 且（已完成 或 已过截止日）—— 过期没做的也算「没按时」 */
+          out.onTime.total++;
+        }
+        if (t.date) {
+          var hg = dayDiff(today, t.date);
+          if (hg > 0) { hangSum += hg; hangN++; }
+        }
+        if (t.date && idxOf[t.date] != null) { daily[idxOf[t.date]].debt++; }
+      } else {
+        out.done++;
+        if (dd === today) { out.doneToday++; }
+        if (dd && dd >= weekAgo && dd <= today) { out.doneWeek++; }
+        if (dd) {
+          if (!out.firstDoneDay || dd < out.firstDoneDay) { out.firstDoneDay = dd; }
+          if (!out.lastDoneDay || dd > out.lastDoneDay) { out.lastDoneDay = dd; }
+          if (idxOf[dd] != null) {
+            daily[idxOf[dd]].done++;
+            d0 = parseDateKey(dd);
+            if (d0) { out.wd[weekdayOf(d0) - 1]++; }
+          }
+          var spend = t.date ? dayDiff(dd, t.date) : -1;
+          if (spend >= 0) { spendSum += spend; spendN++; }
+        }
+        if (t.due) {
+          out.onTime.total++;
+          if (dd && dd <= String(t.due)) { out.onTime.ok++; }
+        }
+      }
+      if (t.date && t.date >= monday && t.date <= weekEnd) {
+        out.weekTotal++;
+        if (t.done) { out.weekDone++; }
+      }
+      c = t.courseId ? courseById(t.courseId) : null;
+      ck = c ? c.id : '';
+      if (!byCourse[ck]) {
+        byCourse[ck] = {
+          id: ck, name: c ? c.name : '未分类', color: c ? colorHex(c.colorKey) : '',
+          open: 0, done: 0, total: 0, rate: 0,
+          onTimeOk: 0, onTimeTotal: 0, onTimeRate: -1,
+          spendSum: 0, spendN: 0, hangSum: 0, hangN: 0, avgSpend: 0, avgHang: 0
+        };
+        order.push(ck);
+      }
+      var row = byCourse[ck];
+      if (t.done) {
+        row.done++;
+        if (t.due) {
+          row.onTimeTotal++;
+          if (dd && dd <= String(t.due)) { row.onTimeOk++; }
+        }
+        var sp = t.date ? dayDiff(dd, t.date) : -1;
+        if (sp >= 0) { row.spendSum += sp; row.spendN++; }
+      } else {
+        row.open++;
+        /* 过期没做的也进这门课的按时率分母（和总口径一致） */
+        if (t.due && String(t.due) < today) { row.onTimeTotal++; }
+        if (t.date) {
+          var hg2 = dayDiff(today, t.date);
+          if (hg2 > 0) { row.hangSum += hg2; row.hangN++; }
+        }
+      }
+    }
+
+    /* 积压：逐日模拟 */
+    var openCnt = 0;
+    for (i = 0; i < DAYS; i++) {
+      openCnt += daily[i].assigned - daily[i].done;
+      if (openCnt < 0) { openCnt = 0; }
+      if (i === DAYS - 1) { out.peakNow = openCnt; }
+      if (openCnt > out.peak.count) { out.peak = { day: daily[i].day, count: openCnt }; }
+    }
+
+    /* 布置最多的星期 + 有欠账的天数 */
+    var busyWd = [0, 0, 0, 0, 0, 0, 0];
+    for (i = 0; i < DAYS; i++) {
+      if (daily[i].debt > 0) { out.debtDays++; }
+      if (!daily[i].assigned) { continue; }
+      d0 = parseDateKey(daily[i].day);
+      if (d0) { busyWd[weekdayOf(d0) - 1] += daily[i].assigned; }
+    }
+    out.busyWd = 1;
+    out.busyWdCount = busyWd[0];
+    for (i = 1; i < 7; i++) {
+      if (busyWd[i] > out.busyWdCount) { out.busyWd = i + 1; out.busyWdCount = busyWd[i]; }
+    }
+
+    /* 连续 / 空窗（只看有完成的天；今天还没完成不算断） */
+    var j = DAYS - 1;
+    if (daily[j].done === 0) { j--; }
+    while (j >= 0 && daily[j].done > 0) { out.streak.cur++; j--; }
+    var run = 0;
+    for (i = 0; i < DAYS; i++) {
+      if (daily[i].done > 0) {
+        run++;
+        if (run > out.streak.best) { out.streak.best = run; }
+      } else { run = 0; }
+    }
+    var last = -1;
+    for (i = 0; i < DAYS; i++) {
+      if (!daily[i].done) { continue; }
+      if (last >= 0 && (i - last - 1) > out.gap.max) {
+        out.gap = { max: i - last - 1, from: daily[last].day, to: daily[i].day };
+      }
+      last = i;
+    }
+    out.daysSinceLastDone = out.lastDoneDay ? dayDiff(today, out.lastDoneDay) : -1;
+
+    /* 近 30 天（旧字段，兼容） */
+    for (i = DAYS - 30; i < DAYS; i++) {
+      out.trend.push({ day: daily[i].day, count: daily[i].done });
+    }
+
+    out.weekRate = out.weekTotal ? Math.round(out.weekDone / out.weekTotal * 100) : 0;
+    out.semRate = out.total ? Math.round(out.done / out.total * 100) : 0;
+    out.onTimeRate = out.onTime.total ? Math.round(out.onTime.ok / out.onTime.total * 100) : 0;
+    out.avgSpend = spendN ? Math.round(spendSum / spendN * 10) / 10 : 0;
+    out.avgHang = hangN ? Math.round(hangSum / hangN * 10) / 10 : 0;
+
+    for (i = 0; i < order.length; i++) {
+      var r2 = byCourse[order[i]];
+      r2.total = r2.open + r2.done;
+      r2.rate = r2.total ? Math.round(r2.done / r2.total * 100) : 0;
+      r2.onTimeRate = r2.onTimeTotal ? Math.round(r2.onTimeOk / r2.onTimeTotal * 100) : -1;
+      r2.avgSpend = r2.spendN ? Math.round(r2.spendSum / r2.spendN * 10) / 10 : 0;
+      r2.avgHang = r2.hangN ? Math.round(r2.hangSum / r2.hangN * 10) / 10 : 0;
+      out.byCourse.push(r2);
+    }
+    out.byCourse.sort(function (a, b) {
+      if (b.open !== a.open) { return b.open - a.open; }
+      if (a.id === '') { return 1; }
+      if (b.id === '') { return -1; }
+      return String(a.name).localeCompare(String(b.name));
+    });
+
+    /* 洞察要用的极值 */
+    for (i = 0; i < out.byCourse.length; i++) {
+      var cc = out.byCourse[i];
+      if (cc.hangN > 0 && (!out.worstHang || cc.avgHang > out.worstHang.avgHang)) { out.worstHang = cc; }
+      if (cc.spendN > 0 && (!out.slowest || cc.avgSpend > out.slowest.avgSpend)) { out.slowest = cc; }
+      if (cc.onTimeRate >= 0) {
+        if (!out.bestOnTime || cc.onTimeRate > out.bestOnTime.onTimeRate) { out.bestOnTime = cc; }
+        if (!out.worstOnTime || cc.onTimeRate < out.worstOnTime.onTimeRate) { out.worstOnTime = cc; }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 「仅数据」同步范围的指纹（v0.5.2）。
+   * 只覆盖真正会同步的数据部分（去掉 settings / 导出时间 / 设备信息），
+   * 用来判断「这一次保存到底有没有动到数据」—— 只改了设置就不该排同步。
+   */
+  function dataSig() {
+    var o = {};
+    for (var k in state) {
+      if (!Object.prototype.hasOwnProperty.call(state, k)) { continue; }
+      if (k === 'settings' || k === 'exportedAt' || k === 'device' || k === 'appVersion') { continue; }
+      o[k] = state[k];
+    }
+    return JSON.stringify(o);
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -1516,6 +2036,8 @@ function todoLongList() { return todoDailyList(); }
     for (var i = 0; i < ct.modules.length; i++) {
       var k = ct.modules[i];
       if (k === 'longterm') { k = 'tasks'; changed++; }
+      /* v0.5.2：作业统计模块已并入作业卡卡底的「作业统计…」弹窗，配置里直接丢弃 */
+      if (k === 'hwstats') { changed++; continue; }
       if (!k || seen[k]) { continue; }
       seen[k] = 1;
       out.push(k);
@@ -1537,6 +2059,14 @@ function todoLongList() { return todoDailyList(); }
     if (!s.settings) { s.settings = defaultSettings((s.semesters && s.semesters[0] && s.semesters[0].id) || uid()); }
     ensureNotifExtras(s);   // v0.5.1：每日提醒 / 个性化覆盖补默认
     /**
+     * v0.5.2：作业默认截止日（下次上课日 - N 天）。
+     * 老配置没有这个字段 → 补 1（前一天）；用户手动选的 -1/0/2 原样保留。
+     */
+    if (s.settings.schedule) {
+      var hwCfg = (s.settings.schedule.homework = s.settings.schedule.homework || { on: true, mode: 'line' });
+      if (hwCfg.dueLeadDays == null) { hwCfg.dueLeadDays = 1; }
+    }
+    /**
      * v0.5.1a：把「多出来的空默认学期」清掉。
      * 放在这里而不是每次保存，是因为它要写墓碑（软删除），属于数据修复。
      */
@@ -1554,6 +2084,10 @@ function todoLongList() { return todoDailyList(); }
     // v0.1.8：「减少动效」入口已删除，旧数据里的开关一并清掉，避免"动画不动"的残留状态
     if (s.settings.appearance) { delete s.settings.appearance.reduceMotion; }
     else { s.settings.appearance = defaultSettings(uid()).appearance; }
+    /* v0.5.2：背景样式（色块 / 纯色 / 主题色渐变），老配置补「色块」——视觉不变 */
+    if (s.settings.appearance.bgStyle == null) { s.settings.appearance.bgStyle = 'blobs'; }
+    /* v0.5.2：作业逾期强调方式，老配置补「两者都要」 */
+    if (s.settings.appearance.overdueStyle == null) { s.settings.appearance.overdueStyle = 'both'; }
     // v0.3.8：流畅模式（关闭 / 标准 / 深度），老数据补默认「关闭」
     if (!{ full: 1, lite: 1, min: 1 }[s.settings.appearance.perfMode]) {
       s.settings.appearance.perfMode = 'full';
@@ -3916,6 +4450,13 @@ function todoLongList() { return todoDailyList(); }
     saveEvent: saveEvent, removeEvent: removeEvent,
     tasksOf: tasksOf, taskBoard: taskBoard, syncTasksFor: syncTasksFor, rebuildTasks: rebuildTasks,
     taskList: taskList, taskRaw: taskRaw,
+    /* v0.5.2：作业条目可编辑（手动添加 / 改文字 / 改课程 / 改日期 / 截止日） */
+    taskById: taskById, taskUpsert: taskUpsert, taskEdit: taskEdit, taskRename: taskRename,
+    taskDetach: taskDetach, taskDueInfo: taskDueInfo, taskStats: taskStats,
+    nextLessonOfCourse: nextLessonOfCourse, defaultDueFor: defaultDueFor, dayDiff: dayDiff,
+    overrideOf: overrideOf, unlinkTaskFromNote: unlinkTaskFromNote,
+    /* v0.5.2：仅数据同步范围的指纹 */
+    dataSig: dataSig,
     parseNoteTasks: parseNoteTasks, setTaskDone: setTaskDone, removeTask: removeTask,
     homeworkSettings: homeworkSettings, taskDoneDay: taskDoneDay,
     longTaskList: longTaskList, longTaskById: longTaskById, longTaskStats: longTaskStats,

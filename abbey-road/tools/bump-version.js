@@ -49,15 +49,15 @@ swapRe('app/js/core.js', /APP_VERSION = '[\d.a-z]+'/, "APP_VERSION = '" + next +
 swapRe('android/AndroidManifest.xml', /android:versionCode="\d+"/, 'android:versionCode="' + code + '"');
 swapRe('android/AndroidManifest.xml', /android:versionName="[\d.a-z]+"/, 'android:versionName="' + next + '"');
 swapRe('android/build.ps1', /\$version   = '[\d.a-z]+'/, "$version   = '" + next + "'");
-swapRe('android/build.ps1', /--version-code \d+/, '--version-code ' + code);
-swapRe('windows/src/AppPaths.cs', /Version = "[\d.a-z]+"/, 'Version = "' + next + '"');
+/* build.ps1 里 versionCode 是变量（aapt2 用 $versionCode），不是命令行字面量 */
+swapRe('android/build.ps1', /\$versionCode = \d+/, '$$versionCode = ' + code);
+swapRe('windows/src/AppPaths.cs', /FallbackVersion = "[\d.a-z]+"/, 'FallbackVersion = "' + next + '"');
 swapRe('windows/build.ps1', /\$version   = '[\d.a-z]+'/, "$version   = '" + next + "'");
 swapRe('windows/README.txt', /v[\d.a-z]+/, 'v' + next);
-swapRe('windows/installer/Installer.cs', /private const string Version = "[\d.a-z]+"/, 'private const string Version = "' + next + '"');
+swapRe('windows/installer/Installer.cs', /internal const string Version = "[\d.a-z]+"/, 'internal const string Version = "' + next + '"');
 /**
  * 网页资源加版本号（?v=x.y.z）：Android 的 WebView 会把上一版 APK 里的 JS/CSS 缓存下来，
  * 升级后还在跑旧代码。带上版本号就换了缓存键，升级后必定生效。
  */
 swapRe('app/index.html', /\?v=[\d.a-z]+/g, '?v=' + next);
-swapRe('windows/installer/Installer.cs', /版本 " \+ "[\d.a-z]+"/, '版本 " + "' + next + '"');
 console.log('版本已更新到 ' + next + '（Android versionCode ' + code + '）');

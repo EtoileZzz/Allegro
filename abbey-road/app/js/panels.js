@@ -1489,11 +1489,51 @@ var AR = window.AR || (window.AR = {});
       AR.Bridge.haptic('medium', $('settingsGrid'));
     }));
     /**
+     * 背景样式（v0.5.2）：色块 / 纯色 / 主题色渐变。
+     * 色块 = 一直以来的柔光斑；另外两档会把色块藏掉，纯色最省，渐变给深色界面留点层次。
+     */
+    box.appendChild(el('<div class="field-label" style="margin-top:14px">背景</div>'));
+    box.appendChild(segmented([
+      { label: '色块', value: 'blobs' },
+      { label: '纯色', value: 'plain' },
+      { label: '渐变', value: 'gradient' }
+    ], (ap.bgStyle === 'plain' || ap.bgStyle === 'gradient') ? ap.bgStyle : 'blobs', function (v) {
+      ap.bgStyle = v;
+      AR.Store.save(true);
+      if (AR.UI.applyBgStyle) { AR.UI.applyBgStyle(); }
+      AR.Bridge.haptic('medium', $('settingsGrid'));
+      AR.UI.toast(v === 'blobs' ? '背景：柔光色块' : (v === 'plain' ? '背景：纯色' : '背景：主题色渐变'));
+    }));
+    box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">'
+      + '色块 = 现在的柔光斑；纯色最干净（也最省电）；渐变用主题色的极淡底色，深色界面不至于太平。'
+      + '这三档都不影响毛玻璃和主题色。</p>'));
+
+    /**
      * 流畅模式：功能完全不变，只是把开销大的光效 / 动效换便宜的等价物。
      *   关闭 = 全部效果；标准 = 关质感模糊、光斑模糊、模糊类特效、主题墨滴；
      *   深度 = 再去掉 3D 翻折与逐条错峰，时长收紧。
      * 切换立刻生效（applyPerf 重挂 data-perf），存档进配置文件。
      */
+    /**
+     * 作业逾期强调（v0.5.2）：作业行右侧那个红色截止日，逾期时怎么更醒目。
+     * both = 红底白字 + 行左侧竖条（默认）；solid / bar / bold 只取其中一种。
+     */
+    box.appendChild(el('<div class="field-label" style="margin-top:14px">作业逾期强调</div>'));
+    box.appendChild(segmented([
+      { label: '红底白字', value: 'solid' },
+      { label: '左侧竖条', value: 'bar' },
+      { label: '两者都要', value: 'both' },
+      { label: '加粗', value: 'bold' }
+    ], (ap.overdueStyle === 'solid' || ap.overdueStyle === 'bar' || ap.overdueStyle === 'bold') ? ap.overdueStyle : 'both', function (v) {
+      ap.overdueStyle = v;
+      AR.Store.save(true);
+      if (AR.UI.applyOdStyle) { AR.UI.applyOdStyle(); }
+      AR.Bridge.haptic('medium', $('settingsGrid'));
+      AR.UI.toast(v === 'solid' ? '逾期：红底白字' : v === 'bar' ? '逾期：行左侧竖条' : v === 'bold' ? '逾期：日期加粗' : '逾期：红底白字 + 竖条');
+    }));
+    box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">'
+      + '只影响作业行右边那个红色截止日；没有截止日的作业不受影响。</p>'));
+
     box.appendChild(el('<div class="field-label" style="margin-top:14px">流畅模式</div>'));
     box.appendChild(segmented([
       { label: '关闭', value: 'full' }, { label: '标准', value: 'lite' }, { label: '深度', value: 'min' }
@@ -2431,6 +2471,38 @@ var AR = window.AR || (window.AR = {});
         AR.Bridge.haptic('light', $('settingsGrid'));
         if (AR.UI.refreshHomeworkPanels) { AR.UI.refreshHomeworkPanels(); }
       }));
+    /**
+     * 作业默认截止日（v0.5.2）：从「本次备注」识别出来的新作业，
+     * 自动写「这门课的下一次上课日 - N 天」。N = -1 表示不自动设。
+     */
+    box.appendChild(el('<h3 class="set-sub" style="margin-top:12px">默认截止日</h3>'));
+    var dueSeg = el('<div class="segmented" id="hwDueLead" style="margin-top:2px"></div>');
+    var dueOpts = [
+      { v: -1, t: '不自动' },
+      { v: 0, t: '上课当天' },
+      { v: 1, t: '前一天' },
+      { v: 2, t: '前两天' }
+    ];
+    if (hw.dueLeadDays == null) { hw.dueLeadDays = 1; }
+    for (var dl = 0; dl < dueOpts.length; dl++) {
+      (function (o) {
+        var b = el('<button class="seg' + (Number(hw.dueLeadDays) === o.v ? ' active' : '') + '" type="button" data-du="' + o.v + '">' + o.t + '</button>');
+        b.addEventListener('click', function () {
+          hw.dueLeadDays = o.v;
+          AR.Store.save(true);
+          AR.Bridge.haptic('light', b);
+          renderSettings();
+          AR.UI.toast(o.v < 0 ? '不再自动填截止日' : ('新作业截止日 = 下次上课日 - ' + o.v + ' 天'));
+        });
+        dueSeg.appendChild(b);
+      })(dueOpts[dl]);
+    }
+    box.appendChild(dueSeg);
+    box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
+      + '只作用于从「本次备注」识别出来的新作业：按这门课的下一次上课日往前推（周次 / 调课都会算进去）；'
+      + '算不出来就留空。手动添加的作业仍由你自己填，长按任意一条也能随时改。</p>'));
+    if (AR.UI.syncSegPill) { AR.UI.syncSegPill(dueSeg, true); }
+
     // 作业概况 + 作业记录（跟着作业走）
     (function () {
       var all = AR.Store.taskList ? AR.Store.taskList() : (AR.Store.get().tasks || []);
@@ -2452,10 +2524,10 @@ var AR = window.AR || (window.AR = {});
         + '<div class="hwo-bar"><i style="width:' + rate + '%"></i></div>'
         + '<div class="hwo-foot">本周完成 ' + doneWeek + ' 条 · 共 ' + all.length + ' 条</div></div>'));
     })();
-    var logBtn = el('<button class="btn" type="button" style="margin-top:10px">作业记录…</button>');
+    var logBtn = el('<button class="btn" type="button" style="margin-top:10px">作业统计…</button>');
     logBtn.addEventListener('click', function () {
       AR.Bridge.haptic('light', logBtn);
-      if (AR.UI.openTaskLog) { AR.UI.openTaskLog(); }
+      if (AR.UI.openHomeworkStats) { AR.UI.openHomeworkStats('overview'); }
     });
     box.appendChild(logBtn);
 
@@ -3610,7 +3682,8 @@ function renderLongTaskList(host) {
         })(SCOPES[si]);
       }
       box.appendChild(scopeRow);
-      box.appendChild(el('<p class="muted">仅数据：课表/任务/日程会同步，主题、提醒等设置留在本机</p>'));
+      box.appendChild(el('<p class="muted">仅数据：课表 / 任务 / 作业 / 日程会同步；主题、提醒等设置只留在本机'
+        + '（不上传也不下载），改设置不会触发同步。云端已有的那份设置原样保留，不会被本机覆盖。</p>'));
     }
     if (!synced) {
       /* ── 未配置：引导表单 ── */

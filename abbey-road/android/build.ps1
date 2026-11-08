@@ -35,8 +35,8 @@ $jdk       = Join-Path $buildRoot 'jdk-17.0.20+8'
 $sdk       = Join-Path $buildRoot 'sdk'
 $platform  = Join-Path $sdk 'platforms\android-34\android.jar'
 $bt        = Join-Path $sdk 'build-tools\34.0.0'
-$version   = '0.5.1a'
-$versionCode = 73
+$version   = '0.5.2'
+$versionCode = 75
 
 # ---------------------------------------------------------------------------
 # Version consistency: build.ps1 and AndroidManifest.xml both hard-code the

@@ -54,6 +54,10 @@
   function nowMs() { return Date.now(); }
   function enc(s) { return new TextEncoder().encode(s); }
   function dec(buf) { return new TextDecoder().decode(buf); }
+  function cloneJSON(o) {
+    if (o == null) { return o; }
+    try { return JSON.parse(JSON.stringify(o)); } catch (e) { return o; }
+  }
 
   function readJSON(key, dflt) {
     try {
@@ -152,6 +156,7 @@
   var state = { salt: '' };  // 当前 salt（加密时写进信封）
   var busy = null;           // 正在跑的那次同步（Promise）
   var debounceTimer = null;
+  var debounceOverride = 0;   // 测试用：把去抖时长压短（正常情况保持 0）
   var applying = false;   // 正在把远端内容合进本机（此时 save() 不该再触发推送）
   var listeners = [];
 
@@ -189,6 +194,19 @@
 
   function isConfigured() {
     return !!(cfg.baseUrl && cfg.token && getPass());
+  }
+
+  /**
+   * 「仅数据」范围用的数据指纹（v0.5.2）。
+   * 只比会同步的数据部分（不含 settings）：指纹没变 = 这次保存只动了设置，
+   * 那就没必要发请求（以前每改一个设置都会 GET+PUT、rev+1、还弹 toast）。
+   */
+  function localDataSig() {
+    try { return (AR.Store && AR.Store.dataSig) ? AR.Store.dataSig() : ''; } catch (e) { return ''; }
+  }
+  function dataChangedSinceLastSync() {
+    if (!run.dataSig) { return true; }          // 还没有基准：宁可同步一次
+    return localDataSig() !== run.dataSig;
   }
 
   function setConfig(next) {
@@ -312,10 +330,24 @@
       if (res.status !== 200) { throw classify(res); }
       var remote = res.json || {};
       var rev = Number(remote.rev) || 0;
-      if (kind === 'force') { return pushOnce(rev, rev); }
+      if (kind === 'force') {
+        /**
+         * v0.5.2：仅数据范围下「用本机覆盖云端」也不该动设置 ——
+         * 先把云端那份设置读出来，推的时候原样放回去。
+         */
+        if (cfg.scope === 'data' && remote.envelope) {
+          var fEnv = parseEnv(remote.envelope);
+          return ensureKey(fEnv).then(function (fk) {
+            return decryptEnvelope(fk, fEnv).then(function (rs) {
+              return pushOnce(rev, rev, (rs && rs.settings) || null);
+            });
+          });
+        }
+        return pushOnce(rev, rev, null);
+      }
       if (!remote.envelope) {
         // 云端是空的：直接把本机推上去
-        return pushOnce(rev, rev);
+        return pushOnce(rev, rev, null);
       }
       var remoteEnv = parseEnv(remote.envelope);
       return ensureKey(remoteEnv)
@@ -326,7 +358,10 @@
               return { rev: rev };
             });
           }
-          return applyRemote(remoteState, rev).then(function () { return pushOnce(rev, rev); });
+          return applyRemote(remoteState, rev).then(function () {
+            /* v0.5.2：仅数据范围 → 推的时候把云端那份设置原样带上，别把它抹掉 */
+            return pushOnce(rev, rev, (remoteState && remoteState.settings) || null);
+          });
         }); });
     });
   }
@@ -347,8 +382,9 @@
   }
 
   /** 推一次；409 说明别人先推了 → 用响应里的最新密文合并后重推 */
-  function pushOnce(ifMatchRev, tryRev) {
+  function pushOnce(ifMatchRev, tryRev, remoteSettings) {
     var attempt = 0;
+    var keepSettings = remoteSettings || null;
     function step(matchRev) {
       attempt++;
       return ensureKey(null).then(function (key) {
@@ -356,7 +392,15 @@
         delete payload.device;          // 设备名是本机属性，不该互相覆盖（合并时本来也会忽略）
         delete payload.exportedAt;
         /* v0.5.1「仅数据」范围：设置不上传（每台设备各自保留） */
-        if (cfg.scope === 'data') { delete payload.settings; }
+        if (cfg.scope === 'data') {
+          /**
+           * v0.5.2：本机设置永远不上传；但也不能顺手把**云端原有的那份**抹掉 ——
+           * 以前这里直接 delete，云端信封从此没有 settings，
+           * 重装 / 换设备就再也拿不回上次「全部」模式推上去的设置。
+           * 云端没有过设置时写空对象（合并端看到空对象什么也不会改）。
+           */
+          payload.settings = keepSettings ? cloneJSON(keepSettings) : {};
+        }
         return encryptState(key, payload, matchRev + 1).then(function (env) {
           var envelope = JSON.stringify(env);
           if (envelope.length > MAX_ENVELOPE) {
@@ -376,6 +420,9 @@
               return ensureKey(curEnv)
                 .then(function (k2) { return decryptEnvelope(k2, curEnv); })
                 .then(function (remoteState) {
+                  if (cfg.scope === 'data' && remoteState && remoteState.settings) {
+                    keepSettings = remoteState.settings;   // 别人更新过设置：跟着保留最新的那份
+                  }
                   return applyRemote(remoteState, serverRev).then(function (r) {
                     emit('conflict-retry', { attempt: attempt, rev: serverRev, conflicts: r.conflicts });
                     return step(serverRev);
@@ -399,6 +446,7 @@
     run.dirty = false;
     run.lastConflicts = info.conflicts || 0;
     if (info.bytes) { run.lastBytes = info.bytes; }
+    run.dataSig = localDataSig();     // v0.5.2：记下「已对齐的数据指纹」
     writeJSON(RUN_KEY, run);
     emit('done', info);
     /**
@@ -442,13 +490,23 @@
     if (!isConfigured()) { return; }
     var mode = cfg.autoMode || 'open';
     if (mode === 'off') { return; }
+    /**
+     * v0.5.2：范围=仅数据时，设置改动不该触发同步。
+     * 以前这里无条件排程，于是「改个主题 / 提醒开关」也会发一次 GET+PUT、
+     * 云端 rev 跟着涨、还弹一句「已同步」——用户看到的就是「仅数据还是同步了设置」。
+     * 数据指纹一变（加课 / 打勾 / 日程 / 任务）照常同步。
+     */
+    if (cfg.scope === 'data' && !dataChangedSinceLastSync()) {
+      if (run.dirty) { run.dirty = false; writeJSON(RUN_KEY, run); }
+      return;
+    }
     run.dirty = true;
     writeJSON(RUN_KEY, run);
     if (debounceTimer) { clearTimeout(debounceTimer); }
     debounceTimer = setTimeout(function () {
       debounceTimer = null;
       syncNow().catch(function () { /* 静默：本地已保存，下次再说 */ });
-    }, mode === 'every' ? DEBOUNCE_FAST_MS : DEBOUNCE_MS);
+    }, debounceOverride || (mode === 'every' ? DEBOUNCE_FAST_MS : DEBOUNCE_MS));
   }
 
   /** 打开 App / 回到前台：按频率决定要不要拉一次 */
@@ -485,7 +543,8 @@
       try { parsed = JSON.parse(env); } catch (e) { throw new Error('信封损坏'); }
       return ensureKey(parsed).then(function (key) {
         return decryptEnvelope(key, parsed).then(function (remoteState) {
-          var opts = { preferIncoming: true };
+          /* v0.5.2：回滚也要遵守同步范围 —— 仅数据模式下别把旧设置合进来 */
+          var opts = { preferIncoming: true, mergeSettings: cfg.scope !== 'data' };
           var plan = AR.Store.planMerge(remoteState, opts);
           AR.Store.applyMerge(remoteState, opts);
           return {
@@ -528,7 +587,9 @@
     /* 测试用 */
     _internal: {
       deriveKey: deriveKey, decryptEnvelope: decryptEnvelope, encryptState: encryptState,
-      b64ToBytes: b64ToBytes, bytesToB64: bytesToB64, AAD_PREFIX: AAD_PREFIX, ITER: ITER
+      b64ToBytes: b64ToBytes, bytesToB64: bytesToB64, AAD_PREFIX: AAD_PREFIX, ITER: ITER,
+      localDataSig: localDataSig, dataChangedSinceLastSync: dataChangedSinceLastSync,
+      setDebounce: function (ms) { debounceOverride = Math.max(0, Number(ms) || 0); }
     }
   };
 })(window.AR = window.AR || {});

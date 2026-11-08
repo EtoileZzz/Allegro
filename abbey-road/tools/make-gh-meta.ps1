@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$OutFile = 'dist\_gh_push_meta.json'
 )
 
@@ -8,7 +8,8 @@
 # NOTE: keep this file ASCII-only (PowerShell 5.1 misreads BOM-less UTF-8).
 
 $ErrorActionPreference = 'Stop'
-$ws = 'C:\Users\Etoile\Documents\ARProject'
+# 工作区根 = 本脚本所在目录(abbey-road/tools)往上两级；不写死本机绝对路径（源码包要开源）
+$ws = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $ws
 
 Write-Host '== collecting git info =='

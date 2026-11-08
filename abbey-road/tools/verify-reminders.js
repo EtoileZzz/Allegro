@@ -204,7 +204,14 @@ function newTask(env, text, goalTarget, unit) {
     const d = new Date(x.atMs);
     return d.getDay() === 0 || d.getDay() === 6;
   });
-  ok('N24 weekdaysOnly：周末不发', !weekendHit && list.length > 0, '条数 ' + list.length);
+  /**
+   * 用例本身依赖「今天是工作日还是周末」：只统计**今天**的通知，
+   * 周末本来就该 0 条。以前固定写 list.length > 0，周末跑就会误报。
+   */
+  const wd = TODAY.getDay();
+  const expectN = (wd === 0 || wd === 6) ? 0 : 1;
+  ok('N24 weekdaysOnly：周末不发', !weekendHit && list.length === expectN,
+    '条数 ' + list.length + '，期望 ' + expectN + '（今天 ' + wd + '）');
 }
 
 /* ══ 9. 课程提前量 / 关闭某课 ══ */

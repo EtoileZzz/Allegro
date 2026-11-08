@@ -976,7 +976,6 @@ var AR = window.AR || (window.AR = {});
   var CUSTOM_MODULES = [
     { k: 'tasks', t: '任务', d: '每天/每周要做的事 · 带进度' },
     { k: 'homework', t: '作业', d: '今天的作业' },
-    { k: 'hwstats', t: '作业统计', d: '完成情况一览' },
     { k: 'todaycourses', t: '今日课表', d: '今天要上的课' },
     { k: 'nextclass', t: '接下来', d: '下一节课' },
     { k: 'events', t: '日程', d: '星标 + 时间线 + 归档' },
@@ -992,16 +991,18 @@ var AR = window.AR || (window.AR = {});
     if (!exp || typeof exp !== 'object') { exp = S.settings.experimental = {}; }
     var ct = exp.customTab;
     if (!ct || typeof ct !== 'object') {
-      ct = exp.customTab = { enabled: false, modules: ['tasks', 'homework', 'hwstats', 'weekgrid'] };
+      ct = exp.customTab = { enabled: false, modules: ['tasks', 'homework', 'weekgrid'] };
     }
     if (!ct.modules || Object.prototype.toString.call(ct.modules) !== '[object Array]') {
-      ct.modules = ['tasks', 'homework', 'hwstats', 'weekgrid'];
+      ct.modules = ['tasks', 'homework', 'weekgrid'];
     }
     // v0.4.0 旧 key 映射：重要事件 / 倒计时 / 星标日程 → 都并进「日程」一张卡
+    // v0.5.2：hwstats（作业统计模块）已并进作业卡卡底的「作业统计…」弹窗，直接从清单里丢弃
     var mapped = [];
     for (var mi = 0; mi < ct.modules.length; mi++) {
       var mk = ct.modules[mi];
       if (mk === 'keyevents' || mk === 'countdown' || mk === 'starevents') { mk = 'events'; }
+      if (mk === 'hwstats') { continue; }
       if (mapped.indexOf(mk) < 0) { mapped.push(mk); }
     }
     ct.modules = mapped;
@@ -1067,6 +1068,7 @@ var AR = window.AR || (window.AR = {});
   function modHomework() {
     var board = AR.Store.taskBoard ? AR.Store.taskBoard(U.dateKey(new Date())) : { open: [], done: [], doneWeek: [] };
     var openN = board.open.length, doneN = board.done.length;
+    var st = AR.Store.taskStats ? AR.Store.taskStats() : null;
     var card = el('<div class="hw-card"></div>');
     card.setAttribute('data-hwnode', 'mod-homework');
     card.__rebuild = modHomework;
@@ -1074,9 +1076,32 @@ var AR = window.AR || (window.AR = {});
       + '<span class="hw-t">作业</span>'
       + '<span class="hw-n">' + (openN ? openN + ' 条未完成' : (doneN || board.doneWeek.length ? '已全部完成' : '还没有作业'))
       + (doneN ? ' · 已完成 ' + doneN : '') + '</span></div>'));
+    /* 汇总条（v0.5.2）：和任务卡的「今天 / 本周」同一个位置、同一种读法 */
+    if (st && st.total) {
+      var tags = '<span class="hw-stat"><b>' + st.open + '</b>未完成</span>';
+      if (st.overdue) { tags += '<span class="hw-stat danger"><b>' + st.overdue + '</b>逾期</span>'; }
+      tags += '<span class="hw-stat"><b>' + st.doneToday + '</b>今天完成</span>'
+        + '<span class="hw-stat"><b>' + st.doneWeek + '</b>本周完成</span>';
+      card.appendChild(el('<div class="hw-stats">' + tags + '</div>'));
+    }
     var bodyEl = el('<div class="hw-body"></div>');
     bodyEl.appendChild(hwListBox(board));
     card.appendChild(bodyEl);
+    /* 卡底：作业记录 + 添加作业（和任务卡同一个位置） */
+    var foot = el('<div class="tk-foot"></div>');
+    var logBtn = el('<button class="tk-fbtn" type="button">作业统计…</button>');
+    logBtn.addEventListener('click', function () {
+      AR.Bridge.haptic('light', logBtn);
+      openHomeworkStats('overview');
+    });
+    var addBtn = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 添加作业</button>');
+    addBtn.addEventListener('click', function () {
+      AR.Bridge.haptic('light', addBtn);
+      openHomeworkEdit(null);
+    });
+    foot.appendChild(logBtn);
+    foot.appendChild(addBtn);
+    card.appendChild(foot);
     return card;
   }
 
@@ -1091,52 +1116,52 @@ var AR = window.AR || (window.AR = {});
   return longTaskCard(false);
 }
 
-  function modHwstats() {
-    var all = AR.Store.taskList ? AR.Store.taskList() : (AR.Store.get().tasks || []);
-    // v0.4.1b：回收站里的作业不算进统计
-    var todayK = U.dateKey(new Date());
-    var weekAgo = U.dateKey(U.addDays(new Date(), -6));
-    var openN = 0, doneToday = 0, doneWeek = 0, doneN = 0;
-    var byCourse = {};
+  /** 某门课的作业明细（作业统计 → 按课程 → 点课程名进来的） */
+  function openCourseHomework(courseId, name) {
+    var all = AR.Store.taskList ? AR.Store.taskList() : [];
+    var open = [], done = [];
     for (var i = 0; i < all.length; i++) {
       var t = all[i];
-      var dd = AR.Store.taskDoneDay ? AR.Store.taskDoneDay(t) : '';
-      if (!t.done) { openN++; }
-      else {
-        doneN++;
-        if (dd === todayK) { doneToday++; }
-        if (dd && dd >= weekAgo) { doneWeek++; }
+      if (String(t.courseId || '') !== String(courseId || '')) { continue; }
+      if (t.done) { done.push(t); } else { open.push(t); }
+    }
+    var todayK = U.dateKey(new Date());
+    var body = el('<div class="hwst"></div>');
+    body.appendChild(el('<div class="hwst-kpis">'
+      + hwStatKpi('未完成', open.length, '条', '')
+      + hwStatKpi('已完成', done.length, '条', '')
+      + hwStatKpi('合计', open.length + done.length, '条', '') + '</div>'));
+    if (!open.length && !done.length) {
+      body.appendChild(el('<div class="hwst-empty">这门课还没有作业记录。</div>'));
+    }
+    [['未完成', open, false], ['已完成', done, true]].forEach(function (g) {
+      if (!g[1].length) { return; }
+      body.appendChild(el('<div class="hwst-sh">' + g[0] + '<span>· ' + g[1].length + ' 项</span></div>'));
+      for (var j = 0; j < g[1].length; j++) {
+        var row = el(hwStatRowHTML(g[1][j], todayK));
+        (function (rec, isDone, node) {
+          bindLongPress(node, function () {
+            if (isDone) {
+              AR.Store.setTaskDone(rec.id, false);
+              AR.UI.toast('已找回：「' + rec.text + '」');
+              refreshHomework();
+            } else {
+              var live = AR.Store.taskById ? AR.Store.taskById(rec.id) : null;
+              if (live) { openHomeworkMenu(live); }
+            }
+          }, isDone ? 600 : 520);
+          node.addEventListener('click', function () {
+            var live2 = AR.Store.taskById ? AR.Store.taskById(rec.id) : null;
+            if (!isDone && live2) { openHomeworkMenu(live2); }
+          });
+        })(g[1][j], g[2], row);
+        body.appendChild(row);
       }
-      var c = AR.Store.courseById(t.courseId);
-      var name = c ? c.name : '（课程已删）';
-      byCourse[name] = byCourse[name] || { open: 0, done: 0 };
-      if (t.done) { byCourse[name].done++; } else { byCourse[name].open++; }
-    }
-    var card = el('<div class="hw-card"></div>');
-    card.setAttribute('data-hwnode', 'mod-hwstats');
-    card.__rebuild = modHwstats;
-    card.appendChild(el('<div class="hw-head"><span class="hw-ico">✎</span>'
-      + '<span class="hw-t">作业统计</span><span class="hw-n">共 ' + all.length + ' 条</span></div>'));
-    var bodyEl = el('<div class="hw-body"></div>');
-    bodyEl.appendChild(el('<div class="cm-stats">'
-      + '<div class="cm-stat"><b>' + openN + '</b><span>未完成</span></div>'
-      + '<div class="cm-stat"><b>' + doneToday + '</b><span>今天完成</span></div>'
-      + '<div class="cm-stat"><b>' + doneWeek + '</b><span>本周完成</span></div>'
-      + '<div class="cm-stat"><b>' + doneN + '</b><span>累计完成</span></div></div>'));
-    var names = Object.keys(byCourse);
-    names.sort(function (a, b) { return byCourse[b].open - byCourse[a].open; });
-    for (var n = 0; n < names.length; n++) {
-      bodyEl.appendChild(el('<div class="cm-line"><span class="cm-name">' + U.escapeHtml(names[n]) + '</span>'
-        + '<span class="cm-num">未完成 ' + byCourse[names[n]].open + ' · 已完成 ' + byCourse[names[n]].done + '</span></div>'));
-    }
-    var logBtn = el('<button class="btn" type="button" style="margin-top:8px">作业记录…</button>');
-    logBtn.addEventListener('click', function () {
-      AR.Bridge.haptic('light', logBtn);
-      if (AR.UI.openTaskLog) { AR.UI.openTaskLog(); }
     });
-    bodyEl.appendChild(logBtn);
-    card.appendChild(bodyEl);
-    return card;
+    openModal({
+      title: name || '未分类', sub: '这门课的作业 · 长按可编辑 / 找回', body: body, wide: true,
+      actions: [{ label: '回到统计', onClick: function (close) { close(); openHomeworkStats('course'); } }]
+    });
   }
 
   function modTodaycourses() {
@@ -2326,7 +2351,6 @@ var AR = window.AR || (window.AR = {});
     tasks: modTasks,
     homework: modHomework,
     longterm: modLongterm,
-    hwstats: modHwstats,
     todaycourses: modTodaycourses,
     nextclass: modNextClass,
     events: modEvents,
@@ -7243,17 +7267,28 @@ var AR = window.AR || (window.AR = {});
     return d ? ((d.getMonth() + 1) + '/' + d.getDate()) : '';
   }
 
-  /** 作业条目：左滑或右滑都能划掉 */
+  /**
+   * 作业条目（v0.5.2 定稿）：左 = 布置日（主题色 chip），右 = 截止日（同款 chip、红色）。
+   * 滑动划掉、长按出菜单，两个手势**共用同一套指针**（见 bindSwipeRow 的 onHold），
+   * 所以不会再出现"划到一半卡住"。
+   * 没有截止日就只显示布置日（旧版那两个字的提示已按用户要求删掉）。
+   */
   function hwRow(task) {
     var todayK = U.dateKey(new Date());
+    var info = AR.Store.taskDueInfo ? AR.Store.taskDueInfo(task, todayK) : { kind: 'none', label: '' };
+    var over = info.kind === 'overdue';
     var dateTag = (task.date && task.date !== todayK)
       ? '<span class="hw-date">' + hwShortDate(task.date) + '</span>' : '';
-    var node = el('<div class="hw-row" data-id="' + task.id + '">'
+    var dueTag = task.due
+      ? '<span class="hw-due' + (over ? ' od' : '') + '">' + hwShortDate(task.due) + '</span>' : '';
+    var node = el('<div class="hw-row' + (over ? ' has-od' : '') + '" data-id="' + task.id + '">'
       + dateTag
       + '<span class="hw-text">' + U.escapeHtml(task.text) + '</span>'
+      + dueTag
       + '<span class="hw-swipe-hint">划掉</span></div>');
     bindSwipeRow(node, {
       flyOut: true,
+      onHold: function () { openHomeworkMenu(task); },   // v0.5.2：和滑动一套指针，不再各挂一套
       onCommit: function () {
         AR.Store.setTaskDone(task.id, true);
         AR.Bridge.haptic('medium', node);
@@ -7265,6 +7300,238 @@ var AR = window.AR || (window.AR = {});
     return node;
   }
 
+  /** 一行小字：课程 · 布置日 · 截止日 · 是否还跟着备注 */
+  function hwMetaLine(task) {
+    var bits = [];
+    var c = task.courseId ? AR.Store.courseById(task.courseId) : null;
+    bits.push(c ? c.name : '未分类');
+    if (task.date) { bits.push('布置 ' + hwShortDate(task.date)); }
+    if (task.due) { bits.push('截止 ' + hwShortDate(task.due)); }
+    if (task.detached) { bits.push('独立于备注'); }
+    return bits.join(' · ');
+  }
+
+  /**
+   * 长按未完成作业 → 菜单（v0.5.2）：编辑… / 设截止日… / 删除。
+   * 已完成的行长按仍然是「找回」，两边不冲突：同一个手势，不同对象。
+   */
+  function openHomeworkMenu(task) {
+    if (!task) { return; }
+    var body = el('<div></div>');
+    body.appendChild(el('<p class="muted" style="margin:0 0 6px">' + U.escapeHtml(hwMetaLine(task)) + '</p>'));
+    var list = el('<div class="export-list"></div>');
+    var rowEdit = el('<button class="export-row" type="button">'
+      + '<span class="er-name">编辑…</span>'
+      + '<span class="er-meta">改文字 / 课程 / 布置日 / 截止日</span></button>');
+    rowEdit.addEventListener('click', function () {
+      AR.Bridge.haptic('light', rowEdit);
+      closeModal();
+      openHomeworkEdit(task);
+    });
+    var rowDue = el('<button class="export-row" type="button">'
+      + '<span class="er-name">设截止日…</span>'
+      + '<span class="er-meta">' + (task.due ? ('现在是 ' + U.escapeHtml(task.due)) : '现在没有截止日') + '</span></button>');
+    rowDue.addEventListener('click', function () {
+      AR.Bridge.haptic('light', rowDue);
+      closeModal();
+      openHomeworkDue(task);
+    });
+    var rowDel = el('<button class="export-row danger" type="button">'
+      + '<span class="er-name">删除</span>'
+      + '<span class="er-meta">备注里那一行不会动，删掉也不会再自动长回来</span></button>');
+    rowDel.addEventListener('click', function () {
+      AR.Bridge.haptic('warn', rowDel);
+      closeModal();
+      deleteHomework(task);
+    });
+    list.appendChild(rowEdit);
+    list.appendChild(rowDue);
+    list.appendChild(rowDel);
+    body.appendChild(list);
+    openModal({ title: '这条作业', sub: task.text || '', body: body });
+  }
+
+  /** 删除一条作业（软删除 + 撤销） */
+  function deleteHomework(task) {
+    if (!task) { return; }
+    confirmDanger({
+      title: '删除这条作业？', sub: task.text || '',
+      text: '删了可以在回收站里找回；备注里那一行不被改动。',
+      okLabel: '确认删除',
+      onOk: function () {
+        AR.Store.removeTask(task.id);
+        AR.Bridge.haptic('warn', $('modalCard'));
+        refreshHomework();
+        toastUndo('已删除作业：' + (task.text || ''), '撤销', function () {
+          AR.Store.restore('tasks', task.id);
+          refreshHomework();
+        });
+      }
+    });
+  }
+
+  /** 只设截止日（长按菜单里的快捷入口） */
+  function openHomeworkDue(task) {
+    if (!task) { return; }
+    var body = el('<div class="lt-edit">'
+      + '<div class="field"><label class="field-label">截止日</label>'
+      + '<input class="input" id="hwDueOnly" type="date" value="' + U.escapeHtml(task.due || '') + '"></div>'
+      + '<p class="muted" style="margin:4px 0 0">截止日只用于显示（今天 / 明天 / 剩 N 天 / 逾期 N 天），'
+      + '不会加一条新提醒。</p></div>');
+    openModal({
+      title: '设截止日', sub: task.text || '', body: body,
+      actions: [
+        {
+          label: '清除', onClick: function (close) {
+            AR.Store.taskEdit(task.id, { due: '' });
+            close();
+            refreshHomework();
+            toast('已清除截止日');
+          }
+        },
+        {
+          label: '保存', kind: 'primary', onClick: function (close) {
+            var input = $('hwDueOnly');
+            var v = input ? String(input.value || '') : '';
+            AR.Store.taskEdit(task.id, { due: v });
+            close();
+            refreshHomework();
+            toast(v ? ('截止日：' + v) : '已清除截止日');
+          }
+        }
+      ]
+    });
+  }
+
+  /** 当前学期的课程（编辑弹窗的课程 chips 用） */
+  function hwCourseChoices() {
+    var sem = AR.Store.currentSemester();
+    var sid = sem && sem.id;
+    var all = AR.Store.get().courses || [];
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var c = all[i];
+      if (!c || c.deletedAt) { continue; }
+      if (sid && c.semesterId && c.semesterId !== sid) { continue; }
+      out.push(c);
+    }
+    return out;
+  }
+
+  /**
+   * 编辑一条作业；task 传 null 就是「手动添加」（v0.5.2）。
+   * 两条路径共用同一张表、同一种行 —— 手动添加的只是 source='manual'。
+   */
+  function openHomeworkEdit(task) {
+    var isNew = !task;
+    var cur = task || {};
+    var sem = AR.Store.currentSemester();
+    var v = {
+      courseId: cur.courseId || '',
+      date: cur.date || U.dateKey(new Date()),
+      due: cur.due || ''
+    };
+    var body = el('<div class="lt-edit">'
+      + '<div class="field"><label class="field-label">内容</label>'
+      + '<input class="input" id="hwText" placeholder="例如 习题 3-5" value="' + U.escapeHtml(cur.text || '') + '"></div>'
+      + '<div class="field"><label class="field-label">课程（可空）</label>'
+      + '<div class="row gap" id="hwCourses" style="flex-wrap:wrap"></div></div>'
+      + '<div class="field"><label class="field-label">布置日</label>'
+      + '<input class="input" id="hwDate" type="date" value="' + U.escapeHtml(v.date) + '"></div>'
+      + '<div class="field"><label class="field-label">截止日（可空）</label>'
+      + '<div class="row gap"><input class="input" id="hwDue" type="date" style="flex:1 1 auto" value="' + U.escapeHtml(v.due) + '">'
+      + '<button class="chip-btn" type="button" id="hwDueNext">下次这节课</button>'
+      + '<button class="chip-btn" type="button" id="hwDueClear">清除</button></div>'
+      + '<p class="muted" id="hwDueHint" style="margin:4px 0 0"></p></div>'
+      + (isNew ? '' : '<p class="muted" style="margin:4px 0 0">' + U.escapeHtml(hwMetaLine(cur)) + '</p>')
+      + '</div>');
+
+    var chips = body.querySelector('#hwCourses');
+    var paintCourses = function () {
+      chips.innerHTML = '';
+      var mk = function (id, name, color) {
+        var on = String(v.courseId || '') === String(id || '');
+        var b = el('<button class="chip-btn' + (on ? ' active' : '') + '" type="button"'
+          + (on && color ? ' style="border-color:' + U.escapeHtml(color) + ';color:' + U.escapeHtml(color) + '"' : '')
+          + '>' + U.escapeHtml(name) + '</button>');
+        b.addEventListener('click', function () {
+          v.courseId = id;
+          AR.Bridge.haptic('light', b);
+          paintCourses();
+          paintHint();
+        });
+        chips.appendChild(b);
+      };
+      mk('', '未分类', '');
+      var list = hwCourseChoices();
+      for (var i = 0; i < list.length; i++) {
+        mk(list[i].id, list[i].name, U.colorHex(list[i].colorKey));
+      }
+    };
+
+    var hint = body.querySelector('#hwDueHint');
+    var paintHint = function () {
+      if (!v.courseId) { hint.textContent = '没选课程时没法算「下次这节课」'; return; }
+      var next = AR.Store.nextLessonOfCourse ? AR.Store.nextLessonOfCourse(v.courseId, v.date) : null;
+      hint.textContent = next
+        ? ('下次这节课：' + hwShortDate(next.date) + '（点按钮填进截止日）')
+        : '这门课在接下来 28 天里没有课';
+    };
+
+    body.querySelector('#hwDueNext').addEventListener('click', function () {
+      var next = AR.Store.nextLessonOfCourse ? AR.Store.nextLessonOfCourse(v.courseId, body.querySelector('#hwDate').value) : null;
+      if (!next) { toast('先选一门课，或者这门课接下来没课'); return; }
+      body.querySelector('#hwDue').value = next.date;
+      AR.Bridge.haptic('light', body.querySelector('#hwDueNext'));
+    });
+    body.querySelector('#hwDueClear').addEventListener('click', function () {
+      body.querySelector('#hwDue').value = '';
+      AR.Bridge.haptic('light', body.querySelector('#hwDueClear'));
+    });
+
+    paintCourses();
+    paintHint();
+
+    var collect = function () {
+      return {
+        text: String((body.querySelector('#hwText').value || '')).trim(),
+        courseId: v.courseId,
+        date: String(body.querySelector('#hwDate').value || '').trim() || U.dateKey(new Date()),
+        due: String(body.querySelector('#hwDue').value || '').trim()
+      };
+    };
+
+    var doSave = function (close) {
+      var patch = collect();
+      if (!patch.text) { toast('先写点内容'); return; }
+      if (isNew) {
+        AR.Store.taskUpsert({
+          text: patch.text, courseId: patch.courseId, date: patch.date, due: patch.due,
+          semesterId: (sem && sem.id) || '', source: 'manual'
+        });
+        AR.Bridge.haptic('medium', $('modalCard'));
+        close();
+        refreshHomework();
+        toast('已添加作业');
+        return;
+      }
+      var r = AR.Store.taskEdit(cur.id, patch);
+      AR.Bridge.haptic('medium', $('modalCard'));
+      close();
+      refreshHomework();
+      if (r && r.mode === 'note') { toast('已保存（备注里那一行也改了）'); }
+      else if (r && r.mode === 'detached') { toast('已保存（这条不再跟随备注）'); }
+      else { toast('已保存'); }
+    };
+
+    openModal({
+      title: isNew ? '添加作业' : '编辑作业',
+      sub: isNew ? '不选课程就归到「未分类」' : '',
+      body: body, wide: true,
+      actions: [{ label: isNew ? '添加' : '保存', kind: 'primary', onClick: doSave }]
+    });
+  }
+
   /**
    * v0.4.0 通用「横向滑动」手势 —— 作业的"划掉"和日程的"归档"共用一套。
    * cfg：
@@ -7274,6 +7541,11 @@ var AR = window.AR || (window.AR = {});
    *   threshold 触发阈值 px（默认 64）
    *   flyOut    true = 划到位就飞出去（作业的观感）；false = 先滑回原位再处置（日程要二次确认）
    *   onCommit  划到位后调用（由调用方决定归档 / 弹确认）
+   *   onHold    v0.5.2：长按（默认 520ms）回调。**和滑动共用同一套指针事件**：
+   *             手指在按下后移动超过阈值就立刻取消长按、转成滑动；
+   *             长按一旦触发会先把行复位并结束这次手势，松手不会再飞出去。
+   *             以前作业行另外挂了一套 bindLongPress（各自动 setPointerCapture），
+   *             两套抢指针捕获 → 松手时滑动那套收不到 pointerup，行就卡在半空。
    */
   function bindSwipeRow(node, cfg) {
     cfg = cfg || {};
@@ -7281,8 +7553,9 @@ var AR = window.AR || (window.AR = {});
     var FOLLOW = cfg.follow == null ? 1 : cfg.follow;
     var RUBBER = cfg.rubber == null ? 0.25 : cfg.rubber;
     var HIT = cfg.threshold || 64;
+    var HOLD_MS = cfg.onHold ? (cfg.holdMs || 520) : 0;
     node.style.touchAction = 'pan-y';
-    var x0 = 0, y0 = 0, dx = 0, armed = false, horizontal = false, raf = 0;
+    var x0 = 0, y0 = 0, dx = 0, armed = false, horizontal = false, raf = 0, holdTimer = 0;
     function shown() {
       var d = dx * FOLLOW;
       if (Math.abs(d) > MAX) { d = (d > 0 ? 1 : -1) * (MAX + (Math.abs(d) - MAX) * RUBBER); }
@@ -7293,8 +7566,12 @@ var AR = window.AR || (window.AR = {});
       node.style.transform = 'translate3d(' + shown() + 'px,0,0)';
       node.classList.toggle('swipe-ok', Math.abs(shown()) >= HIT);
     }
+    function clearHold() {
+      if (holdTimer) { clearTimeout(holdTimer); holdTimer = 0; }
+    }
     function reset() {
       armed = false; horizontal = false; dx = 0;
+      clearHold();
       if (raf) { cancelAnimationFrame(raf); raf = 0; }
       node.classList.remove('swiping', 'swipe-ok');
       node.style.transform = '';
@@ -8075,127 +8352,478 @@ var AR = window.AR || (window.AR = {});
     }
   }
 
-  /**
-   * 设置 → 课程与课表 →「作业记录…」：作业统计 + 找回隐藏的已完成。
-   *
-   * 「已完成」在界面上只保留今天（更早的折进小分组、超过一周不显示），
-   * 这里能看到**全部**记录（含被隐藏的），并能长按找回 / 删除 / 批量清理。
-   */
-  function openTaskLog() {
-    // v0.4.1b：只看还活着的条目（回收站里的不列出来）
-    var all = AR.Store.taskList ? AR.Store.taskList().slice() : (AR.Store.get().tasks || []).slice();
-    var todayK = U.dateKey(new Date());
-    var weekAgo = U.dateKey(U.addDays(new Date(), -6));
-    var open = [], doneToday = [], doneRest = [];
-    var byCourse = {};
-    for (var i = 0; i < all.length; i++) {
-      var t = all[i];
-      var dd = AR.Store.taskDoneDay ? AR.Store.taskDoneDay(t) : '';
-      if (!t.done) { open.push(t); } else if (dd === todayK) { doneToday.push(t); } else { doneRest.push(t); }
-      var c = AR.Store.courseById(t.courseId);
-      var name = c ? c.name : '（课程已删）';
-      byCourse[name] = byCourse[name] || { open: 0, done: 0 };
-      if (t.done) { byCourse[name].done++; } else { byCourse[name].open++; }
+  /* ══════════════════════════════════════════════════════════════
+     作业统计弹窗（v0.5.2 定稿：一个弹窗六页）
+
+     总览 / 趋势 / 热力图 / 按课程 / 记录 / 洞察 —— 「记录」就是老的「作业记录」：
+     找作业、改、删、长按找回、清理 30 天前的已完成都还在这一页。
+     数字全部来自 AR.Store.taskStats()（唯一一份口径），这里只管排版。
+     ══════════════════════════════════════════════════════════════ */
+
+  var HW_STAT_PAGES = [
+    { k: 'overview', t: '总览' }, { k: 'trend', t: '趋势' }, { k: 'heat', t: '热力图' },
+    { k: 'course', t: '按课程' }, { k: 'record', t: '记录' }, { k: 'insight', t: '洞察' }
+  ];
+  var HW_STAT = { page: 'overview', state: 'all', course: 'all', closed: {}, heat: -1, courseOpen: null };
+
+  function hwStatDateLong(dayKey) {
+    var d = U.parseDateKey(dayKey);
+    if (!d) { return dayKey || ''; }
+    return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 · ' + U.WEEKDAY_NAMES[U.weekdayOf(d)];
+  }
+
+  function hwStatKpi(label, value, unit, sub) {
+    return '<div class="hwst-kpi"><div class="hwst-kl">' + U.escapeHtml(label) + '</div>'
+      + '<div class="hwst-kv">' + value + (unit ? '<i>' + U.escapeHtml(unit) + '</i>' : '') + '</div>'
+      + (sub ? '<div class="hwst-ks">' + sub + '</div>' : '') + '</div>';
+  }
+
+  function hwStatBars(vals) {
+    var mx = 1, i;
+    for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
+    var h = '';
+    for (i = 0; i < vals.length; i++) {
+      var px = vals[i] ? Math.max(3, Math.round(vals[i] / mx * 58)) : 2;
+      h += '<i class="' + (vals[i] ? 'on' : '') + '" style="height:' + px + 'px"></i>';
     }
-    var doneWeek = 0;
-    for (var w = 0; w < all.length; w++) {
-      var dw = AR.Store.taskDoneDay ? AR.Store.taskDoneDay(all[w]) : '';
-      if (all[w].done && dw && dw >= weekAgo) { doneWeek++; }
+    return '<div class="hwst-bars">' + h + '</div>';
+  }
+
+  function hwStatLine(vals) {
+    var w = 100, h = 34, mx = 1, i, d = '';
+    for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
+    for (i = 0; i < vals.length; i++) {
+      var x = vals.length > 1 ? (i / (vals.length - 1)) * w : 0;
+      var y = h - (vals[i] / mx) * (h - 3) - 1;
+      d += (i ? 'L' : 'M') + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
     }
-    var body = el('<div class="task-log">'
-      + '<div class="tl-stats">'
-      + '<div class="tl-stat"><b>' + open.length + '</b><span>未完成</span></div>'
-      + '<div class="tl-stat"><b>' + doneToday.length + '</b><span>今天完成</span></div>'
-      + '<div class="tl-stat"><b>' + doneWeek + '</b><span>本周完成</span></div>'
-      + '<div class="tl-stat"><b>' + (all.length - open.length) + '</b><span>累计完成</span></div>'
-      + '</div></div>');
-    // 按课程统计
-    var names = Object.keys(byCourse);
-    if (names.length) {
-      var box1 = el('<div class="tl-group"><div class="tl-title">按课程</div></div>');
-      names.sort(function (a, b) { return byCourse[b].open - byCourse[a].open; });
-      for (var n = 0; n < names.length; n++) {
-        box1.appendChild(el('<div class="tl-line"><span class="tl-name">' + U.escapeHtml(names[n]) + '</span>'
-          + '<span class="tl-num">未完成 ' + byCourse[names[n]].open + ' · 已完成 ' + byCourse[names[n]].done + '</span></div>'));
+    return '<svg class="hwst-line" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
+      + '<path class="area" d="' + d + 'L' + w + ' ' + h + ' L0 ' + h + ' Z"/>'
+      + '<path class="stroke" d="' + d + '"/></svg>';
+  }
+
+  function hwStatWeekday(wd) {
+    var mx = 1, i, h = '';
+    for (i = 0; i < 7; i++) { if (wd[i] > mx) { mx = wd[i]; } }
+    for (i = 0; i < 7; i++) {
+      h += '<div class="hwst-wd"><span>' + U.WEEKDAY_NAMES[i + 1].replace('周', '') + '</span>'
+        + '<span class="hwst-wdt"><i style="width:' + Math.round(wd[i] / mx * 100) + '%"></i></span>'
+        + '<span class="hwst-wdn">' + wd[i] + '</span></div>';
+    }
+    return h;
+  }
+
+  /** 12 周 × 7 天的贡献图：色阶固定 1 / 2 / 3+，debt = 那天布置的还没勾完 */
+  function hwStatHeat(daily) {
+    var cols = '', months = '', lastM = '', c, d, i;
+    for (c = 0; c < 12; c++) {
+      var cells = '';
+      for (d = 0; d < 7; d++) {
+        i = c * 7 + d;
+        if (i >= daily.length) { cells += '<i class="hwst-cell"></i>'; continue; }
+        var it = daily[i];
+        var lv = it.done >= 3 ? ' l3' : (it.done === 2 ? ' l2' : (it.done === 1 ? ' l1' : ''));
+        cells += '<i class="hwst-cell' + lv + (it.debt > 0 ? ' debt' : '')
+          + (HW_STAT.heat === i ? ' sel' : '') + '" data-hi="' + i + '"></i>';
       }
-      body.appendChild(box1);
+      var dd = U.parseDateKey(daily[Math.min(c * 7, daily.length - 1)].day);
+      var mk = dd ? ((dd.getMonth() + 1) + ' 月') : '';
+      if (c === 0 || mk !== lastM) { months += '<span>' + mk + '</span>'; lastM = mk; }
+      else { months += '<span></span>'; }
+      cols += '<div class="hwst-hcol">' + cells + '</div>';
     }
-    body.appendChild(taskLogGroup('未完成', open, false));
-    body.appendChild(taskLogGroup('今天完成', doneToday, true));
-    body.appendChild(taskLogGroup('更早的已完成（含已隐藏的）', doneRest, true));
-
-    openModal({
-      title: '作业记录', sub: '共 ' + all.length + ' 条 · 长按已完成可找回', body: body, wide: true,
-      actions: [
-        {
-          label: '清理 30 天前的已完成', onClick: function () {
-            var cut = U.dateKey(U.addDays(new Date(), -30));
-            var S = AR.Store.get();
-            var removed = 0;
-            var list = S.tasks || [];
-            for (var i2 = 0; i2 < list.length; i2++) {
-              var t2 = list[i2];
-              if (t2.deletedAt) { continue; }
-              var d2 = t2.doneAt ? String(t2.doneAt) : '';
-              // v0.4.1b：清理也走软删除（进回收站，可恢复），不再直接从文件里抹掉
-              if (t2.done && d2 && d2.slice(0, 10) < cut) {
-                if (AR.Store.softDelete) { AR.Store.softDelete('tasks', t2); }
-                else { t2.deletedAt = new Date().toISOString(); }
-                removed++;
-              }
-            }
-            AR.Store.save(true);
-            AR.UI.toast(removed ? ('已清理 ' + removed + ' 条（可在回收站恢复）') : '没有被清理的记录');
-            refreshHomework();
-          }
-        },
-        { label: '关闭', kind: 'primary', onClick: function (c) { c(); } }
-      ]
-    });
+    return '<div class="hwst-heat"><div class="hwst-hdays"><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><i>日</i></div>'
+      + '<div class="hwst-hmain"><div class="hwst-hmonths">' + months + '</div>'
+      + '<div class="hwst-hgrid">' + cols + '</div></div></div>';
   }
 
-  /** 作业记录里的一块列表（done=true 的条目长按可找回、点右侧删除） */
-  function taskLogGroup(title, list, isDone) {
-    var box = el('<div class="tl-group"><div class="tl-title">' + title + ' · ' + list.length + '</div></div>');
-    if (!list.length) { box.appendChild(el('<div class="muted" style="padding:4px 2px">没有记录</div>')); return box; }
-    for (var i = 0; i < list.length; i++) {
-      (function (t) {
-        var when = isDone ? (AR.Store.taskDoneDay ? AR.Store.taskDoneDay(t) : '') : (t.date || '');
-        var row = el('<div class="tl-row' + (isDone ? ' done' : '') + '">'
-          + '<span class="tl-text">' + U.escapeHtml(t.text) + '</span>'
-          + '<span class="tl-when">' + (when || '') + '</span>'
-          + '<button class="tl-del" type="button" title="删除">✕</button></div>');
-        if (isDone) {
-          bindLongPress(row, function () {
-            AR.Store.setTaskDone(t.id, false);
-            AR.Bridge.haptic('medium', row);
-            AR.UI.toast('已找回：「' + t.text + '」');
-            refreshHomework();
-          }, 600);
+  /** 记录页的一行：左布置日 · 文字 · 右截止日（红）· 已完成打勾日期 · 删除 */
+  function hwStatRowHTML(t, todayK) {
+    var info = AR.Store.taskDueInfo ? AR.Store.taskDueInfo(t, todayK) : { kind: 'none' };
+    var overdue = !t.done && info.kind === 'overdue';
+    var doneDay = t.done && AR.Store.taskDoneDay ? AR.Store.taskDoneDay(t) : '';
+    return '<div class="hwst-lrow' + (t.done ? ' done' : '') + '"'
+      + ' data-hrow="' + U.escapeHtml(t.id) + '" data-hdone="' + (t.done ? '1' : '0') + '">'
+      + (t.date ? '<span class="hw-date">' + hwShortDate(t.date) + '</span>' : '')
+      + '<span class="hw-text">' + U.escapeHtml(t.text) + '</span>'
+      + (t.due ? '<span class="hw-due' + (overdue ? ' od' : '') + '">' + hwShortDate(t.due) + '</span>' : '')
+      + (t.done ? '<span class="hwst-when">✓ ' + hwShortDate(doneDay || t.date) + '</span>' : '')
+      + '<button class="hwst-x" type="button" title="删除">✕</button></div>';
+  }
+
+  function hwStatPageHTML(D) {
+    var h = '', i;
+    var todayK = U.dateKey(new Date());
+
+    if (HW_STAT.page === 'overview') {
+      var vals = [];
+      for (i = 0; i < D.trend.length; i++) { vals.push(D.trend[i].count); }
+      h += '<div class="hwst-kpis">'
+        + hwStatKpi('本周完成率', D.weekRate + '%', '', D.weekDone + ' / ' + D.weekTotal + ' 条')
+        + hwStatKpi('本学期', D.semRate + '%', '', D.done + ' / ' + D.total + ' 条')
+        + hwStatKpi('按时完成率', D.onTime.total ? (D.onTimeRate + '%') : '—', '',
+          D.onTime.total ? ('仅 ' + D.onTime.total + ' 条有截止日') : '还没有带截止日的条目')
+        + hwStatKpi('未完成', D.open, '条', D.overdue ? ('其中逾期 ' + D.overdue + ' 条') : '没有逾期')
+        + '</div>'
+        + '<div class="hwst-sh">近 30 天<span>每天完成几条</span></div>' + hwStatBars(vals)
+        + '<div class="hwst-x"><span>30 天前</span><span>今天</span></div>'
+        + '<div class="hwst-sh">星期分布<span>星期几在勾作业</span></div>' + hwStatWeekday(D.wd);
+      return h;
+    }
+
+    if (HW_STAT.page === 'trend') {
+      var d7 = 0, d14 = 0, d30 = 0, d7prev = 0, active = 0, vals2 = [];
+      for (i = 0; i < D.daily.length; i++) {
+        var back = D.daily.length - 1 - i;
+        var n = D.daily[i].done;
+        if (back < 30) { vals2.push(n); d30 += n; if (n) { active++; } }
+        if (back < 14) { d14 += n; }
+        if (back < 7) { d7 += n; }
+        else if (back < 14) { d7prev += n; }
+      }
+      h += '<div class="hwst-kpis">'
+        + hwStatKpi('近 7 天', d7, '条', '')
+        + hwStatKpi('近 14 天', d14, '条', '')
+        + hwStatKpi('近 30 天', d30, '条', '')
+        + hwStatKpi('有完成的天', active + ' / 30', '', '')
+        + '</div>'
+        + '<div class="hwst-sh">近 30 天走势</div>' + hwStatLine(vals2)
+        + '<div class="hwst-x"><span>30 天前</span><span>今天</span></div>'
+        + '<div class="hwst-note">近 7 天完成 <b>' + d7 + ' 条</b>'
+        + (d7prev ? ('，比上期（' + d7prev + ' 条）' + (d7 >= d7prev ? '多 ' : '少 ') + Math.abs(d7 - d7prev) + ' 条') : '，上期没有记录')
+        + '。'
+        + (D.peak.count ? ('积压峰值 <b>' + D.peak.count + ' 条</b>（' + hwShortDate(D.peak.day) + '）。') : '')
+        + (D.streak.cur ? ('当前连续 <b>' + D.streak.cur + ' 天</b>都有作业勾掉。') : '')
+        + '</div>';
+      return h;
+    }
+
+    if (HW_STAT.page === 'heat') {
+      h += '<div class="hwst-sh">最近 12 周<span>格子 = 那天完成几条（按完成日期）</span></div>'
+        + hwStatHeat(D.daily)
+        + '<div class="hwst-legend">少<i class="hwst-cell"></i><i class="hwst-cell l1"></i>'
+        + '<i class="hwst-cell l2"></i><i class="hwst-cell l3"></i>多'
+        + '<span class="hwst-debtkey"><i class="hwst-cell debt"></i>那天布置的还没勾完</span></div>';
+      var hi = HW_STAT.heat >= 0 ? D.daily[HW_STAT.heat] : null;
+      h += '<div class="hwst-detail">' + (hi
+        ? (hwStatDateLong(hi.day) + ' · 完成 <b>' + hi.done + ' 条</b> · 当天布置 <b>' + hi.assigned + ' 条</b>'
+          + (hi.debt ? (' · 还有 <b>' + hi.debt + ' 条</b>没勾') : ''))
+        : '点一个格子看那天的账。') + '</div>'
+        + '<div class="hwst-note">色阶固定 1 / 2 / 3+ 条 —— 作业一天通常就 0–3 条，用 12 周分位会把“完成 1 条”标成满色。</div>';
+      return h;
+    }
+
+    if (HW_STAT.page === 'course') {
+      if (!D.byCourse.length) { return '<div class="hwst-empty">还没有作业。</div>'; }
+      h += '<div class="hwst-crs">';
+      for (i = 0; i < D.byCourse.length; i++) {
+        var row = D.byCourse[i];
+        var dot = row.color ? '<span class="hw-dot" style="background:' + U.escapeHtml(row.color) + '"></span>' : '';
+        h += '<button class="hwst-crow' + (HW_STAT.courseOpen === row.id ? ' on' : '') + '"'
+          + ' type="button" data-hc="' + U.escapeHtml(row.id) + '">'
+          + dot + '<span class="hwst-cname">' + U.escapeHtml(row.name) + '</span>'
+          + '<span class="hwst-cnum">未完成 ' + row.open + ' · 已完成 ' + row.done + '</span>'
+          + '<span class="hwst-cbar"><i style="width:' + row.rate + '%;background:'
+          + (row.color ? U.escapeHtml(row.color) : 'var(--accent)') + '"></i></span>'
+          + '<span class="hwst-cnum">' + row.rate + '%</span></button>';
+      }
+      h += '</div>';
+      var sel = null;
+      for (i = 0; i < D.byCourse.length; i++) {
+        if (D.byCourse[i].id === HW_STAT.courseOpen) { sel = D.byCourse[i]; }
+      }
+      if (sel) {
+        h += '<div class="hwst-cdetail"><b>' + U.escapeHtml(sel.name) + '</b> · 完成率 <b>' + sel.rate
+          + '%</b>，未完成 <b>' + sel.open + '</b>、已完成 <b>' + sel.done + '</b>。'
+          + (sel.onTimeRate >= 0 ? ('按时完成 <b>' + sel.onTimeOk + ' / ' + sel.onTimeTotal + '</b>。') : '还没有带截止日的条目。')
+          + (sel.spendN ? ('平均 <b>' + sel.avgSpend + ' 天</b>勾掉一条。') : '')
+          + '<br><span class="hwst-link" data-hlink="' + U.escapeHtml(sel.id) + '">看这门课的全部条目 →</span></div>';
+      } else {
+        h += '<div class="hwst-note">点一门课看明细；进度条是完成率，按未完成条数从多到少排。</div>';
+      }
+      return h;
+    }
+
+    if (HW_STAT.page === 'record') {
+      var all = AR.Store.taskList ? AR.Store.taskList().slice() : [];
+      var monday = U.dateKey(U.mondayOf(new Date()));
+      var courseList = D.byCourse.filter(function (r) { return r.total > 0; });
+      h += '<div class="hwst-chips">';
+      var states = [['all', '全部'], ['open', '未完成'], ['done', '已完成'], ['week', '本周']];
+      for (i = 0; i < states.length; i++) {
+        h += '<button type="button" data-hs="' + states[i][0] + '"'
+          + (HW_STAT.state === states[i][0] ? ' class="on"' : '') + '>' + states[i][1] + '</button>';
+      }
+      h += '</div>';
+      if (courseList.length >= 2) {
+        h += '<div class="hwst-chips">';
+        h += '<button type="button" data-hc2="all"' + (HW_STAT.course === 'all' ? ' class="on"' : '') + '>全部课程</button>';
+        for (i = 0; i < courseList.length; i++) {
+          var cid = courseList[i].id;
+          h += '<button type="button" data-hc2="' + U.escapeHtml(cid) + '"'
+            + (HW_STAT.course === cid ? ' class="on"' : '') + '>' + U.escapeHtml(courseList[i].name) + '</button>';
         }
-        row.querySelector('.tl-del').addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          // v0.4.0：删作业记录要二次确认（做完的记录会一起没）
-          confirmDanger({
-            title: '删除这条作业记录？', sub: t.text || '',
-            text: '删了就找不回来了；如果它已经完成，完成记录也会一起没。',
-            okLabel: '确认删除',
-            onOk: function () {
-              AR.Store.removeTask(t.id);
-              AR.Bridge.haptic('warn', $('modalCard'));
-              refreshHomework();
-              toastUndo('已删除作业记录：' + (t.text || ''), '撤销', function () {
-                AR.Store.restore('tasks', t.id);
-                refreshHomework();
-              });
-            }
-          });
-        });
-        box.appendChild(row);
-      })(list[i]);
+        h += '</div>';
+      }
+      /* 分组：今天 / 本周 / 更早（未完成按布置日，已完成按勾掉那天） */
+      var bucketOrder = ['今天', '本周', '更早'];
+      var buckets = { '今天': [], '本周': [], '更早': [] };
+      for (i = 0; i < all.length; i++) {
+        var t = all[i];
+        if (HW_STAT.state === 'open' && t.done) { continue; }
+        if (HW_STAT.state === 'done' && !t.done) { continue; }
+        if (HW_STAT.state === 'week' && !t.done && String(t.date || '') < monday) { continue; }
+        if (HW_STAT.course !== 'all' && String(t.courseId || '') !== String(HW_STAT.course)) { continue; }
+        var bk = t.done ? (AR.Store.taskDoneDay(t) || t.date || '') : (t.date || '');
+        var g = '更早';
+        if (bk === todayK) { g = '今天'; }
+        else if (bk && bk >= monday) { g = '本周'; }
+        buckets[g].push(t);
+      }
+      var shown = 0;
+      for (i = 0; i < bucketOrder.length; i++) {
+        var g2 = bucketOrder[i];
+        var list2 = buckets[g2];
+        if (!list2.length) { continue; }
+        shown += list2.length;
+        var closedNow = HW_STAT.closed[g2];
+        h += '<button class="hwst-ghead' + (closedNow ? ' closed' : '') + '" type="button" data-hg="' + g2 + '">'
+          + '<span class="hwst-arrow">▾</span>' + g2 + '<span class="hwst-gn">· ' + list2.length + ' 项</span></button>'
+          + '<div class="hwst-gbody"' + (closedNow ? ' hidden' : '') + '>';
+        for (var j = 0; j < list2.length; j++) { h += hwStatRowHTML(list2[j], todayK); }
+        h += '</div>';
+      }
+      if (!shown) { h += '<div class="hwst-empty">这个筛选下没有记录。</div>'; }
+      h += '<button class="btn hwst-clean" type="button" data-hclean="1" style="margin-top:14px">清理 30 天前的已完成</button>';
+      return h;
     }
-    return box;
+
+    /* 洞察 */
+    h += '<div class="hwst-ins"><span class="hwst-ic">⏳</span><p>'
+      + (D.worstHang
+        ? ('「<b>' + U.escapeHtml(D.worstHang.name) + '</b>」拖得最久：还没勾的条目平均放了 <b>' + D.worstHang.avgHang + ' 天</b>。')
+        : '还没有“放了一阵子还没勾”的作业。')
+      + '</p></div>';
+    h += '<div class="hwst-ins"><span class="hwst-ic">✓</span><p>'
+      + (D.bestOnTime
+        ? ('按时完成率最高 <b>' + U.escapeHtml(D.bestOnTime.name) + ' ' + D.bestOnTime.onTimeRate + '%</b>（'
+          + D.bestOnTime.onTimeTotal + ' 条）'
+          + (D.worstOnTime && D.worstOnTime !== D.bestOnTime
+            ? ('，最低 <b>' + U.escapeHtml(D.worstOnTime.name) + ' ' + D.worstOnTime.onTimeRate + '%</b>（' + D.worstOnTime.onTimeTotal + ' 条）')
+            : '')
+          + '。')
+        : '还没有带截止日的作业，按时率算不出来。')
+      + '</p></div>';
+    h += '<div class="hwst-ins"><span class="hwst-ic">⏱</span><p>'
+      + (D.avgSpend
+        ? ('平均 <b>' + D.avgSpend + ' 天</b>勾掉一条作业' + (D.slowest ? ('；最慢的是 <b>' + U.escapeHtml(D.slowest.name) + '</b>（' + D.slowest.avgSpend + ' 天）') : '') + '。')
+        : '还没有“布置到今天”的完整样本。')
+      + '</p></div>';
+    h += '<div class="hwst-ins"><span class="hwst-ic">!</span><p>'
+      + (D.peak.count
+        ? ('积压峰值 <b>' + hwShortDate(D.peak.day) + '</b>：那天同时挂着 <b>' + D.peak.count + ' 条</b>没完成')
+        : '没出现过积压')
+      + '；布置最多的是 <b>' + U.WEEKDAY_NAMES[D.busyWd] + '</b>（' + D.busyWdCount + ' 条）。</p></div>';
+    h += '<div class="hwst-ins"><span class="hwst-ic">☆</span><p>'
+      + (D.streak.best ? ('最长连续 <b>' + D.streak.best + ' 天</b>都有作业勾掉' + (D.streak.cur ? ('，当前连续 <b>' + D.streak.cur + ' 天</b>') : '')) : '还没有连续完成记录')
+      + (D.gap.max ? ('；最长空窗 <b>' + D.gap.max + ' 天</b>（' + hwShortDate(D.gap.from) + ' → ' + hwShortDate(D.gap.to) + '）。') : '。')
+      + '</p></div>';
+    h += '<div class="hwst-note">都是现算的：不额外存字段，也不进同步。</div>';
+    return h;
   }
+
+  /** 重新画一页（数据、筛选、折叠、热力图选中都走这里） */
+  function hwStatPaint(pageBox, repaint) {
+    var D = AR.Store.taskStats ? AR.Store.taskStats() : null;
+    if (!D) { pageBox.innerHTML = '<div class="hwst-empty">统计暂时算不出来。</div>'; return; }
+    pageBox.innerHTML = hwStatPageHTML(D);
+    var todayK = U.dateKey(new Date());
+    var i, nodes;
+
+    nodes = pageBox.querySelectorAll('[data-hs]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (b) {
+        b.addEventListener('click', function () {
+          HW_STAT.state = b.getAttribute('data-hs');
+          AR.Bridge.haptic('light', b);
+          repaint();
+        });
+      })(nodes[i]);
+    }
+    nodes = pageBox.querySelectorAll('[data-hc2]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (b) {
+        b.addEventListener('click', function () {
+          HW_STAT.course = b.getAttribute('data-hc2');
+          AR.Bridge.haptic('light', b);
+          repaint();
+        });
+      })(nodes[i]);
+    }
+    nodes = pageBox.querySelectorAll('[data-hg]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (b) {
+        b.addEventListener('click', function () {
+          var g = b.getAttribute('data-hg');
+          HW_STAT.closed[g] = !HW_STAT.closed[g];
+          b.classList.toggle('closed', !!HW_STAT.closed[g]);
+          var body = b.nextElementSibling;
+          if (body) { body.hidden = !!HW_STAT.closed[g]; }
+          AR.Bridge.haptic('light', b);
+        });
+      })(nodes[i]);
+    }
+    nodes = pageBox.querySelectorAll('[data-hi]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (c) {
+        c.addEventListener('click', function () {
+          HW_STAT.heat = Number(c.getAttribute('data-hi'));
+          AR.Bridge.haptic('light', c);
+          repaint();
+        });
+      })(nodes[i]);
+    }
+    nodes = pageBox.querySelectorAll('[data-hc]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (b) {
+        b.addEventListener('click', function () {
+          var id = b.getAttribute('data-hc');
+          HW_STAT.courseOpen = (HW_STAT.courseOpen === id) ? null : id;
+          AR.Bridge.haptic('light', b);
+          repaint();
+        });
+      })(nodes[i]);
+    }
+    nodes = pageBox.querySelectorAll('[data-hlink]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (ln) {
+        ln.addEventListener('click', function () {
+          var id = ln.getAttribute('data-hlink');
+          openCourseHomework(id, '');
+        });
+      })(nodes[i]);
+    }
+    nodes = pageBox.querySelectorAll('[data-hclean]');
+    for (i = 0; i < nodes.length; i++) {
+      nodes[i].addEventListener('click', function () { cleanOldDone(); });
+    }
+    nodes = pageBox.querySelectorAll('[data-hrow]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (row) {
+        var id = row.getAttribute('data-hrow');
+        var isDone = row.getAttribute('data-hdone') === '1';
+        bindLongPress(row, function () {
+          if (isDone) {
+            AR.Store.setTaskDone(id, false);
+            AR.Bridge.haptic('medium', row);
+            toast('已找回');
+            refreshHomework();
+            repaint();
+          } else {
+            var t = AR.Store.taskById ? AR.Store.taskById(id) : null;
+            if (t) { openHomeworkMenu(t); }
+          }
+        }, isDone ? 600 : 520);
+        var x = row.querySelector('.hwst-x');
+        if (x) {
+          x.addEventListener('click', function (ev) {
+            ev.stopPropagation();
+            var t2 = AR.Store.taskById ? AR.Store.taskById(id) : null;
+            if (!t2) { return; }
+            confirmDanger({
+              title: '删除这条作业记录？', sub: t2.text || '',
+              text: '删了可以在回收站里找回；备注里那一行不被改动。',
+              okLabel: '确认删除',
+              onOk: function () {
+                AR.Store.removeTask(t2.id);
+                AR.Bridge.haptic('warn', $('modalCard'));
+                refreshHomework();
+                repaint();
+                toastUndo('已删除作业记录：' + (t2.text || ''), '撤销', function () {
+                  AR.Store.restore('tasks', t2.id);
+                  refreshHomework();
+                  repaint();
+                });
+              }
+            });
+          });
+        }
+        row.addEventListener('click', function (ev) {
+          if (ev.target === row.querySelector('.hwst-x')) { return; }
+          toast(isDone ? '已完成：长按可找回' : '长按可编辑 / 设截止日 / 删除');
+        });
+      })(nodes[i]);
+    }
+    /* 空态时也允许点清理（记录页没有记录时） */
+    if (!nodes.length && HW_STAT.page === 'record') { /* 清理按钮已单独绑定 */ }
+    void todayK;
+  }
+
+  /** 清理 30 天前的已完成（软删除，可在回收站恢复） */
+  function cleanOldDone() {
+    var cut = U.dateKey(U.addDays(new Date(), -30));
+    var S = AR.Store.get();
+    var removed = 0;
+    var list = S.tasks || [];
+    for (var i = 0; i < list.length; i++) {
+      var t = list[i];
+      if (t.deletedAt) { continue; }
+      var d = t.doneAt ? String(t.doneAt) : '';
+      if (t.done && d && d.slice(0, 10) < cut) {
+        if (AR.Store.softDelete) { AR.Store.softDelete('tasks', t); }
+        else { t.deletedAt = new Date().toISOString(); }
+        removed++;
+      }
+    }
+    AR.Store.save(true);
+    toast(removed ? ('已清理 ' + removed + ' 条（可在回收站恢复）') : '没有被清理的记录');
+    refreshHomework();
+  }
+
+  /**
+   * 打开「作业统计」弹窗。page 可选 overview / trend / heat / course / record / insight。
+   * 记录页 = 老「作业记录」；其它入口（卡底按钮、设置里那一项）默认开总览。
+   */
+  function openHomeworkStats(page) {
+    if (page) { HW_STAT.page = page; }
+    if (!HW_STAT.page) { HW_STAT.page = 'overview'; }
+    var st0 = AR.Store.taskStats ? AR.Store.taskStats() : { total: 0 };
+    var body = el('<div class="hwst"></div>');
+    var seg = el('<div class="segmented hwst-seg" id="hwStatSeg"></div>');
+    body.appendChild(seg);
+    var pageBox = el('<div class="hwst-page" id="hwStatPage"></div>');
+    body.appendChild(pageBox);
+
+    function repaint() { hwStatPaint(pageBox, repaint); }
+
+    for (var i = 0; i < HW_STAT_PAGES.length; i++) {
+      (function (pg) {
+        var b = el('<button class="seg' + (HW_STAT.page === pg.k ? ' active' : '') + '" type="button">' + pg.t + '</button>');
+        b.addEventListener('click', function () {
+          if (HW_STAT.page === pg.k) { return; }
+          HW_STAT.page = pg.k;
+          var all = seg.querySelectorAll('.seg');
+          for (var q = 0; q < all.length; q++) { all[q].classList.toggle('active', all[q] === b); }
+          AR.Bridge.haptic('light', b);
+          syncSegPill(seg, true);
+          repaint();
+        });
+        seg.appendChild(b);
+      })(HW_STAT_PAGES[i]);
+    }
+    repaint();
+    openModal({
+      title: '作业统计',
+      sub: '共 ' + (st0.total || 0) + ' 条 · 本学期 · 数字都来自同一份统计口径',
+      body: body, wide: true
+    });
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
+    }
+  }
+
+  /** 兼容旧调用：直接开到记录页 */
+  function openTaskLog() { openHomeworkStats('record'); }
 
   /* ── Toast ────────────────────────────────────────────────── */
 
@@ -9202,6 +9830,8 @@ var AR = window.AR || (window.AR = {});
     applyTheme();
     applyMotion();
     applyPerf();
+    applyBgStyle();
+    applyOdStyle();
     Layout.profileKey = breakpointKey(document.documentElement.clientWidth);
     lastTodayKey = U.dateKey(new Date());
     show('today');
@@ -10121,6 +10751,27 @@ var AR = window.AR || (window.AR = {});
     return b;
   }
 
+  /**
+   * 背景样式（v0.5.2）：色块 / 纯色 / 主题色渐变。
+   * 只往 body 上挂 data-bg，样式全交给 app.css 两条规则 ——
+   * 这样切主题色 / 深浅色时不用重跑（渐变用的是 --accent-* 变量）。
+   */
+  function applyBgStyle() {
+    var v = S.settings.appearance.bgStyle;
+    if (v !== 'plain' && v !== 'gradient') { document.body.removeAttribute('data-bg'); return; }
+    document.body.setAttribute('data-bg', v);
+  }
+
+  /**
+   * 作业逾期强调（v0.5.2）：both（默认）/ solid（红底白字）/ bar（行左侧竖条）/ bold（加粗）。
+   * 同样只挂一个 body 属性，具体样式在 app.css 里一条一条写清楚。
+   */
+  function applyOdStyle() {
+    var v = S.settings.appearance.overdueStyle;
+    if (v !== 'solid' && v !== 'bar' && v !== 'bold') { document.body.removeAttribute('data-od'); return; }
+    document.body.setAttribute('data-od', v);
+  }
+
   function applyGlass() {
     var lvl = S.settings.appearance.glassLevel || 'medium';
     var degraded = AR.Bridge.sdkInt && AR.Bridge.sdkInt() > 0 && AR.Bridge.sdkInt() < 31;
@@ -10180,6 +10831,9 @@ var AR = window.AR || (window.AR = {});
     applyModalTuning: applyModalTuning,
     themeSwitch: themeSwitch,
     applyGlass: applyGlass,
+    applyBgStyle: applyBgStyle,
+    applyOdStyle: applyOdStyle,
+    openHomeworkStats: openHomeworkStats,
     applyPerf: applyPerf,
     applyMotion: applyMotion,
     applyLayout: applyLayout,

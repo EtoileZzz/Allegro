@@ -36,6 +36,19 @@ input, textarea { user-select: text; }
 .blob-b { width: 40vw; height: 40vw; right: -8vw; top: 6vh; background: var(--blob-b); }
 .blob-c { width: 34vw; height: 34vw; left: 22vw; bottom: -16vw; background: var(--blob-c); }
 
+/**
+ * 背景样式（v0.5.2，设置 → 外观 → 背景）：
+ *   不挂属性 = 色块（默认）；plain = 纯色；gradient = 主题色极淡渐变。
+ * 后两种都把三个色块藏掉（不藏的话色块盖在渐变上，「关掉」看起来没生效）。
+ */
+body[data-bg="plain"] .blob, body[data-bg="gradient"] .blob { display: none; }
+body[data-bg="gradient"] {
+  background:
+    radial-gradient(130% 90% at 18% -12%, var(--accent-glow) 0%, transparent 62%),
+    radial-gradient(120% 80% at 88% 108%, var(--accent-soft) 0%, transparent 60%),
+    var(--bg-base);
+}
+
 /* ── 毛玻璃基类 ─────────────────────────────────────────────── */
 .glass {
   background: var(--glass-card);
@@ -2530,6 +2543,146 @@ body.dev-outline .segmented, body.dev-outline .btn, body.dev-outline .chip-btn {
 .hw-when { margin-left: auto; flex: 0 0 auto; font-size: 10.5px; color: var(--text-tertiary); }
 .hw-more { padding: 4px 2px; font-size: 11.5px; color: var(--accent); }
 .hw-earlier { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
+
+/* ── 作业 · 截止日（v0.5.2 定稿）────────────────────────────────
+   右边那枚 chip 和左边的「布置日」是**同一种样式**，只是字是红的。
+   逾期的强调方式见下面 data-od 那几条（设置 → 外观 可改）。 */
+.hw-due {
+  flex: 0 0 auto; font-size: 10.5px; padding: 1px 5px; border-radius: 6px;
+  background: var(--accent-soft); color: var(--danger);
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+/**
+ * 逾期强调：默认「两者都要」= 红底白字 + 行左侧竖条。
+ * 块里的第一条给默认值，后面按 body[data-od] 覆盖成用户选的那一种。
+ */
+.hw-due.od { background: var(--danger); color: #fff; font-weight: 650; }
+.hw-row.has-od { box-shadow: inset 2px 0 0 var(--danger); }
+body[data-od="solid"] .hw-row.has-od,
+body[data-od="bold"] .hw-row.has-od { box-shadow: none; }
+body[data-od="bar"] .hw-due.od,
+body[data-od="bold"] .hw-due.od { background: var(--accent-soft); color: var(--danger); font-weight: 400; }
+body[data-od="bold"] .hw-due.od { font-weight: 750; }
+
+/* 作业卡汇总条（和任务卡的「今天 / 本周」同一个位置） */
+.hw-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  padding: 0 12px 8px; font-size: 11.5px; color: var(--text-tertiary);
+}
+.hw-stat b { font-weight: 650; color: var(--text-primary); margin-right: 3px; }
+.hw-stat.warn b { color: var(--warn); }
+.hw-stat.danger b { color: var(--danger); }
+
+/* ══════════ 作业统计弹窗（v0.5.2：一个弹窗六页）══════════ */
+/* 六个分页：窄屏只收窄内边距，标签保留全称。
+   360dp 直板机可用 ~292px，收窄后六标签约 275px → 一行；320dp 自动折 3+3。 */
+.hwst-seg { gap: 3px; padding: 3px; }
+.hwst-seg .seg { font-size: 12px; padding: 6px 7px; }
+@media (max-width: 400px) { .hwst-seg .seg { font-size: 11.5px; padding: 6px 6px; } }
+
+.hwst-page { padding-top: 2px; }
+.hwst-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.hwst-kpi { padding: 8px 8px 7px; border-radius: 10px; background: var(--bg-subtle); }
+.hwst-kl { font-size: 10.5px; color: var(--text-tertiary); }
+.hwst-kv { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.hwst-kv i { font-style: normal; font-size: 10px; font-weight: 400; color: var(--text-tertiary); margin-left: 1px; }
+.hwst-ks { font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
+.hwst-sh { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 6px; font-size: 11.5px; font-weight: 600; }
+.hwst-sh span { font-weight: 400; font-size: 10.5px; color: var(--text-tertiary); }
+.hwst-bars { display: flex; align-items: flex-end; gap: 3px; height: 62px; }
+.hwst-bars i { flex: 1 1 0; min-height: 2px; border-radius: 2px; background: var(--divider); }
+.hwst-bars i.on { background: var(--accent); }
+.hwst-x { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); padding-top: 3px; }
+.hwst-wd { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 11px; }
+.hwst-wd > span:first-child { width: 14px; color: var(--text-tertiary); }
+.hwst-wdt { flex: 1 1 auto; height: 7px; border-radius: 999px; background: var(--bg-subtle); overflow: hidden; }
+.hwst-wdt i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.hwst-wdn { width: 24px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.hwst-line { width: 100%; height: 118px; }
+.hwst-line .area { fill: var(--accent-soft); }
+.hwst-line .stroke { fill: none; stroke: var(--accent); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+
+/* 热力图：12 周 × 7 天，色阶固定 1 / 2 / 3+；红框 = 那天布置的还没勾完 */
+.hwst-heat { display: flex; gap: 6px; }
+.hwst-hdays { display: flex; flex-direction: column; gap: 2px; padding-top: 14px; font-size: 9px; color: var(--text-tertiary); }
+.hwst-hdays i { height: 11px; line-height: 11px; font-style: normal; }
+.hwst-hmain { flex: 1 1 auto; min-width: 0; }
+.hwst-hmonths { display: flex; gap: 2px; height: 12px; font-size: 9.5px; color: var(--text-tertiary); }
+.hwst-hmonths span { flex: 1 1 0; }
+.hwst-hgrid { display: flex; gap: 2px; }
+.hwst-hcol { display: flex; flex-direction: column; gap: 2px; flex: 1 1 0; }
+.hwst-cell {
+  position: relative; display: block; height: 11px; border-radius: 2px;
+  background: var(--bg-subtle);
+}
+.hwst-cell::after {
+  content: ""; position: absolute; inset: 0; border-radius: 2px;
+  background: var(--accent); opacity: 0;
+}
+.hwst-cell.l1::after { opacity: .28; }
+.hwst-cell.l2::after { opacity: .6; }
+.hwst-cell.l3::after { opacity: .95; }
+.hwst-cell.debt { box-shadow: inset 0 0 0 1.5px var(--danger); }
+.hwst-cell.sel { box-shadow: inset 0 0 0 1.5px var(--text-primary); }
+.hwst-legend {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding-top: 8px; font-size: 10px; color: var(--text-tertiary);
+}
+.hwst-legend .hwst-cell { width: 11px; flex: 0 0 auto; }
+.hwst-debtkey { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.hwst-debtkey .hwst-cell { height: 11px; }
+.hwst-detail { font-size: 11.5px; color: var(--text-secondary); padding-top: 8px; min-height: 18px; }
+.hwst-note { font-size: 10.5px; color: var(--text-tertiary); padding-top: 6px; line-height: 1.55; }
+.hwst-empty { font-size: 12px; color: var(--text-tertiary); padding: 12px 2px; }
+
+/* 按课程：完成率排行 + 点开明细 */
+.hwst-crs { display: flex; flex-direction: column; gap: 6px; }
+.hwst-crow {
+  width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px;
+  border-radius: 10px; background: var(--bg-subtle); border: 1px solid transparent;
+  font: inherit; color: var(--text-primary); cursor: pointer; text-align: left;
+}
+.hwst-crow.on { border-color: var(--accent); }
+.hwst-cname { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hwst-cnum { flex: 0 0 auto; font-size: 10.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.hwst-cbar { flex: 0 0 auto; width: 72px; height: 6px; border-radius: 999px; background: var(--divider); overflow: hidden; }
+.hwst-cbar i { display: block; height: 100%; border-radius: 999px; }
+.hwst-cdetail {
+  margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg-subtle);
+  font-size: 11.5px; line-height: 1.65; color: var(--text-secondary);
+}
+.hwst-cdetail b { color: var(--text-primary); }
+.hwst-link { display: inline-block; margin-top: 6px; color: var(--accent); cursor: pointer; }
+
+/* 记录页：状态 + 课程两排 chips、可折叠分组、行内双日期 */
+.hwst-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; }
+.hwst-chips button {
+  border: 1px solid var(--divider); background: transparent; color: var(--text-tertiary);
+  font: inherit; font-size: 11px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
+}
+.hwst-chips button.on { border-color: var(--accent); color: var(--accent); }
+.hwst-ghead {
+  width: 100%; display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  border: 0; background: transparent; color: var(--text-primary);
+  font: inherit; font-size: 12px; font-weight: 600; padding: 2px 0; cursor: pointer; text-align: left;
+}
+.hwst-arrow { display: inline-block; width: 10px; color: var(--text-tertiary); transition: transform 150ms var(--ease-standard); }
+.hwst-ghead.closed .hwst-arrow { transform: rotate(-90deg); }
+.hwst-gn { font-weight: 400; color: var(--text-tertiary); }
+.hwst-gbody { display: flex; flex-direction: column; }
+.hwst-lrow { display: flex; align-items: center; gap: 8px; padding: 7px 2px; border-top: 1px dashed var(--divider); }
+.hwst-lrow:first-child { border-top: 0; }
+.hwst-lrow.done .hw-text { text-decoration: line-through; color: var(--text-tertiary); }
+.hwst-when { flex: 0 0 auto; font-size: 10px; color: var(--text-tertiary); }
+.hwst-x { border: 0; background: transparent; color: var(--text-tertiary); font-size: 12px; cursor: pointer; padding: 0 2px; }
+.hwst-x:hover { color: var(--danger); }
+.hwst-clean { width: 100%; }
+
+/* 洞察 */
+.hwst-ins { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg-subtle); margin-bottom: 8px; }
+.hwst-ic { flex: 0 0 auto; width: 18px; text-align: center; color: var(--accent); font-size: 12px; }
+.hwst-ins p { margin: 0; font-size: 11.5px; line-height: 1.65; color: var(--text-secondary); }
+.hwst-ins b { color: var(--text-primary); }
 
 /* 作业 · 按课程分组（v0.3.7）：组头是课程色点 + 课程名 + 条数 */
 .hw-group {

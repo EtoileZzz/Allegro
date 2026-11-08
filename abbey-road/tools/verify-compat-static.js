@@ -640,7 +640,8 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     remSrc.indexOf("channel: 'class'") >= 0 && remSrc.indexOf("channel: 'daily'") >= 0);
   ok('C155 云同步有静默 + 仅数据范围',
     syncSrc.indexOf('silent') >= 0 && syncSrc.indexOf("cfg.scope !== 'data'") >= 0
-    && syncSrc.indexOf("delete payload.settings") >= 0);
+    /* v0.5.2：不再 delete payload.settings（那会把云端那份设置永久抹掉），改成原样放回去 */
+    && syncSrc.indexOf('payload.settings = keepSettings') >= 0);
   ok('C146 打卡记录用自分时间戳合并（否则删除/撤销同步不出去）',
     coreSync.indexOf('function entryStamp') >= 0 && coreSync.indexOf('entryStamp(e) > entryStamp(out[at])') >= 0);
   ok('C147 删除/撤销打卡都会写条目自己的 updatedAt',
@@ -674,6 +675,102 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C129 大资源走流式（不再把每个资源整读进内存）',
     fs.readFileSync(path.join(root5, 'android/src/com/etoilezzz/allegro/MainActivity.java'), 'utf8')
       .indexOf('getAssets().openFd') >= 0);
+
+  /* ── v0.5.2：作业条目可编辑 + 「仅数据」不再同步设置 ── */
+  ok('C177 仅数据：设置改动不触发同步（onLocalSave 先比数据指纹）',
+    syncSrc.indexOf('function dataChangedSinceLastSync') >= 0
+    && syncSrc.indexOf("cfg.scope === 'data' && !dataChangedSinceLastSync()") >= 0);
+  ok('C178 数据指纹排除 settings（只比数据部分）',
+    core5.indexOf('function dataSig()') >= 0
+    && core5.indexOf("k === 'settings' || k === 'exportedAt'") >= 0);
+  ok('C179 回滚历史版本也遵守同步范围',
+    syncSrc.indexOf("mergeSettings: cfg.scope !== 'data'") >= 0);
+  ok('C180 作业能手动添加（写当前学期 + source=manual）',
+    core5.indexOf('function taskUpsert(patch)') >= 0
+    && core5.indexOf("source: 'manual'") >= 0
+    && core5.indexOf('semesterId: (sem && sem.id)') >= 0);
+  ok('C181 改文字会回写备注那一行（先改条目、再改备注、最后同步）',
+    core5.indexOf('function replaceNoteLineBody') >= 0
+    && core5.indexOf('taskUpsert({ id: id, text: nt });') >= 0
+    && core5.indexOf('upsertOverride(t.blockId, t.courseId, t.date, { newNote: newNote })') >= 0);
+  ok('C182 删掉的备注作业不会因为刷新作业又长回来',
+    core5.indexOf('function taskDeletedFor') >= 0
+    && core5.indexOf('if (taskDeletedFor(blockId, dateK, p.text)) { continue; }') >= 0);
+  ok('C183 脱钩后记住原来那行（override.hwSkip），重建时不重复创建',
+    core5.indexOf('hwSkip') >= 0 && core5.indexOf('skipMap') >= 0);
+  ok('C184 备注作业的默认截止日 = 下次上课日 - N 天',
+    core5.indexOf('function nextLessonOfCourse') >= 0
+    && core5.indexOf('function defaultDueFor') >= 0
+    && core5.indexOf('dueLeadDays') >= 0
+    && panels5.indexOf('dueLeadDays') >= 0);
+  ok('C185 划掉与长按共用一套指针（防「划到一半卡住」）',
+    ui5.indexOf('function openHomeworkMenu') >= 0
+    && ui5.indexOf('onHold: function () { openHomeworkMenu(task); }') >= 0
+    && ui5.indexOf('if (holdTimer) { clearTimeout(holdTimer); holdTimer = 0; }') >= 0
+    && ui5.indexOf('var HOLD_MS = cfg.onHold ? (cfg.holdMs || 520) : 0;') >= 0
+    /* 作业行不能再单独挂一套长按 */
+    && ui5.indexOf('bindLongPress(node, function () { openHomeworkMenu(task); }, 520)') < 0);
+  ok('C186 统计口径只有一份（taskStats），弹窗各页都从它取数',
+    (ui5.match(/AR\.Store\.taskStats/g) || []).length >= 2
+    && ui5.indexOf('function hwStatPageHTML(D)') >= 0
+    && ui5.indexOf('function openHomeworkStats(page)') >= 0
+    && ui5.indexOf('function hwStatPaint(pageBox, repaint)') >= 0);
+  ok('C187 新增代码仍是 ES5（无箭头函数 / let / const）',
+    !/[=:]\s*(?:function\s*)?\([^)]*\)\s*=>/.test(core5.slice(core5.indexOf('function taskUpsert')))
+    && core5.indexOf('function taskStats()') >= 0);
+
+  /* ── v0.5.2：背景三档（色块 / 纯色 / 主题色渐变）── */
+  ok('C188 外观有三档背景，默认「色块」',
+    panels5.indexOf("{ label: '色块', value: 'blobs' }") >= 0
+    && panels5.indexOf("{ label: '纯色', value: 'plain' }") >= 0
+    && panels5.indexOf("{ label: '渐变', value: 'gradient' }") >= 0
+    && core5.indexOf("bgStyle: 'blobs'") >= 0);
+  ok('C189 纯色 / 渐变会把三个光斑藏掉，渐变走主题色变量',
+    css5.indexOf('body[data-bg="plain"] .blob, body[data-bg="gradient"] .blob { display: none; }') >= 0
+    && css5.indexOf('body[data-bg="gradient"]') >= 0
+    && css5.indexOf('var(--accent-glow)') >= 0 && css5.indexOf('var(--accent-soft)') >= 0);
+  ok('C190 切换后立刻生效（applyBgStyle 挂 data-bg，且初始化会调一次）',
+    ui5.indexOf('function applyBgStyle()') >= 0
+    && ui5.indexOf('document.body.setAttribute(\'data-bg\', v)') >= 0
+    && ui5.indexOf('applyPerf();\n    applyBgStyle();') >= 0
+    && panels5.indexOf('AR.UI.applyBgStyle()') >= 0);
+
+  /* ── v0.5.2：作业统计弹窗（六页）+ 逾期样式 ── */
+  ok('C191 作业统计弹窗有六个分页，记录是其中一页',
+    ui5.indexOf("{ k: 'overview', t: '总览' }") >= 0
+    && ui5.indexOf("{ k: 'heat', t: '热力图' }") >= 0
+    && ui5.indexOf("{ k: 'record', t: '记录' }") >= 0
+    && ui5.indexOf("{ k: 'insight', t: '洞察' }") >= 0
+    && ui5.indexOf("function openTaskLog() { openHomeworkStats('record'); }") >= 0);
+  ok('C192 「作业记录」入口全部改成「作业统计」，模块卡删除',
+    panels5.indexOf('作业统计…') >= 0
+    && panels5.indexOf('作业记录…') < 0
+    && ui5.indexOf("t: '作业统计'") < 0
+    && ui5.indexOf('function modHwstats') < 0
+    && core5.indexOf("if (k === 'hwstats') { changed++; continue; }") >= 0);
+  ok('C193 「挂账」表述已从代码里删干净',
+    core5.indexOf('挂 ') < 0 && (core5 + ui5).indexOf('挂账') < 0);
+  ok('C194 截止日一律红字，逾期按 data-od 强调（默认两者都要）',
+    css5.indexOf('.hw-due.od { background: var(--danger)') >= 0
+    && css5.indexOf('body[data-od="solid"] .hw-row.has-od') >= 0
+    && css5.indexOf('body[data-od="bar"] .hw-due.od') >= 0
+    && css5.indexOf('body[data-od="bold"] .hw-due.od') >= 0
+    && core5.indexOf("overdueStyle: 'both'") >= 0
+    && ui5.indexOf('function applyOdStyle()') >= 0
+    && panels5.indexOf('作业逾期强调') >= 0);
+  ok('C195 六个分页在窄屏只收窄内边距、标签保留全称',
+    css5.indexOf('.hwst-seg { gap: 3px; padding: 3px; }') >= 0
+    && css5.indexOf('.hwst-seg .seg { font-size: 12px; padding: 6px 7px; }') >= 0
+    && css5.indexOf('@media (max-width: 400px) { .hwst-seg .seg { font-size: 11.5px; padding: 6px 6px; } }') >= 0);
+  ok('C196 热力图：12 周、固定 1/2/3+ 档、欠账日红框、点格子看详情',
+    ui5.indexOf('function hwStatHeat(daily)') >= 0
+    && ui5.indexOf("it.done >= 3 ? ' l3'") >= 0
+    && ui5.indexOf("(it.debt > 0 ? ' debt' : '')") >= 0
+    && ui5.indexOf('data-hi=') >= 0
+    && css5.indexOf('.hwst-cell.debt { box-shadow: inset 0 0 0 1.5px var(--danger); }') >= 0);
+  ok('C197 记录页：状态 + 课程两排 chips 可叠加、分组可折叠',
+    ui5.indexOf('data-hs="') >= 0 && ui5.indexOf('data-hc2="') >= 0
+    && ui5.indexOf('data-hg="') >= 0 && ui5.indexOf('courseList.length >= 2') >= 0);
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

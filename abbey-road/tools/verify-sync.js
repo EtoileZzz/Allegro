@@ -94,6 +94,12 @@ function makeStore(seed) {
     data: st,
     meta: meta,
     exportPayload() { const out = JSON.parse(JSON.stringify(st)); meta.lastPayload = out; return out; },
+    /** v0.5.2：和真实 Store 同口径的数据指纹（去掉 settings 等） */
+    dataSig() {
+      const o = JSON.parse(JSON.stringify(st));
+      delete o.settings; delete o.exportedAt; delete o.device; delete o.appVersion;
+      return JSON.stringify(o);
+    },
     planMerge(incoming, opts) {
       meta.lastOpts = opts || {};
       const plan = { additions: [], updates: [], conflicts: [] };
@@ -362,12 +368,15 @@ function configure(dev, opts) {
     await dev.Sync.syncNow();
     ok('S32 静默：同步成功不提示', dev.toasts.length === 0, JSON.stringify(dev.toasts));
 
-    /* 仅数据：payload 不含 settings，且拉取时不合并设置 */
+    /* 仅数据：不把本机设置传上去，但也不能抹掉云端那份（v0.5.2） */
+    store.data.settings = { appearance: { theme: 'light' } };   // 本机改成 light，云端还是 dark
     dev.Sync.setConfig({ scope: 'data', silent: true });
     await dev.Sync.syncNow();
-    ok('S33 仅数据：上传的 payload 里没有 settings',
-      store.meta.lastPayload && store.meta.lastPayload.settings === undefined,
-      JSON.stringify(Object.keys(store.meta.lastPayload || {})));
+    ok('S33 仅数据：上传的 settings 是云端那份，不是本机的新设置',
+      store.meta.lastPayload && store.meta.lastPayload.settings
+      && store.meta.lastPayload.settings.appearance
+      && store.meta.lastPayload.settings.appearance.theme === 'dark',
+      JSON.stringify(store.meta.lastPayload && store.meta.lastPayload.settings));
     await dev.Sync.pullOnly();
     ok('S34 仅数据：拉取时 mergeSettings === false',
       store.meta.lastOpts && store.meta.lastOpts.mergeSettings === false,
@@ -378,6 +387,57 @@ function configure(dev, opts) {
     ok('S35 全部范围：mergeSettings 恢复为 true',
       store.meta.lastOpts && store.meta.lastOpts.mergeSettings === true,
       JSON.stringify(store.meta.lastOpts));
+  }
+
+  /* ── 13. 仅数据：只改设置不排同步（v0.5.2，用户报的那个 bug）── */
+  {
+    const srv = makeServer();
+    const store = makeStore({ settings: { appearance: { theme: 'dark' } } });
+    const dev = makeDevice('S2', store, srv);
+    configure(dev);
+    dev.Sync._internal.setDebounce(20);
+    dev.Sync.setConfig({ scope: 'data', silent: true });
+    await dev.Sync.syncNow();                       // 建立基准（云端空 → 首推）
+    const puts = srv.putCount, gets = srv.getCount;
+
+    store.data.settings.appearance.theme = 'light'; // 只改设置，数据一动不动
+    dev.Sync.onLocalSave();
+    await new Promise((r) => setTimeout(r, 90));
+    ok('S36 仅数据：只改设置不触发同步（不发请求）', srv.putCount === puts && srv.getCount === gets,
+      'put ' + srv.putCount + '/' + puts + ' get ' + srv.getCount + '/' + gets);
+    ok('S37 仅数据：只改设置也不留「待同步」标记',
+      dev.Sync.status().dirty === false && dev.Sync._internal.dataChangedSinceLastSync() === false);
+
+    store.data.courses.push({ id: 'c-new', name: '新加的课', updatedAt: '2026-11-01T00:00:00Z' });
+    dev.Sync.onLocalSave();
+    await new Promise((r) => setTimeout(r, 140));
+    ok('S38 仅数据：数据一动照常同步', srv.putCount > puts && dev.Sync.status().dirty === false,
+      'put ' + srv.putCount);
+
+    /* 云端本来没有设置 → 写空对象，本机设置絕不外传 */
+    const srv2 = makeServer();
+    const store2 = makeStore({ settings: { appearance: { theme: 'light' } } });
+    const dev2 = makeDevice('S3', store2, srv2);
+    configure(dev2);
+    dev2.Sync.setConfig({ scope: 'data', silent: true });
+    await dev2.Sync.syncNow();
+    ok('S39 仅数据：云端本没设置时写空对象（本机设置不外传）',
+      store2.meta.lastPayload && store2.meta.lastPayload.settings
+      && Object.keys(store2.meta.lastPayload.settings).length === 0,
+      JSON.stringify(store2.meta.lastPayload && store2.meta.lastPayload.settings));
+
+    /* 回滚历史版本也要遵守范围 */
+    const srv3 = makeServer();
+    const store3 = makeStore({ settings: { appearance: { theme: 'dark' } } });
+    const dev3 = makeDevice('S4', store3, srv3);
+    configure(dev3);
+    await dev3.Sync.syncNow();          // 产生 rev 1
+    dev3.Sync.setConfig({ scope: 'data', silent: true });
+    store3.meta.lastOpts = null;
+    await dev3.Sync.restoreRev(1);
+    ok('S40 回滚历史版本也遵守仅数据范围',
+      store3.meta.lastOpts && store3.meta.lastOpts.mergeSettings === false,
+      JSON.stringify(store3.meta.lastOpts));
   }
 
   console.log('');
