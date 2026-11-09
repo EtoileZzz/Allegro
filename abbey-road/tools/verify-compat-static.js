@@ -714,7 +714,7 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     (ui5.match(/AR\.Store\.taskStats/g) || []).length >= 2
     && ui5.indexOf('function hwStatPageHTML(D)') >= 0
     && ui5.indexOf('function openHomeworkStats(page)') >= 0
-    && ui5.indexOf('function hwStatPaint(pageBox, repaint)') >= 0);
+    && ui5.indexOf('function hwStatPaint(pageBox, api)') >= 0);
   ok('C187 新增代码仍是 ES5（无箭头函数 / let / const）',
     !/[=:]\s*(?:function\s*)?\([^)]*\)\s*=>/.test(core5.slice(core5.indexOf('function taskUpsert')))
     && core5.indexOf('function taskStats()') >= 0);
@@ -735,12 +735,19 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     && ui5.indexOf('applyPerf();\n    applyBgStyle();') >= 0
     && panels5.indexOf('AR.UI.applyBgStyle()') >= 0);
 
-  /* ── v0.5.2：作业统计弹窗（六页）+ 逾期样式 ── */
-  ok('C191 作业统计弹窗有六个分页，记录是其中一页',
-    ui5.indexOf("{ k: 'overview', t: '总览' }") >= 0
-    && ui5.indexOf("{ k: 'heat', t: '热力图' }") >= 0
-    && ui5.indexOf("{ k: 'record', t: '记录' }") >= 0
-    && ui5.indexOf("{ k: 'insight', t: '洞察' }") >= 0
+
+  /* ── v0.5.2 / v0.5.3：作业统计弹窗（四页）── */
+  ok('C191 作业统计弹窗是四个分页，热力图并进总览、洞察页取消',
+    (function () {
+      var p0 = ui5.indexOf('var HW_STAT_PAGES = [');
+      var arr = p0 < 0 ? '' : ui5.slice(p0, ui5.indexOf('];', p0));
+      return arr.indexOf("{ k: 'overview', t: '总览' }") >= 0
+        && arr.indexOf("{ k: 'trend', t: '趋势' }") >= 0
+        && arr.indexOf("{ k: 'course', t: '按课程' }") >= 0
+        && arr.indexOf("{ k: 'record', t: '记录' }") >= 0
+        && arr.indexOf('热力图') < 0 && arr.indexOf('洞察') < 0
+        && (arr.match(/\{ k: '/g) || []).length === 4;
+    })()
     && ui5.indexOf("function openTaskLog() { openHomeworkStats('record'); }") >= 0);
   ok('C192 「作业记录」入口全部改成「作业统计」，模块卡删除',
     panels5.indexOf('作业统计…') >= 0
@@ -750,27 +757,109 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     && core5.indexOf("if (k === 'hwstats') { changed++; continue; }") >= 0);
   ok('C193 「挂账」表述已从代码里删干净',
     core5.indexOf('挂 ') < 0 && (core5 + ui5).indexOf('挂账') < 0);
-  ok('C194 截止日一律红字，逾期按 data-od 强调（默认两者都要）',
+  ok('C194 逾期强调改「左侧投影」（默认两者都要），旧值 bar 会迁成 glow',
     css5.indexOf('.hw-due.od { background: var(--danger)') >= 0
-    && css5.indexOf('body[data-od="solid"] .hw-row.has-od') >= 0
-    && css5.indexOf('body[data-od="bar"] .hw-due.od') >= 0
-    && css5.indexOf('body[data-od="bold"] .hw-due.od') >= 0
+    && css5.indexOf('.hw-row.has-od { box-shadow: inset 12px 0 14px -12px var(--danger); }') >= 0
+    && css5.indexOf('body[data-od="solid"] .hw-row.has-od { box-shadow: none; }') >= 0
+    && css5.indexOf('body[data-od="glow"] .hw-due.od') >= 0
     && core5.indexOf("overdueStyle: 'both'") >= 0
-    && ui5.indexOf('function applyOdStyle()') >= 0
-    && panels5.indexOf('作业逾期强调') >= 0);
-  ok('C195 六个分页在窄屏只收窄内边距、标签保留全称',
-    css5.indexOf('.hwst-seg { gap: 3px; padding: 3px; }') >= 0
-    && css5.indexOf('.hwst-seg .seg { font-size: 12px; padding: 6px 7px; }') >= 0
-    && css5.indexOf('@media (max-width: 400px) { .hwst-seg .seg { font-size: 11.5px; padding: 6px 6px; } }') >= 0);
-  ok('C196 热力图：12 周、固定 1/2/3+ 档、欠账日红框、点格子看详情',
+    && core5.indexOf("if (s.settings.appearance.overdueStyle === 'bar')") >= 0
+    && panels5.indexOf("{ label: '左侧投影', value: 'glow' }") >= 0
+    && ui5.indexOf('function applyOdStyle()') >= 0);
+  ok('C195 作业统计复用任务数据分析的组件、进场动画与弹窗宽度',
+    ui5.indexOf('<div class="tk-statpage" id="hwStatPage"></div>') >= 0
+    && ui5.indexOf('function playContentIn(node, name)') >= 0
+    && ui5.indexOf('playContentIn(pageBox);') >= 0
+    && ui5.indexOf('<div class="tk-kpi">') >= 0
+    && ui5.indexOf('<div class="tk-chart">') >= 0
+    && (css5.match(/\.hwst-/g) || []).length === 0
+    && (ui5.match(/hwst-/g) || []).length === 0);
+  ok('C196 热力图按真实周对齐、今天之后留白、不再有欠账红框',
     ui5.indexOf('function hwStatHeat(daily)') >= 0
-    && ui5.indexOf("it.done >= 3 ? ' l3'") >= 0
-    && ui5.indexOf("(it.debt > 0 ? ' debt' : '')") >= 0
-    && ui5.indexOf('data-hi=') >= 0
-    && css5.indexOf('.hwst-cell.debt { box-shadow: inset 0 0 0 1.5px var(--danger); }') >= 0);
-  ok('C197 记录页：状态 + 课程两排 chips 可叠加、分组可折叠',
-    ui5.indexOf('data-hs="') >= 0 && ui5.indexOf('data-hc2="') >= 0
-    && ui5.indexOf('data-hg="') >= 0 && ui5.indexOf('courseList.length >= 2') >= 0);
+    && ui5.indexOf('(c - 11) * 7 + d') >= 0
+    && ui5.indexOf('var isFuture = k > todayK;') >= 0
+    && ui5.indexOf("(isFuture ? ' future' : lv)") >= 0
+    && ui5.indexOf('it.debt') < 0
+    && ui5.indexOf('data-hk=') >= 0
+    && css5.indexOf('.tk-hcell.future { background: transparent; }') >= 0
+    && css5.indexOf('.hwst-cell.debt') < 0);
+  ok('C197 记录页：逾期 / 这周 / 上周 / 近一个月 / 更早，段内按课程再分组，筛选各占一行',
+    ui5.indexOf("['od', '逾期', overdueList, false]") >= 0
+    && ui5.indexOf("['tw', '这周', thisWeek, false]") >= 0
+    && ui5.indexOf("['lw', '上周', lastWeek, false]") >= 0
+    && ui5.indexOf("['mo', '近一个月', monthList, false]") >= 0
+    && ui5.indexOf("['old', '更早', olderList, true]") >= 0
+    && ui5.indexOf('function courseMeta(cid)') >= 0
+    && ui5.indexOf('class="tk-cgh"') >= 0
+    && css5.indexOf('.tk-cgh {') >= 0
+    && ui5.indexOf('data-hs="') >= 0 && ui5.indexOf('data-hc2="') >= 0
+    && ui5.indexOf('data-hg="') >= 0
+    && css5.indexOf('.tk-chips {') >= 0 && css5.indexOf('scrollbar-width: thin') >= 0);
+
+  /* ── v0.5.2a：作业统计跟进的 8 条 ── */
+  ok('C198 课程行的进度条不再叫 .tk-cbar（撞名会把 30 天柱压成 64×6 的灰块）',
+    css5.indexOf('.tk-crow-bar { flex: 0 0 auto; width: 64px') >= 0
+    && css5.indexOf('.tk-cbar { flex: 0 0 auto; width: 64px') < 0
+    && ui5.indexOf('<span class="tk-crow-bar"><i') >= 0);
+  ok('C199 流畅模式/减弱动画下折线要画出来（不能被 dashoffset 挂在 1400）',
+    css5.indexOf('body[data-perf] .tk-statpage .tk-spark polyline { stroke-dasharray: none; stroke-dashoffset: 0; }') >= 0
+    && (css5.match(/stroke-dashoffset: 0;/g) || []).length >= 2);
+  ok('C200 三条结论搬到趋势页尾部，总览只留数字与图表',
+    ui5.indexOf('function hwStatInsights(D)') >= 0
+    && ui5.indexOf('+ hwStatInsights(D);') >= 0
+    && ui5.indexOf('+ hwStatWeekday(D.wd);') >= 0);
+  ok('C201 热力图大小可在设置里切换（sm / lg）',
+    core5.indexOf("heatSize: 'sm'") >= 0
+    && panels5.indexOf("{ label: '大（铺满宽度）', value: 'lg' }") >= 0
+    && ui5.indexOf('function applyHeatSize()') >= 0
+    && ui5.indexOf('applyHeatSize: applyHeatSize,') >= 0
+    && css5.indexOf('body[data-heat="lg"] .tk-hcell') >= 0);
+  ok('C202 热力图点开那天可以展开去记录页（带那天筛选）',
+    ui5.indexOf('data-hday="') >= 0
+    && ui5.indexOf('data-hdayclear="') >= 0
+    && ui5.indexOf("HW_STAT.day = ln.getAttribute('data-hday') || '';") >= 0
+    && ui5.indexOf('dk1 !== HW_STAT.day && dk2 !== HW_STAT.day') >= 0);
+  ok('C203 任务贡献图同样「未来留白 + 今天描边」',
+    ui5.indexOf("cls += ' future';") >= 0
+    && ui5.indexOf("cls += ' today';") >= 0
+    && css5.indexOf('body[data-perf][data-theme="dark"] .tk-gh-cell.future { background: transparent; opacity: 1; }') >= 0
+    && css5.indexOf('body .tk-gh-cell.today { box-shadow: inset 0 0 0 1.5px var(--accent); }') >= 0);
+  ok('C204 展开/收起走高度补间、列表错峰进场（流畅模式下自动跳过）',
+    ui5.indexOf('function tkSlide(node, open, done)') >= 0
+    && ui5.indexOf('function tkFadeRows(scope)') >= 0
+    && ui5.indexOf('tkSlide(bd, !willFold);') >= 0
+    && ui5.indexOf('tkSlide(oldBody, false,') >= 0
+    && ui5.indexOf('tkFadeRows(pageBox);') >= 0);
+  ok('C205 任务贡献图的「未来留白」规则排在主题/流畅模式配色之后（否则盖不住）',
+    css5.indexOf('body[data-perf][data-theme="dark"] .tk-gh-cell.future') >= 0
+    && css5.indexOf('body[data-perf][data-theme="dark"] .tk-gh-cell.future') > css5.indexOf('body[data-perf][data-theme="dark"] .tk-gh-cell.l4'),
+    '规则顺序');
+  ok('C206 大号热力图同时作用于作业热力图与任务贡献图，且星期列跟格子同高',
+    css5.indexOf('body[data-heat="lg"] .tk-gh-cell { width: 100%; height: 22px;') >= 0
+    && css5.indexOf('body[data-heat="lg"] .tk-gh-days i { height: 22px; line-height: 22px; }') >= 0
+    && css5.indexOf('body[data-heat="lg"] .tk-hdays i { height: 24px; line-height: 24px; }') >= 0
+    && css5.indexOf('body[data-heat="lg"] .tk-hdays { gap: 4px; padding-top: 11px; }') >= 0);
+  ok('C207 按课程只允许一个展开块，且展开时清掉跨页筛选',
+    ui5.indexOf("pageBox.querySelectorAll('.tk-cbody')") >= 0
+    && ui5.indexOf("HW_STAT.day = '';") >= 0
+    && ui5.indexOf("HW_STAT.course = 'all';") >= 0);
+  ok('C208 高度补间只动高度（opacity 交给进场动画，避免闪一下）',
+    ui5.indexOf("{ height: '0px' }, { height: h + 'px' }") >= 0
+    && ui5.indexOf("{ height: h2 + 'px' }, { height: '0px' }") >= 0);
+  ok('C209 课程展开按 DOM 判断开合（状态不同步也不会点不动），且只绑一次',
+    ui5.indexOf('var curBody = (b.nextElementSibling') >= 0
+    && ui5.indexOf('var wasOpen = !!curBody;') >= 0
+    && ui5.indexOf('if (nodes[i].__hwB) { continue; }') >= 0
+    && ui5.indexOf('if (row.__hwB) { return; }') >= 0);
+  ok('C210 记录页每个时间段内部按课程分组',
+    ui5.indexOf('function courseMeta(cid)') >= 0
+    && ui5.indexOf("class=\"tk-cgh\"") >= 0
+    && css5.indexOf('.tk-cgh {') >= 0);
+  ok('C211 按课程展开后「在记录页看全部 →」也能点（插入的块要补绑链接）',
+    ui5.indexOf('function hwStatBindLinks(scope, api)') >= 0
+    && ui5.indexOf('hwStatBindLinks(pageBox, api);') >= 0
+    && ui5.indexOf('hwStatBindLinks(b.nextElementSibling, api);') >= 0);
+
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

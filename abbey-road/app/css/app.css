@@ -2544,7 +2544,7 @@ body.dev-outline .segmented, body.dev-outline .btn, body.dev-outline .chip-btn {
 .hw-more { padding: 4px 2px; font-size: 11.5px; color: var(--accent); }
 .hw-earlier { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; }
 
-/* ── 作业 · 截止日（v0.5.2 定稿）────────────────────────────────
+/* ── 作业 · 截止日（v0.5.3）──────────────────────────────────────
    右边那枚 chip 和左边的「布置日」是**同一种样式**，只是字是红的。
    逾期的强调方式见下面 data-od 那几条（设置 → 外观 可改）。 */
 .hw-due {
@@ -2553,14 +2553,17 @@ body.dev-outline .segmented, body.dev-outline .btn, body.dev-outline .chip-btn {
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 /**
- * 逾期强调：默认「两者都要」= 红底白字 + 行左侧竖条。
- * 块里的第一条给默认值，后面按 body[data-od] 覆盖成用户选的那一种。
+ * 逾期强调：默认「两者都要」= 红底白字 + 行左侧投影。
+ *
+ * v0.5.3 把「行左侧」从 2px 硬竖条换成向内投影：那条竖条上下顶满，
+ * 一条行挨着一条时看着像给每行镶了一圈红边。投影只有 12px 宽、
+ * 从红渐到透明，读起来是「这行有点问题」，不是「这行被框起来了」。
+ * 四档：solid=红底白字 / glow=左侧投影 / both=红底+投影 / bold=加粗日期。
  */
 .hw-due.od { background: var(--danger); color: #fff; font-weight: 650; }
-.hw-row.has-od { box-shadow: inset 2px 0 0 var(--danger); }
-body[data-od="solid"] .hw-row.has-od,
-body[data-od="bold"] .hw-row.has-od { box-shadow: none; }
-body[data-od="bar"] .hw-due.od,
+.hw-row.has-od { box-shadow: inset 12px 0 14px -12px var(--danger); }
+body[data-od="solid"] .hw-row.has-od { box-shadow: none; }
+body[data-od="glow"] .hw-due.od,
 body[data-od="bold"] .hw-due.od { background: var(--accent-soft); color: var(--danger); font-weight: 400; }
 body[data-od="bold"] .hw-due.od { font-weight: 750; }
 
@@ -2573,116 +2576,9 @@ body[data-od="bold"] .hw-due.od { font-weight: 750; }
 .hw-stat.warn b { color: var(--warn); }
 .hw-stat.danger b { color: var(--danger); }
 
-/* ══════════ 作业统计弹窗（v0.5.2：一个弹窗六页）══════════ */
-/* 六个分页：窄屏只收窄内边距，标签保留全称。
-   360dp 直板机可用 ~292px，收窄后六标签约 275px → 一行；320dp 自动折 3+3。 */
-.hwst-seg { gap: 3px; padding: 3px; }
-.hwst-seg .seg { font-size: 12px; padding: 6px 7px; }
-@media (max-width: 400px) { .hwst-seg .seg { font-size: 11.5px; padding: 6px 6px; } }
-
-.hwst-page { padding-top: 2px; }
-.hwst-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.hwst-kpi { padding: 8px 8px 7px; border-radius: 10px; background: var(--bg-subtle); }
-.hwst-kl { font-size: 10.5px; color: var(--text-tertiary); }
-.hwst-kv { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
-.hwst-kv i { font-style: normal; font-size: 10px; font-weight: 400; color: var(--text-tertiary); margin-left: 1px; }
-.hwst-ks { font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
-.hwst-sh { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 6px; font-size: 11.5px; font-weight: 600; }
-.hwst-sh span { font-weight: 400; font-size: 10.5px; color: var(--text-tertiary); }
-.hwst-bars { display: flex; align-items: flex-end; gap: 3px; height: 62px; }
-.hwst-bars i { flex: 1 1 0; min-height: 2px; border-radius: 2px; background: var(--divider); }
-.hwst-bars i.on { background: var(--accent); }
-.hwst-x { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); padding-top: 3px; }
-.hwst-wd { display: flex; align-items: center; gap: 8px; padding: 2px 0; font-size: 11px; }
-.hwst-wd > span:first-child { width: 14px; color: var(--text-tertiary); }
-.hwst-wdt { flex: 1 1 auto; height: 7px; border-radius: 999px; background: var(--bg-subtle); overflow: hidden; }
-.hwst-wdt i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
-.hwst-wdn { width: 24px; text-align: right; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-.hwst-line { width: 100%; height: 118px; }
-.hwst-line .area { fill: var(--accent-soft); }
-.hwst-line .stroke { fill: none; stroke: var(--accent); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
-
-/* 热力图：12 周 × 7 天，色阶固定 1 / 2 / 3+；红框 = 那天布置的还没勾完 */
-.hwst-heat { display: flex; gap: 6px; }
-.hwst-hdays { display: flex; flex-direction: column; gap: 2px; padding-top: 14px; font-size: 9px; color: var(--text-tertiary); }
-.hwst-hdays i { height: 11px; line-height: 11px; font-style: normal; }
-.hwst-hmain { flex: 1 1 auto; min-width: 0; }
-.hwst-hmonths { display: flex; gap: 2px; height: 12px; font-size: 9.5px; color: var(--text-tertiary); }
-.hwst-hmonths span { flex: 1 1 0; }
-.hwst-hgrid { display: flex; gap: 2px; }
-.hwst-hcol { display: flex; flex-direction: column; gap: 2px; flex: 1 1 0; }
-.hwst-cell {
-  position: relative; display: block; height: 11px; border-radius: 2px;
-  background: var(--bg-subtle);
-}
-.hwst-cell::after {
-  content: ""; position: absolute; inset: 0; border-radius: 2px;
-  background: var(--accent); opacity: 0;
-}
-.hwst-cell.l1::after { opacity: .28; }
-.hwst-cell.l2::after { opacity: .6; }
-.hwst-cell.l3::after { opacity: .95; }
-.hwst-cell.debt { box-shadow: inset 0 0 0 1.5px var(--danger); }
-.hwst-cell.sel { box-shadow: inset 0 0 0 1.5px var(--text-primary); }
-.hwst-legend {
-  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
-  padding-top: 8px; font-size: 10px; color: var(--text-tertiary);
-}
-.hwst-legend .hwst-cell { width: 11px; flex: 0 0 auto; }
-.hwst-debtkey { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
-.hwst-debtkey .hwst-cell { height: 11px; }
-.hwst-detail { font-size: 11.5px; color: var(--text-secondary); padding-top: 8px; min-height: 18px; }
-.hwst-note { font-size: 10.5px; color: var(--text-tertiary); padding-top: 6px; line-height: 1.55; }
-.hwst-empty { font-size: 12px; color: var(--text-tertiary); padding: 12px 2px; }
-
-/* 按课程：完成率排行 + 点开明细 */
-.hwst-crs { display: flex; flex-direction: column; gap: 6px; }
-.hwst-crow {
-  width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px;
-  border-radius: 10px; background: var(--bg-subtle); border: 1px solid transparent;
-  font: inherit; color: var(--text-primary); cursor: pointer; text-align: left;
-}
-.hwst-crow.on { border-color: var(--accent); }
-.hwst-cname { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hwst-cnum { flex: 0 0 auto; font-size: 10.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
-.hwst-cbar { flex: 0 0 auto; width: 72px; height: 6px; border-radius: 999px; background: var(--divider); overflow: hidden; }
-.hwst-cbar i { display: block; height: 100%; border-radius: 999px; }
-.hwst-cdetail {
-  margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg-subtle);
-  font-size: 11.5px; line-height: 1.65; color: var(--text-secondary);
-}
-.hwst-cdetail b { color: var(--text-primary); }
-.hwst-link { display: inline-block; margin-top: 6px; color: var(--accent); cursor: pointer; }
-
-/* 记录页：状态 + 课程两排 chips、可折叠分组、行内双日期 */
-.hwst-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 6px; }
-.hwst-chips button {
-  border: 1px solid var(--divider); background: transparent; color: var(--text-tertiary);
-  font: inherit; font-size: 11px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
-}
-.hwst-chips button.on { border-color: var(--accent); color: var(--accent); }
-.hwst-ghead {
-  width: 100%; display: flex; align-items: center; gap: 6px; margin-top: 8px;
-  border: 0; background: transparent; color: var(--text-primary);
-  font: inherit; font-size: 12px; font-weight: 600; padding: 2px 0; cursor: pointer; text-align: left;
-}
-.hwst-arrow { display: inline-block; width: 10px; color: var(--text-tertiary); transition: transform 150ms var(--ease-standard); }
-.hwst-ghead.closed .hwst-arrow { transform: rotate(-90deg); }
-.hwst-gn { font-weight: 400; color: var(--text-tertiary); }
-.hwst-gbody { display: flex; flex-direction: column; }
-.hwst-lrow { display: flex; align-items: center; gap: 8px; padding: 7px 2px; border-top: 1px dashed var(--divider); }
-.hwst-lrow:first-child { border-top: 0; }
-.hwst-lrow.done .hw-text { text-decoration: line-through; color: var(--text-tertiary); }
-.hwst-when { flex: 0 0 auto; font-size: 10px; color: var(--text-tertiary); }
-.hwst-x { border: 0; background: transparent; color: var(--text-tertiary); font-size: 12px; cursor: pointer; padding: 0 2px; }
-.hwst-x:hover { color: var(--danger); }
-.hwst-clean { width: 100%; }
-
-/* 洞察 */
-.hwst-ins { display: flex; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--bg-subtle); margin-bottom: 8px; }
-.hwst-ic { flex: 0 0 auto; width: 18px; text-align: center; color: var(--accent); font-size: 12px; }
-.hwst-ins p { margin: 0; font-size: 11.5px; line-height: 1.65; color: var(--text-secondary); }
-.hwst-ins b { color: var(--text-primary); }
+/* 作业统计弹窗的样式在「任务数据分析」那套 tk-* 里 ——
+v0.5.3 起它复用同一份组件（.tk-kpi / .tk-shead / .tk-chart / .tk-ins），
+不再维护一套并行的旧样式。热力图与课程行见下面的 .tk-heat / .tk-crow。 */
 
 /* 作业 · 按课程分组（v0.3.7）：组头是课程色点 + 课程名 + 条数 */
 .hw-group {
@@ -3645,6 +3541,21 @@ body[data-perf][data-theme="dark"] .tk-gh-cell.l1 { background: rgba(122, 165, 2
 body[data-perf][data-theme="dark"] .tk-gh-cell.l2 { background: rgba(122, 165, 246, .52); }
 body[data-perf][data-theme="dark"] .tk-gh-cell.l3 { background: rgba(122, 165, 246, .72); }
 body[data-perf][data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
+/* v0.5.2a：未来的日子不画格子、今天描一圈主题色 —— 放在主题/流畅模式配色之后才盖得住 */
+body .tk-gh-cell.future,
+body[data-theme="dark"] .tk-gh-cell.future,
+body[data-perf] .tk-gh-cell.future,
+body[data-perf][data-theme="dark"] .tk-gh-cell.future { background: transparent; opacity: 1; }
+body .tk-gh-cell.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* 热力图大小（设置 → 外观）：任务贡献图也跟着大/小两档 */
+body[data-heat="lg"] .tk-gh-months span { flex: 1 1 0; width: auto; }
+body[data-heat="lg"] .tk-gh-grid { gap: 4px; }
+body[data-heat="lg"] .tk-gh-col { flex: 1 1 0; gap: 4px; }
+body[data-heat="lg"] .tk-gh-cell { width: 100%; height: 22px; border-radius: 3px; }
+body[data-heat="lg"] .tk-gh-days { gap: 4px; }
+body[data-heat="lg"] .tk-gh-days i { height: 22px; line-height: 22px; }
+body[data-heat="lg"] .tk-gh-legend .tk-gh-cell { width: 11px; height: 11px; flex: 0 0 auto; }
+
 .tk-gh-legend {
   display: flex; align-items: center; gap: 4px; justify-content: flex-end;
   margin-top: 8px; font-size: 9.5px; color: var(--text-tertiary);
@@ -3901,6 +3812,8 @@ body[data-perf][data-theme="dark"] .tk-gh-cell.l4 { background: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .tk-statpage .tk-cbar, .tk-statpage .tk-wdt i, .tk-statpage .tk-kbar i,
   .tk-statpage .tk-goalbar i, .tk-statpage .tk-spark polyline { animation: none !important; }
+  /* 同上：减弱动画时折线要直接画出来 */
+  .tk-statpage .tk-spark polyline { stroke-dasharray: none; stroke-dashoffset: 0; }
 }
 /* 性能模式：不播动画 */
 body[data-perf] .tk-statpage .tk-cbar,
@@ -3908,7 +3821,107 @@ body[data-perf] .tk-statpage .tk-wdt i,
 body[data-perf] .tk-statpage .tk-kbar i,
 body[data-perf] .tk-statpage .tk-goalbar i,
 body[data-perf] .tk-statpage .tk-spark polyline { animation: none !important; }
+/* 关掉动画时必须把描边拨到底：否则 stroke-dashoffset 还是 1400，折线整根不可见 */
+body[data-perf] .tk-statpage .tk-spark polyline { stroke-dasharray: none; stroke-dashoffset: 0; }
 
+
+/* ── 作业统计（v0.5.3）：只补任务数据分析那套没有的三个部件 ──────
+   热力图（12 周 × 7 天，真实周对齐、今天之后留白）、按课程的课程行、
+   记录页的单行筛选与折叠分组。其余全部复用 .tk-* 现成样式。 */
+.tk-heat { display: flex; gap: 10px; align-items: flex-start; }
+.tk-hdays { display: flex; flex-direction: column; gap: 3px; padding-top: 11px; font-size: 9px; color: var(--text-tertiary); }
+.tk-hdays i { height: 12px; line-height: 12px; font-style: normal; }
+.tk-hmain { min-width: 0; }
+.tk-hmonths { display: flex; gap: 3px; height: 11px; font-size: 9px; color: var(--text-tertiary); }
+/* 每格固定 12px（跟下面格子同宽）：flex-basis 设为 0 时「8 月」这种标签会把列撑开，月份就和格子错位了 */
+.tk-hmonths span { flex: 0 0 12px; min-width: 0; white-space: nowrap; }
+.tk-hgrid { display: flex; gap: 3px; }
+.tk-hcol { display: flex; flex-direction: column; gap: 3px; }
+.tk-hcell { display: block; width: 12px; height: 12px; border-radius: 2px; background: var(--divider); }
+.tk-hcell.l1 { background: var(--accent); opacity: .32; }
+.tk-hcell.l2 { background: var(--accent); opacity: .62; }
+.tk-hcell.l3 { background: var(--accent); opacity: .95; }
+.tk-hcell.future { background: transparent; }                      /* 还没到的日子：留白，不画格子 */
+.tk-hcell.today { box-shadow: inset 0 0 0 1.5px var(--accent); }    /* 今天：描一圈主题色 */
+.tk-hcell.sel { box-shadow: inset 0 0 0 1.5px var(--text-primary); }
+.tk-hlg { display: flex; align-items: center; gap: 3px; margin-top: 8px; font-size: 9.5px; color: var(--text-tertiary); }
+.tk-hlg .tk-hcell { width: 10px; height: 10px; }
+/* 大号热力图（设置 → 外观 → 热力图大小）：12 周铺满宽度、格子 24px */
+body[data-heat="lg"] .tk-heat { gap: 12px; }
+body[data-heat="lg"] .tk-hmain { flex: 1 1 auto; }
+body[data-heat="lg"] .tk-hmonths span { flex: 1 1 0; }
+body[data-heat="lg"] .tk-hgrid { gap: 4px; }
+body[data-heat="lg"] .tk-hcol { flex: 1 1 0; gap: 4px; }
+body[data-heat="lg"] .tk-hcell { width: 100%; height: 24px; border-radius: 3px; }
+body[data-heat="lg"] .tk-hlg .tk-hcell { width: 10px; height: 10px; flex: 0 0 auto; }
+/* 星期列必须和 24px 格子同高，否则左侧「一二三…」会错位 */
+body[data-heat="lg"] .tk-hdays { gap: 4px; padding-top: 11px; }
+body[data-heat="lg"] .tk-hdays i { height: 24px; line-height: 24px; }
+.tk-hdetail { font-size: 11.5px; color: var(--text-secondary); padding-top: 8px; min-height: 17px; }
+.tk-hdetail b { color: var(--text-primary); }
+
+/* 按课程：一行一门课，点开就地列条目（不再弹新窗） */
+.tk-crs { display: flex; flex-direction: column; gap: 6px; }
+.tk-crow {
+  width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+  border: 1px solid var(--glass-stroke); border-radius: 12px; background: var(--glass-surface);
+  font: inherit; color: var(--text-primary); cursor: pointer; text-align: left;
+}
+.tk-crow.on { border-color: var(--accent); }
+.tk-cdot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
+.tk-cname { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-cnum { flex: 0 0 auto; font-size: 10.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+/* 课程行的进度条：别再叫 .tk-cbar —— 那个名字是任务数据分析里的柱子，
+   撞名会把 30 天柱压成 64×6px 的灰圆角块（v0.5.2a 已修）。 */
+.tk-crow-bar { flex: 0 0 auto; width: 64px; height: 6px; border-radius: 999px; background: var(--divider); overflow: hidden; }
+.tk-crow-bar i { display: block; height: 100%; border-radius: 999px; }
+.tk-cbody { margin: 2px 0 4px 7px; padding-left: 8px; border-left: 1px solid var(--divider); }
+.tk-clink { display: inline-block; margin-top: 6px; font-size: 11px; color: var(--accent); cursor: pointer; }
+
+/* 记录页：单行筛选 + 折叠分组；行本身复用作业卡的 .hw-row（连同逾期投影） */
+.tk-chips {
+  display: flex; gap: 5px; overflow-x: auto; padding: 0 0 6px;
+  scrollbar-width: thin; scrollbar-color: var(--divider) transparent;
+}
+/* 桌面端没有横向手势：滚动条必须露出来，否则后面几门课根本点不到 */
+.tk-chips::-webkit-scrollbar { height: 6px; }
+.tk-chips::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 3px; }
+.tk-chips::-webkit-scrollbar-track { background: transparent; }
+.tk-chip {
+  flex: 0 0 auto; border: 1px solid var(--divider); background: transparent; color: var(--text-tertiary);
+  font: inherit; font-size: 11px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
+}
+.tk-chip.on { border-color: var(--accent); color: var(--accent); }
+/* 记录页：每个时间段内部再按课程分组的小标题 */
+.tk-cgh {
+  display: flex; align-items: center; gap: 5px; margin: 8px 0 2px; padding: 0 2px;
+  font-size: 11px; color: var(--text-secondary);
+}
+.tk-cgh .tk-cdot { width: 7px; height: 7px; }
+.tk-cgn { color: var(--text-tertiary); font-weight: 400; }
+
+.tk-ghead {
+  width: 100%; display: flex; align-items: center; gap: 6px; margin-top: 9px; padding: 2px 0;
+  border: 0; background: transparent; color: var(--text-primary);
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; text-align: left;
+}
+.tk-garrow { display: inline-block; width: 10px; color: var(--text-tertiary); transition: transform 150ms var(--ease-standard); }
+.tk-ghead.fold .tk-garrow { transform: rotate(-90deg); }
+.tk-gn { font-weight: 400; color: var(--text-tertiary); }
+.tk-gbody { display: flex; flex-direction: column; gap: 4px; }
+.tk-gbody[hidden] { display: none; }
+.tk-when { flex: 0 0 auto; font-size: 10px; color: var(--text-tertiary); }
+.tk-x { border: 0; background: transparent; color: var(--text-tertiary); font-size: 11px; padding: 4px 4px; cursor: pointer; }
+.tk-x:hover { color: var(--danger); }
+.tk-clean { width: 100%; margin-top: 14px; }
+
+/* 热力图格子进场：从 0.7 倍淡进来，按列错峰（延迟在行内写） */
+.tk-statpage .tk-hcell { animation: tkHeatIn 260ms var(--ease-emphasized) both; }
+@keyframes tkHeatIn { from { opacity: 0; transform: scale(.7); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .tk-statpage .tk-hcell { animation: none !important; }
+}
+body[data-perf] .tk-statpage .tk-hcell { animation: none !important; }
 
 /* 任务编辑页里的「最近记录」 */
 .tk-edit-recs { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--divider); }

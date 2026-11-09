@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.5.2';
+var APP_VERSION = '0.5.2a';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -282,7 +282,8 @@ var APP_VERSION = '0.5.2';
          * 作业逾期强调（v0.5.2，设置 → 外观）：
          *   both（默认）= 红底白字 + 行左侧竖条；solid / bar / bold 只取其中一种
          */
-        overdueStyle: 'both'
+        overdueStyle: 'both',
+      heatSize: 'sm'
       },
       /**
        * leftHand：左手模式。「左右」布局下把两栏对调
@@ -2088,6 +2089,10 @@ function todoLongList() { return todoDailyList(); }
     if (s.settings.appearance.bgStyle == null) { s.settings.appearance.bgStyle = 'blobs'; }
     /* v0.5.2：作业逾期强调方式，老配置补「两者都要」 */
     if (s.settings.appearance.overdueStyle == null) { s.settings.appearance.overdueStyle = 'both'; }
+    /* v0.5.3：「左侧竖条」那档换成了「左侧投影」（2px 实线太像给整行镶边），旧值迁过去 */
+    if (s.settings.appearance.overdueStyle === 'bar') { s.settings.appearance.overdueStyle = 'glow'; }
+    /* v0.5.2a：作业热力图大小（sm = 12px 方格靠左；lg = 铺满宽度） */
+    if (s.settings.appearance.heatSize !== 'lg') { s.settings.appearance.heatSize = 'sm'; }
     // v0.3.8：流畅模式（关闭 / 标准 / 深度），老数据补默认「关闭」
     if (!{ full: 1, lite: 1, min: 1 }[s.settings.appearance.perfMode]) {
       s.settings.appearance.perfMode = 'full';

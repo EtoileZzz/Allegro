@@ -1116,54 +1116,6 @@ var AR = window.AR || (window.AR = {});
   return longTaskCard(false);
 }
 
-  /** 某门课的作业明细（作业统计 → 按课程 → 点课程名进来的） */
-  function openCourseHomework(courseId, name) {
-    var all = AR.Store.taskList ? AR.Store.taskList() : [];
-    var open = [], done = [];
-    for (var i = 0; i < all.length; i++) {
-      var t = all[i];
-      if (String(t.courseId || '') !== String(courseId || '')) { continue; }
-      if (t.done) { done.push(t); } else { open.push(t); }
-    }
-    var todayK = U.dateKey(new Date());
-    var body = el('<div class="hwst"></div>');
-    body.appendChild(el('<div class="hwst-kpis">'
-      + hwStatKpi('未完成', open.length, '条', '')
-      + hwStatKpi('已完成', done.length, '条', '')
-      + hwStatKpi('合计', open.length + done.length, '条', '') + '</div>'));
-    if (!open.length && !done.length) {
-      body.appendChild(el('<div class="hwst-empty">这门课还没有作业记录。</div>'));
-    }
-    [['未完成', open, false], ['已完成', done, true]].forEach(function (g) {
-      if (!g[1].length) { return; }
-      body.appendChild(el('<div class="hwst-sh">' + g[0] + '<span>· ' + g[1].length + ' 项</span></div>'));
-      for (var j = 0; j < g[1].length; j++) {
-        var row = el(hwStatRowHTML(g[1][j], todayK));
-        (function (rec, isDone, node) {
-          bindLongPress(node, function () {
-            if (isDone) {
-              AR.Store.setTaskDone(rec.id, false);
-              AR.UI.toast('已找回：「' + rec.text + '」');
-              refreshHomework();
-            } else {
-              var live = AR.Store.taskById ? AR.Store.taskById(rec.id) : null;
-              if (live) { openHomeworkMenu(live); }
-            }
-          }, isDone ? 600 : 520);
-          node.addEventListener('click', function () {
-            var live2 = AR.Store.taskById ? AR.Store.taskById(rec.id) : null;
-            if (!isDone && live2) { openHomeworkMenu(live2); }
-          });
-        })(g[1][j], g[2], row);
-        body.appendChild(row);
-      }
-    });
-    openModal({
-      title: name || '未分类', sub: '这门课的作业 · 长按可编辑 / 找回', body: body, wide: true,
-      actions: [{ label: '回到统计', onClick: function (close) { close(); openHomeworkStats('course'); } }]
-    });
-  }
-
   function modTodaycourses() {
     var items = AR.Schedule.dayItems(new Date(), AR.Store.currentSemester());
     var card = el('<div class="hw-card"></div>');
@@ -8353,18 +8305,20 @@ var AR = window.AR || (window.AR = {});
   }
 
   /* ══════════════════════════════════════════════════════════════
-     作业统计弹窗（v0.5.2 定稿：一个弹窗六页）
+     作业统计弹窗（v0.5.3：四页，和「任务数据分析」共用一套组件）
 
-     总览 / 趋势 / 热力图 / 按课程 / 记录 / 洞察 —— 「记录」就是老的「作业记录」：
-     找作业、改、删、长按找回、清理 30 天前的已完成都还在这一页。
-     数字全部来自 AR.Store.taskStats()（唯一一份口径），这里只管排版。
+     总览 / 趋势 / 按课程 / 记录 —— 热力图并进总览；「洞察」页取消，
+     其中三条最有用（拖最久 / 按时率 / 积压峰值）落在总览尾部。
+     样式全部复用 .tk-*（任务数据分析那套），动画也走同一条路：
+     contentIn 进场 + tkGrow 柱子 + tkWipe 横条 + tkDraw 折线。
+     数字仍然只来自 AR.Store.taskStats()，这里只管排版。
      ══════════════════════════════════════════════════════════════ */
 
   var HW_STAT_PAGES = [
-    { k: 'overview', t: '总览' }, { k: 'trend', t: '趋势' }, { k: 'heat', t: '热力图' },
-    { k: 'course', t: '按课程' }, { k: 'record', t: '记录' }, { k: 'insight', t: '洞察' }
+    { k: 'overview', t: '总览' }, { k: 'trend', t: '趋势' },
+    { k: 'course', t: '按课程' }, { k: 'record', t: '记录' }
   ];
-  var HW_STAT = { page: 'overview', state: 'all', course: 'all', closed: {}, heat: -1, courseOpen: null };
+  var HW_STAT = { page: 'overview', state: 'all', course: 'all', fold: {}, heat: '', courseOpen: null, day: '' };
 
   function hwStatDateLong(dayKey) {
     var d = U.parseDateKey(dayKey);
@@ -8372,102 +8326,226 @@ var AR = window.AR || (window.AR = {});
     return (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 · ' + U.WEEKDAY_NAMES[U.weekdayOf(d)];
   }
 
-  function hwStatKpi(label, value, unit, sub) {
-    return '<div class="hwst-kpi"><div class="hwst-kl">' + U.escapeHtml(label) + '</div>'
-      + '<div class="hwst-kv">' + value + (unit ? '<i>' + U.escapeHtml(unit) + '</i>' : '') + '</div>'
-      + (sub ? '<div class="hwst-ks">' + sub + '</div>' : '') + '</div>';
+  /** KPI 格：和任务数据分析同一套（tk-kpi / tk-kbar / tk-kd），第 4 个参数是进度 0–100 */
+  function hwStatKpi(label, value, unit, pct, sub) {
+    var h = '<div class="tk-kpi"><div class="tk-kl">' + U.escapeHtml(label) + '</div>'
+      + '<div class="tk-kv">' + value + (unit ? '<i> ' + U.escapeHtml(unit) + '</i>' : '') + '</div>';
+    if (pct != null) {
+      var w = Math.max(0, Math.min(100, Math.round(pct)));
+      h += '<div class="tk-kbar"><i style="width:' + w + '%"></i></div>';
+    }
+    return h + (sub || '') + '</div>';
   }
 
+  /** 近 30 天柱状图：柱高按峰值归一，包在 tk-chart 玻璃卡里（包 casing 与任务数据分析一致） */
   function hwStatBars(vals) {
-    var mx = 1, i;
+    var mx = 1, i, h = '';
     for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
-    var h = '';
     for (i = 0; i < vals.length; i++) {
-      var px = vals[i] ? Math.max(3, Math.round(vals[i] / mx * 58)) : 2;
-      h += '<i class="' + (vals[i] ? 'on' : '') + '" style="height:' + px + 'px"></i>';
+      var px = vals[i] ? Math.max(3, Math.round(vals[i] / mx * 92)) : 3;
+      h += '<span class="tk-cbar" style="height:' + px + 'px;'
+        + (vals[i] ? '' : 'opacity:.16;') + 'animation-delay:' + (i * 9) + 'ms"></span>';
     }
-    return '<div class="hwst-bars">' + h + '</div>';
+    return '<div class="tk-chart"><div class="tk-cbars">' + h + '</div>'
+      + '<div class="tk-axis"><span>30 天前</span><span>峰值 ' + mx + ' 条</span><span>今天</span></div></div>';
   }
 
+  /** 近 30 天折线（tk-spark + tkDraw 描线，和任务数据分析同一套） */
   function hwStatLine(vals) {
-    var w = 100, h = 34, mx = 1, i, d = '';
+    var W = 500, H = 100, pad = 6, mx = 1, i, pts = [];
     for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
     for (i = 0; i < vals.length; i++) {
-      var x = vals.length > 1 ? (i / (vals.length - 1)) * w : 0;
-      var y = h - (vals[i] / mx) * (h - 3) - 1;
-      d += (i ? 'L' : 'M') + x.toFixed(2) + ' ' + y.toFixed(2) + ' ';
+      var x = pad + i * ((W - pad * 2) / Math.max(1, vals.length - 1));
+      var y = H - pad - (vals[i] / mx) * (H - pad * 2);
+      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
     }
-    return '<svg class="hwst-line" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none">'
-      + '<path class="area" d="' + d + 'L' + w + ' ' + h + ' L0 ' + h + ' Z"/>'
-      + '<path class="stroke" d="' + d + '"/></svg>';
+    return '<div class="tk-chart"><svg class="tk-spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-hidden="true">'
+      + '<polyline points="' + pts.join(' ') + '" fill="none" stroke="var(--accent)" stroke-width="2" '
+      + 'stroke-linejoin="round" stroke-linecap="round"/></svg>'
+      + '<div class="tk-axis"><span>30 天前</span><span>峰值 ' + mx + ' 条</span><span>今天</span></div></div>';
   }
 
   function hwStatWeekday(wd) {
     var mx = 1, i, h = '';
     for (i = 0; i < 7; i++) { if (wd[i] > mx) { mx = wd[i]; } }
     for (i = 0; i < 7; i++) {
-      h += '<div class="hwst-wd"><span>' + U.WEEKDAY_NAMES[i + 1].replace('周', '') + '</span>'
-        + '<span class="hwst-wdt"><i style="width:' + Math.round(wd[i] / mx * 100) + '%"></i></span>'
-        + '<span class="hwst-wdn">' + wd[i] + '</span></div>';
+      h += '<div class="tk-wdrow"><span class="tk-wdn">' + U.WEEKDAY_NAMES[i + 1].replace('周', '') + '</span>'
+        + '<span class="tk-wdt"><i style="width:' + Math.round(wd[i] / mx * 100) + '%;animation-delay:'
+        + (i * 40) + 'ms"></i></span>'
+        + '<span class="tk-wdc">' + wd[i] + '</span></div>';
     }
     return h;
   }
 
-  /** 12 周 × 7 天的贡献图：色阶固定 1 / 2 / 3+，debt = 那天布置的还没勾完 */
+  /**
+   * 12 周热力图（v0.5.3 重写）
+   *   · 按真实周对齐（周一开头）—— 行标签「一…日」才对得上真的星期；
+   *   · 今天之后不画格子（留白）—— v0.5.2 是按 84 天硬排，最后一列其实是周二→周一，
+   *     「今天」掉到「日」那行，看着像把接下来几天也画满了；
+   *   · 今天那格描一圈主题色，点格子看那天的完成数。
+   * 数据仍来自 taskStats().daily（84 项，最后一项 = 今天），这里只负责摆位置。
+   */
   function hwStatHeat(daily) {
-    var cols = '', months = '', lastM = '', c, d, i;
+    var today = new Date();
+    var todayK = U.dateKey(today);
+    var monday = U.mondayOf(today);
+    var idxOf = {}, months = '', lastM = -1, cols = '', c, d, i;
+    for (i = 0; i < daily.length; i++) { idxOf[daily[i].day] = i; }
     for (c = 0; c < 12; c++) {
       var cells = '';
       for (d = 0; d < 7; d++) {
-        i = c * 7 + d;
-        if (i >= daily.length) { cells += '<i class="hwst-cell"></i>'; continue; }
-        var it = daily[i];
-        var lv = it.done >= 3 ? ' l3' : (it.done === 2 ? ' l2' : (it.done === 1 ? ' l1' : ''));
-        cells += '<i class="hwst-cell' + lv + (it.debt > 0 ? ' debt' : '')
-          + (HW_STAT.heat === i ? ' sel' : '') + '" data-hi="' + i + '"></i>';
+        var day = U.addDays(monday, (c - 11) * 7 + d);
+        var k = U.dateKey(day);
+        var isFuture = k > todayK;
+        var isToday = k === todayK;
+        var lv = '';
+        if (!isFuture) {
+          var it = idxOf[k] != null ? daily[idxOf[k]] : null;
+          if (it && it.done >= 3) { lv = ' l3'; }
+          else if (it && it.done === 2) { lv = ' l2'; }
+          else if (it && it.done === 1) { lv = ' l1'; }
+        }
+        cells += '<i class="tk-hcell' + (isFuture ? ' future' : lv)
+          + (isToday ? ' today' : '') + (HW_STAT.heat === k ? ' sel' : '') + '"'
+          + (isFuture ? '' : ' data-hk="' + k + '"')
+          + ' style="animation-delay:' + (c * 20) + 'ms"></i>';
       }
-      var dd = U.parseDateKey(daily[Math.min(c * 7, daily.length - 1)].day);
-      var mk = dd ? ((dd.getMonth() + 1) + ' 月') : '';
-      if (c === 0 || mk !== lastM) { months += '<span>' + mk + '</span>'; lastM = mk; }
-      else { months += '<span></span>'; }
-      cols += '<div class="hwst-hcol">' + cells + '</div>';
+      var mDay = U.addDays(monday, (c - 11) * 7);
+      var m = mDay.getMonth();
+      months += '<span>' + (m !== lastM ? ((m + 1) + ' 月') : '') + '</span>';
+      lastM = m;
+      cols += '<div class="tk-hcol">' + cells + '</div>';
     }
-    return '<div class="hwst-heat"><div class="hwst-hdays"><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><i>日</i></div>'
-      + '<div class="hwst-hmain"><div class="hwst-hmonths">' + months + '</div>'
-      + '<div class="hwst-hgrid">' + cols + '</div></div></div>';
+    var sel = null;
+    if (HW_STAT.heat && idxOf[HW_STAT.heat] != null) { sel = daily[idxOf[HW_STAT.heat]]; }
+    var detail = sel
+      ? (hwStatDateLong(sel.day) + (sel.day === todayK ? '（今天）' : '')
+        + ' · 完成 <b>' + sel.done + ' 条</b> · 当天布置 <b>' + sel.assigned + ' 条</b>'
+        + ' <span class="tk-clink" data-hday="' + sel.day + '">展开 →</span>')
+      : '点一个格子看那天完成了多少。';
+    return '<div class="tk-heat">'
+      + '<div class="tk-hdays"><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><i>日</i></div>'
+      + '<div class="tk-hmain"><div class="tk-hmonths">' + months + '</div>'
+      + '<div class="tk-hgrid">' + cols + '</div>'
+      + '<div class="tk-hlg">少<i class="tk-hcell"></i><i class="tk-hcell l1"></i>'
+      + '<i class="tk-hcell l2"></i><i class="tk-hcell l3"></i>多</div>'
+      + '</div></div>'
+      + '<div class="tk-hdetail">' + detail + '</div>';
   }
 
-  /** 记录页的一行：左布置日 · 文字 · 右截止日（红）· 已完成打勾日期 · 删除 */
+  function hwStatIns(glyph, html) {
+    return '<div class="tk-ins"><span class="tk-ic">' + glyph + '</span><p>' + html + '</p></div>';
+  }
+
+  /**
+   * 三条结论（v0.5.2a：从总览搬到趋势页）。
+   * 既然挂在「趋势」下，就只讲走势和节奏 —— 不再评课程好坏（那是「按课程」的事）。
+   */
+  function hwStatInsights(D) {
+    var h = '', i, back, n2;
+    var d7 = 0, d7prev = 0, active7 = 0;
+    for (i = 0; i < D.daily.length; i++) {
+      back = D.daily.length - 1 - i;
+      n2 = D.daily[i].done;
+      if (back < 7) { d7 += n2; if (n2) { active7++; } }
+      else if (back < 14) { d7prev += n2; }
+    }
+    /* ① 近 7 天 vs 上期 */
+    var delta = d7 - d7prev;
+    h += hwStatIns(delta >= 0 ? '↗' : '↘',
+      '近 7 天完成 <b>' + d7 + ' 条</b>'
+      + (d7prev
+        ? ('，比上期（' + d7prev + ' 条）' + (delta > 0 ? ('多 <b>' + delta + ' 条</b>')
+          : (delta < 0 ? ('少 <b>' + (-delta) + ' 条</b>') : '持平')))
+        : '，上期没有记录')
+      + '；7 天里有 <b>' + active7 + ' 天</b>动过作业。');
+    /* ② 连续天数 */
+    h += hwStatIns('☆', D.streak.cur
+      ? ('当前连续 <b>' + D.streak.cur + ' 天</b>都有作业勾掉'
+        + (D.streak.best > D.streak.cur ? ('，最长记录 <b>' + D.streak.best + ' 天</b>') : '（就是最长记录了）')
+        + '。')
+      : (D.streak.best ? ('今天还没勾作业；最长连续 <b>' + D.streak.best + ' 天</b>。') : '还没有连续完成的记录。'));
+    /* ③ 空窗 / 积压 —— 断档和堆积是趋势里真正该提醒的两件事 */
+    if (D.gap.max) {
+      h += hwStatIns('!', '最长 <b>' + D.gap.max + ' 天</b>没动作业（' + hwShortDate(D.gap.from)
+        + ' → ' + hwShortDate(D.gap.to) + '）'
+        + (D.peak.count ? ('；积压峰值 <b>' + D.peak.count + ' 条</b>（' + hwShortDate(D.peak.day) + '）。') : '。'));
+    } else if (D.peak.count) {
+      h += hwStatIns('!', '积压峰值 <b>' + hwShortDate(D.peak.day) + '</b>：那天同时挂着 <b>'
+        + D.peak.count + ' 条</b>没完成。');
+    }
+    return h ? ('<div style="margin-top:14px">' + h + '</div>') : '';
+  }
+
+  /** 记录页 / 课程展开共用的一行：左布置日 · 文字 · 右截止日（红）· 已完成打勾日期 · 删除 */
   function hwStatRowHTML(t, todayK) {
     var info = AR.Store.taskDueInfo ? AR.Store.taskDueInfo(t, todayK) : { kind: 'none' };
     var overdue = !t.done && info.kind === 'overdue';
     var doneDay = t.done && AR.Store.taskDoneDay ? AR.Store.taskDoneDay(t) : '';
-    return '<div class="hwst-lrow' + (t.done ? ' done' : '') + '"'
+    return '<div class="hw-row' + (t.done ? ' done' : '') + (overdue ? ' has-od' : '') + '"'
       + ' data-hrow="' + U.escapeHtml(t.id) + '" data-hdone="' + (t.done ? '1' : '0') + '">'
       + (t.date ? '<span class="hw-date">' + hwShortDate(t.date) + '</span>' : '')
       + '<span class="hw-text">' + U.escapeHtml(t.text) + '</span>'
       + (t.due ? '<span class="hw-due' + (overdue ? ' od' : '') + '">' + hwShortDate(t.due) + '</span>' : '')
-      + (t.done ? '<span class="hwst-when">✓ ' + hwShortDate(doneDay || t.date) + '</span>' : '')
-      + '<button class="hwst-x" type="button" title="删除">✕</button></div>';
+      + (t.done && doneDay ? '<span class="tk-when">✓ ' + hwShortDate(doneDay) + '</span>' : '')
+      + '<button class="tk-x" type="button" title="删除">✕</button></div>';
+  }
+
+  /** 记录排序：未完成在前；各自按截止日近的在前（没截止日的按布置日新的在前） */
+  function hwStatSort(a, b) {
+    if (!!a.done !== !!b.done) { return a.done ? 1 : -1; }
+    var da = a.done ? '' : String(a.due || '');
+    var db = b.done ? '' : String(b.due || '');
+    if (da && db && da !== db) { return da < db ? -1 : 1; }
+    if (da && !db) { return -1; }
+    if (!da && db) { return 1; }
+    var ta = String(a.date || ''), tb = String(b.date || '');
+    if (ta === tb) { return 0; }
+    return ta > tb ? -1 : 1;
+  }
+
+  function hwStatCourseBody(row, todayK) {
+    var all = AR.Store.taskList ? AR.Store.taskList() : [];
+    var mine = [], i;
+    for (i = 0; i < all.length; i++) {
+      if (String(all[i].courseId || '') === String(row.id)) { mine.push(all[i]); }
+    }
+    mine.sort(hwStatSort);
+    var shown = mine.slice(0, 8), h = '';
+    for (i = 0; i < shown.length; i++) { h += hwStatRowHTML(shown[i], todayK); }
+    h += '<div class="tk-tsmeta">按时完成 '
+      + (row.onTimeRate >= 0 ? (row.onTimeOk + ' / ' + row.onTimeTotal) : '—')
+      + (row.spendN ? (' · 平均 ' + row.avgSpend + ' 天勾掉一条') : '')
+      + (mine.length > shown.length ? (' · 还有 ' + (mine.length - shown.length) + ' 条') : '')
+      + '</div>'
+      + '<span class="tk-clink" data-hlink="' + U.escapeHtml(row.id) + '">在记录页看全部 ' + mine.length + ' 条 →</span>';
+    return '<div class="tk-cbody">' + h + '</div>';
   }
 
   function hwStatPageHTML(D) {
     var h = '', i;
     var todayK = U.dateKey(new Date());
+    var today = new Date();
 
     if (HW_STAT.page === 'overview') {
       var vals = [];
       for (i = 0; i < D.trend.length; i++) { vals.push(D.trend[i].count); }
-      h += '<div class="hwst-kpis">'
-        + hwStatKpi('本周完成率', D.weekRate + '%', '', D.weekDone + ' / ' + D.weekTotal + ' 条')
-        + hwStatKpi('本学期', D.semRate + '%', '', D.done + ' / ' + D.total + ' 条')
+      h += '<div class="tk-kpis">'
+        + hwStatKpi('本周完成率', D.weekRate + '%', '', D.weekRate,
+          '<div class="tk-tsmeta">' + D.weekDone + ' / ' + D.weekTotal + ' 条</div>')
+        + hwStatKpi('本学期', D.semRate + '%', '', D.semRate,
+          '<div class="tk-tsmeta">' + D.done + ' / ' + D.total + ' 条</div>')
         + hwStatKpi('按时完成率', D.onTime.total ? (D.onTimeRate + '%') : '—', '',
-          D.onTime.total ? ('仅 ' + D.onTime.total + ' 条有截止日') : '还没有带截止日的条目')
-        + hwStatKpi('未完成', D.open, '条', D.overdue ? ('其中逾期 ' + D.overdue + ' 条') : '没有逾期')
+          D.onTime.total ? D.onTimeRate : null,
+          '<div class="tk-tsmeta">' + (D.onTime.total ? ('按 ' + D.onTime.total + ' 条有截止日的算') : '还没有带截止日的条目') + '</div>')
+        + hwStatKpi('未完成', D.open, '条', null,
+          '<div class="tk-kd ' + (D.overdue ? 'down' : 'up') + '">'
+          + (D.overdue ? ('其中逾期 ' + D.overdue + ' 条') : '没有逾期') + '</div>')
         + '</div>'
-        + '<div class="hwst-sh">近 30 天<span>每天完成几条</span></div>' + hwStatBars(vals)
-        + '<div class="hwst-x"><span>30 天前</span><span>今天</span></div>'
-        + '<div class="hwst-sh">星期分布<span>星期几在勾作业</span></div>' + hwStatWeekday(D.wd);
+        + '<div class="tk-shead">最近 12 周 · 一格 = 一天完成的条数</div>'
+        + hwStatHeat(D.daily)
+        + '<div class="tk-shead">近 30 天 · 每天完成几条</div>' + hwStatBars(vals)
+        + '<div class="tk-shead">星期分布 · 星期几在勾作业</div>' + hwStatWeekday(D.wd);
       return h;
     }
 
@@ -8481,235 +8559,257 @@ var AR = window.AR || (window.AR = {});
         if (back < 7) { d7 += n; }
         else if (back < 14) { d7prev += n; }
       }
-      h += '<div class="hwst-kpis">'
-        + hwStatKpi('近 7 天', d7, '条', '')
-        + hwStatKpi('近 14 天', d14, '条', '')
-        + hwStatKpi('近 30 天', d30, '条', '')
-        + hwStatKpi('有完成的天', active + ' / 30', '', '')
+      h += '<div class="tk-kpis">'
+        + hwStatKpi('近 7 天', d7, '条', null, null)
+        + hwStatKpi('近 14 天', d14, '条', null, null)
+        + hwStatKpi('近 30 天', d30, '条', null, null)
+        + hwStatKpi('有完成的天', active + ' / 30', '', Math.round(active / 30 * 100), null)
         + '</div>'
-        + '<div class="hwst-sh">近 30 天走势</div>' + hwStatLine(vals2)
-        + '<div class="hwst-x"><span>30 天前</span><span>今天</span></div>'
-        + '<div class="hwst-note">近 7 天完成 <b>' + d7 + ' 条</b>'
+        + '<div class="tk-shead">近 30 天走势 · 每天完成几条</div>' + hwStatLine(vals2)
+        + '<p class="tk-muted">近 7 天完成 <b>' + d7 + ' 条</b>'
         + (d7prev ? ('，比上期（' + d7prev + ' 条）' + (d7 >= d7prev ? '多 ' : '少 ') + Math.abs(d7 - d7prev) + ' 条') : '，上期没有记录')
         + '。'
-        + (D.peak.count ? ('积压峰值 <b>' + D.peak.count + ' 条</b>（' + hwShortDate(D.peak.day) + '）。') : '')
         + (D.streak.cur ? ('当前连续 <b>' + D.streak.cur + ' 天</b>都有作业勾掉。') : '')
-        + '</div>';
-      return h;
-    }
-
-    if (HW_STAT.page === 'heat') {
-      h += '<div class="hwst-sh">最近 12 周<span>格子 = 那天完成几条（按完成日期）</span></div>'
-        + hwStatHeat(D.daily)
-        + '<div class="hwst-legend">少<i class="hwst-cell"></i><i class="hwst-cell l1"></i>'
-        + '<i class="hwst-cell l2"></i><i class="hwst-cell l3"></i>多'
-        + '<span class="hwst-debtkey"><i class="hwst-cell debt"></i>那天布置的还没勾完</span></div>';
-      var hi = HW_STAT.heat >= 0 ? D.daily[HW_STAT.heat] : null;
-      h += '<div class="hwst-detail">' + (hi
-        ? (hwStatDateLong(hi.day) + ' · 完成 <b>' + hi.done + ' 条</b> · 当天布置 <b>' + hi.assigned + ' 条</b>'
-          + (hi.debt ? (' · 还有 <b>' + hi.debt + ' 条</b>没勾') : ''))
-        : '点一个格子看那天的账。') + '</div>'
-        + '<div class="hwst-note">色阶固定 1 / 2 / 3+ 条 —— 作业一天通常就 0–3 条，用 12 周分位会把“完成 1 条”标成满色。</div>';
+        + '</p>'
+        + hwStatInsights(D);
       return h;
     }
 
     if (HW_STAT.page === 'course') {
-      if (!D.byCourse.length) { return '<div class="hwst-empty">还没有作业。</div>'; }
-      h += '<div class="hwst-crs">';
-      for (i = 0; i < D.byCourse.length; i++) {
-        var row = D.byCourse[i];
-        var dot = row.color ? '<span class="hw-dot" style="background:' + U.escapeHtml(row.color) + '"></span>' : '';
-        h += '<button class="hwst-crow' + (HW_STAT.courseOpen === row.id ? ' on' : '') + '"'
-          + ' type="button" data-hc="' + U.escapeHtml(row.id) + '">'
-          + dot + '<span class="hwst-cname">' + U.escapeHtml(row.name) + '</span>'
-          + '<span class="hwst-cnum">未完成 ' + row.open + ' · 已完成 ' + row.done + '</span>'
-          + '<span class="hwst-cbar"><i style="width:' + row.rate + '%;background:'
+      if (!D.byCourse.length) { return '<p class="tk-muted">还没有作业。</p>'; }
+      var rows = D.byCourse.slice().sort(function (a, b) {
+        if (a.open !== b.open) { return b.open - a.open; }
+        return a.rate - b.rate;
+      });
+      h += '<div class="tk-crs">';
+      for (i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        var dot = row.color ? '<span class="tk-cdot" style="background:' + U.escapeHtml(row.color) + '"></span>' : '';
+        h += '<button class="tk-crow' + (HW_STAT.courseOpen === row.id ? ' on' : '') + '" type="button"'
+          + ' data-hc="' + U.escapeHtml(row.id) + '">'
+          + dot + '<span class="tk-cname">' + U.escapeHtml(row.name) + '</span>'
+          + '<span class="tk-cnum">未完成 ' + row.open + '</span>'
+          + '<span class="tk-crow-bar"><i style="width:' + row.rate + '%;background:'
           + (row.color ? U.escapeHtml(row.color) : 'var(--accent)') + '"></i></span>'
-          + '<span class="hwst-cnum">' + row.rate + '%</span></button>';
+          + '<span class="tk-cnum">' + row.rate + '%</span></button>';
+        if (HW_STAT.courseOpen === row.id) { h += hwStatCourseBody(row, todayK); }
       }
-      h += '</div>';
-      var sel = null;
-      for (i = 0; i < D.byCourse.length; i++) {
-        if (D.byCourse[i].id === HW_STAT.courseOpen) { sel = D.byCourse[i]; }
-      }
-      if (sel) {
-        h += '<div class="hwst-cdetail"><b>' + U.escapeHtml(sel.name) + '</b> · 完成率 <b>' + sel.rate
-          + '%</b>，未完成 <b>' + sel.open + '</b>、已完成 <b>' + sel.done + '</b>。'
-          + (sel.onTimeRate >= 0 ? ('按时完成 <b>' + sel.onTimeOk + ' / ' + sel.onTimeTotal + '</b>。') : '还没有带截止日的条目。')
-          + (sel.spendN ? ('平均 <b>' + sel.avgSpend + ' 天</b>勾掉一条。') : '')
-          + '<br><span class="hwst-link" data-hlink="' + U.escapeHtml(sel.id) + '">看这门课的全部条目 →</span></div>';
-      } else {
-        h += '<div class="hwst-note">点一门课看明细；进度条是完成率，按未完成条数从多到少排。</div>';
-      }
+      h += '</div>'
+        + '<p class="tk-muted">点一门课就地展开条目（长按条目可编辑 / 设截止日 / 删除）。</p>';
       return h;
     }
 
-    if (HW_STAT.page === 'record') {
-      var all = AR.Store.taskList ? AR.Store.taskList().slice() : [];
-      var monday = U.dateKey(U.mondayOf(new Date()));
-      var courseList = D.byCourse.filter(function (r) { return r.total > 0; });
-      h += '<div class="hwst-chips">';
-      var states = [['all', '全部'], ['open', '未完成'], ['done', '已完成'], ['week', '本周']];
-      for (i = 0; i < states.length; i++) {
-        h += '<button type="button" data-hs="' + states[i][0] + '"'
-          + (HW_STAT.state === states[i][0] ? ' class="on"' : '') + '>' + states[i][1] + '</button>';
+    /* ── 记录：逾期 / 今天 / 本周 / 更早（按周折叠） ── */
+    var all = AR.Store.taskList ? AR.Store.taskList().slice() : [];
+    var monday = U.dateKey(U.mondayOf(today));
+    var states = [['all', '全部'], ['open', '未完成'], ['done', '已完成'], ['week', '本周']];
+    h += '<div class="tk-chips">';
+    for (i = 0; i < states.length; i++) {
+      h += '<button type="button" class="tk-chip' + (HW_STAT.state === states[i][0] ? ' on' : '') + '"'
+        + ' data-hs="' + states[i][0] + '">' + states[i][1] + '</button>';
+    }
+    h += '</div>';
+    if (HW_STAT.day) {
+      h += '<div class="tk-chips"><button type="button" class="tk-chip on" data-hdayclear="1">'
+        + hwShortDate(HW_STAT.day) + ' 那天 ✕</button></div>';
+    }
+    var courseList = D.byCourse.filter(function (r) { return r.total > 0; });
+    if (courseList.length >= 2) {
+      h += '<div class="tk-chips">'
+        + '<button type="button" class="tk-chip' + (HW_STAT.course === 'all' ? ' on' : '') + '" data-hc2="all">全部课程</button>';
+      for (i = 0; i < courseList.length; i++) {
+        var cid = courseList[i].id;
+        h += '<button type="button" class="tk-chip' + (HW_STAT.course === cid ? ' on' : '') + '"'
+          + ' data-hc2="' + U.escapeHtml(cid) + '">' + U.escapeHtml(courseList[i].name) + '</button>';
       }
       h += '</div>';
-      if (courseList.length >= 2) {
-        h += '<div class="hwst-chips">';
-        h += '<button type="button" data-hc2="all"' + (HW_STAT.course === 'all' ? ' class="on"' : '') + '>全部课程</button>';
-        for (i = 0; i < courseList.length; i++) {
-          var cid = courseList[i].id;
-          h += '<button type="button" data-hc2="' + U.escapeHtml(cid) + '"'
-            + (HW_STAT.course === cid ? ' class="on"' : '') + '>' + U.escapeHtml(courseList[i].name) + '</button>';
+    }
+
+    var monday2 = U.dateKey(U.mondayOf(today));
+    var lastMonday = U.dateKey(U.addDays(U.mondayOf(today), -7));
+    var monthAgo = U.dateKey(U.addDays(today, -30));
+    var overdueList = [], thisWeek = [], lastWeek = [], monthList = [], olderList = [];
+    for (i = 0; i < all.length; i++) {
+      var t = all[i];
+      if (HW_STAT.state === 'open' && t.done) { continue; }
+      if (HW_STAT.state === 'done' && !t.done) { continue; }
+      if (HW_STAT.state === 'week' && !t.done && String(t.date || '') < monday2) { continue; }
+      if (HW_STAT.course !== 'all' && String(t.courseId || '') !== String(HW_STAT.course)) { continue; }
+      if (HW_STAT.day) {
+        var dk1 = String(t.date || '');
+        var dk2 = t.done ? (AR.Store.taskDoneDay(t) || '') : '';
+        if (dk1 !== HW_STAT.day && dk2 !== HW_STAT.day) { continue; }
+      }
+      var info2 = AR.Store.taskDueInfo ? AR.Store.taskDueInfo(t, todayK) : { kind: 'none' };
+      if (!t.done && info2.kind === 'overdue') { overdueList.push(t); continue; }
+      var bk = t.done ? (AR.Store.taskDoneDay(t) || t.date || '') : (t.date || '');
+      if (!bk) { olderList.push(t); }
+      else if (bk >= monday2) { thisWeek.push(t); }
+      else if (bk >= lastMonday) { lastWeek.push(t); }
+      else if (bk >= monthAgo) { monthList.push(t); }
+      else { olderList.push(t); }
+    }
+    overdueList.sort(hwStatSort);
+    thisWeek.sort(hwStatSort);
+    lastWeek.sort(hwStatSort);
+    monthList.sort(hwStatSort);
+    olderList.sort(hwStatSort);
+
+    function head(key, label, count, folded) {
+      return '<button class="tk-ghead' + (folded ? ' fold' : '') + '" type="button" data-hg="'
+        + U.escapeHtml(key) + '"><span class="tk-garrow">▾</span>' + U.escapeHtml(label)
+        + '<span class="tk-gn">· ' + count + ' 项</span></button>';
+    }
+    /** 课程 id → 名称/颜色（记录页按课程分组用） */
+    function courseMeta(cid) {
+      if (!cid) { return { name: '未分类', color: '' }; }
+      for (var q = 0; q < D.byCourse.length; q++) {
+        if (D.byCourse[q].id === cid) { return D.byCourse[q]; }
+      }
+      return { name: '未分类', color: '' };
+    }
+    function body(key, list, folded) {
+      var b = '<div class="tk-gbody"' + (folded ? ' hidden' : '') + ' data-hb="' + U.escapeHtml(key) + '">';
+      /* 段内按课程分组：先按出现顺序收拢，再在组内保持原来的截止日排序 */
+      var bag = {}, order2 = [], j2, cid2;
+      for (j2 = 0; j2 < list.length; j2++) {
+        cid2 = String(list[j2].courseId || '');
+        if (!bag[cid2]) { bag[cid2] = []; order2.push(cid2); }
+        bag[cid2].push(list[j2]);
+      }
+      for (var k2 = 0; k2 < order2.length; k2++) {
+        var meta = courseMeta(order2[k2]);
+        if (order2.length > 1) {
+          b += '<div class="tk-cgh"><span class="tk-cdot" style="background:'
+            + (meta.color ? U.escapeHtml(meta.color) : 'var(--text-tertiary)') + '"></span>'
+            + U.escapeHtml(meta.name) + '<span class="tk-cgn">· ' + bag[order2[k2]].length + ' 项</span></div>';
         }
-        h += '</div>';
+        for (j2 = 0; j2 < bag[order2[k2]].length; j2++) { b += hwStatRowHTML(bag[order2[k2]][j2], todayK); }
       }
-      /* 分组：今天 / 本周 / 更早（未完成按布置日，已完成按勾掉那天） */
-      var bucketOrder = ['今天', '本周', '更早'];
-      var buckets = { '今天': [], '本周': [], '更早': [] };
-      for (i = 0; i < all.length; i++) {
-        var t = all[i];
-        if (HW_STAT.state === 'open' && t.done) { continue; }
-        if (HW_STAT.state === 'done' && !t.done) { continue; }
-        if (HW_STAT.state === 'week' && !t.done && String(t.date || '') < monday) { continue; }
-        if (HW_STAT.course !== 'all' && String(t.courseId || '') !== String(HW_STAT.course)) { continue; }
-        var bk = t.done ? (AR.Store.taskDoneDay(t) || t.date || '') : (t.date || '');
-        var g = '更早';
-        if (bk === todayK) { g = '今天'; }
-        else if (bk && bk >= monday) { g = '本周'; }
-        buckets[g].push(t);
-      }
-      var shown = 0;
-      for (i = 0; i < bucketOrder.length; i++) {
-        var g2 = bucketOrder[i];
-        var list2 = buckets[g2];
-        if (!list2.length) { continue; }
-        shown += list2.length;
-        var closedNow = HW_STAT.closed[g2];
-        h += '<button class="hwst-ghead' + (closedNow ? ' closed' : '') + '" type="button" data-hg="' + g2 + '">'
-          + '<span class="hwst-arrow">▾</span>' + g2 + '<span class="hwst-gn">· ' + list2.length + ' 项</span></button>'
-          + '<div class="hwst-gbody"' + (closedNow ? ' hidden' : '') + '>';
-        for (var j = 0; j < list2.length; j++) { h += hwStatRowHTML(list2[j], todayK); }
-        h += '</div>';
-      }
-      if (!shown) { h += '<div class="hwst-empty">这个筛选下没有记录。</div>'; }
-      h += '<button class="btn hwst-clean" type="button" data-hclean="1" style="margin-top:14px">清理 30 天前的已完成</button>';
-      return h;
+      return b + '</div>';
     }
-
-    /* 洞察 */
-    h += '<div class="hwst-ins"><span class="hwst-ic">⏳</span><p>'
-      + (D.worstHang
-        ? ('「<b>' + U.escapeHtml(D.worstHang.name) + '</b>」拖得最久：还没勾的条目平均放了 <b>' + D.worstHang.avgHang + ' 天</b>。')
-        : '还没有“放了一阵子还没勾”的作业。')
-      + '</p></div>';
-    h += '<div class="hwst-ins"><span class="hwst-ic">✓</span><p>'
-      + (D.bestOnTime
-        ? ('按时完成率最高 <b>' + U.escapeHtml(D.bestOnTime.name) + ' ' + D.bestOnTime.onTimeRate + '%</b>（'
-          + D.bestOnTime.onTimeTotal + ' 条）'
-          + (D.worstOnTime && D.worstOnTime !== D.bestOnTime
-            ? ('，最低 <b>' + U.escapeHtml(D.worstOnTime.name) + ' ' + D.worstOnTime.onTimeRate + '%</b>（' + D.worstOnTime.onTimeTotal + ' 条）')
-            : '')
-          + '。')
-        : '还没有带截止日的作业，按时率算不出来。')
-      + '</p></div>';
-    h += '<div class="hwst-ins"><span class="hwst-ic">⏱</span><p>'
-      + (D.avgSpend
-        ? ('平均 <b>' + D.avgSpend + ' 天</b>勾掉一条作业' + (D.slowest ? ('；最慢的是 <b>' + U.escapeHtml(D.slowest.name) + '</b>（' + D.slowest.avgSpend + ' 天）') : '') + '。')
-        : '还没有“布置到今天”的完整样本。')
-      + '</p></div>';
-    h += '<div class="hwst-ins"><span class="hwst-ic">!</span><p>'
-      + (D.peak.count
-        ? ('积压峰值 <b>' + hwShortDate(D.peak.day) + '</b>：那天同时挂着 <b>' + D.peak.count + ' 条</b>没完成')
-        : '没出现过积压')
-      + '；布置最多的是 <b>' + U.WEEKDAY_NAMES[D.busyWd] + '</b>（' + D.busyWdCount + ' 条）。</p></div>';
-    h += '<div class="hwst-ins"><span class="hwst-ic">☆</span><p>'
-      + (D.streak.best ? ('最长连续 <b>' + D.streak.best + ' 天</b>都有作业勾掉' + (D.streak.cur ? ('，当前连续 <b>' + D.streak.cur + ' 天</b>') : '')) : '还没有连续完成记录')
-      + (D.gap.max ? ('；最长空窗 <b>' + D.gap.max + ' 天</b>（' + hwShortDate(D.gap.from) + ' → ' + hwShortDate(D.gap.to) + '）。') : '。')
-      + '</p></div>';
-    h += '<div class="hwst-note">都是现算的：不额外存字段，也不进同步。</div>';
+    var shown = 0;
+    var groups = [
+      ['od', '逾期', overdueList, false],
+      ['tw', '这周', thisWeek, false],
+      ['lw', '上周', lastWeek, false],
+      ['mo', '近一个月', monthList, false],
+      ['old', '更早', olderList, true]
+    ];
+    for (i = 0; i < groups.length; i++) {
+      var g = groups[i];
+      if (!g[2].length) { continue; }
+      shown += g[2].length;
+      var folded = HW_STAT.fold[g[0]] == null ? g[3] : !!HW_STAT.fold[g[0]];
+      h += head(g[0], g[1], g[2].length, folded) + body(g[0], g[2], folded);
+    }
+    if (!shown) { h += '<p class="tk-muted">这个筛选下没有记录。</p>'; }
+    h += '<button class="btn tk-clean" type="button" data-hclean="1">清理 30 天前的已完成</button>';
     return h;
   }
 
-  /** 重新画一页（数据、筛选、折叠、热力图选中都走这里） */
-  function hwStatPaint(pageBox, repaint) {
-    var D = AR.Store.taskStats ? AR.Store.taskStats() : null;
-    if (!D) { pageBox.innerHTML = '<div class="hwst-empty">统计暂时算不出来。</div>'; return; }
-    pageBox.innerHTML = hwStatPageHTML(D);
-    var todayK = U.dateKey(new Date());
-    var i, nodes;
+  /**
+   * 内容进场（v0.5.3）：真正把 AR.Motion 里那档样式播一次。
+   *
+   * 之前统计弹窗写的是 `AR.Motion.pose(node, 'contentIn')` —— pose() 只接一个参数，
+   * 它是「姿势 → WAAPI 关键帧」的转换函数，所以那两处其实什么都没发生。
+   * 这里和「卡片内容浮入」（playZoneContent）用同一套关键帧：opacity 先冲到 1，
+   * 剩下的时间留给位移收尾；时长/曲线/位移都从 AR.Motion 的样式表里取，
+   * 开发者模式换样式时统计弹窗跟着一起变。流畅模式/减弱动画由 get() 出口收掉。
+   */
+  function playContentIn(node, name) {
+    if (!node || !node.animate || !AR.Motion || !AR.Motion.get) { return; }
+    var m = AR.Motion.get(name || 'contentIn');
+    if (!m || !m.dur) { return; }
+    var speed = Number((S.settings.appearance && S.settings.appearance.animationSpeed) || 1) || 1;
+    var y = m.y || 0, x = m.x || 0;
+    var sc = (m.s == null ? 1 : m.s);
+    var hold = (m.hold == null ? .5 : m.hold);
+    var frames = (sc === 1 && !y && !x)
+      ? [{ opacity: .35, offset: 0 }, { opacity: 1, offset: hold }, { opacity: 1, offset: 1 }]
+      : [{ opacity: .35, transform: 'translate3d(' + x + 'px,' + y + 'px,0) scale(' + sc + ')', offset: 0 },
+         { opacity: 1, transform: 'translate3d(0px,0px,0) scale(1)', offset: hold },
+         { opacity: 1, transform: 'none', offset: 1 }];
+    if (node.__cAnim) { try { node.__cAnim.cancel(); } catch (e) { } node.__cAnim = null; }
+    try {
+      node.__cAnim = node.animate(frames, {
+        duration: Math.round(m.dur / speed),
+        delay: 20,
+        easing: AR.Motion.ease(m.ease)
+      });
+    } catch (e) { }
+  }
 
-    nodes = pageBox.querySelectorAll('[data-hs]');
-    for (i = 0; i < nodes.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          HW_STAT.state = b.getAttribute('data-hs');
-          AR.Bridge.haptic('light', b);
-          repaint();
-        });
-      })(nodes[i]);
+  /** 行进场：按顺序错峰浮入（筛选切换后整块换列表时用；流畅模式/减弱动画下不播） */
+  function tkFadeRows(scope) {
+    if (!scope || !scope.querySelectorAll) { return; }
+    var lvl = AR.Motion && AR.Motion.perfLevel ? AR.Motion.perfLevel() : 'full';
+    if (lvl === 'min') { return; }
+    var nodes = scope.querySelectorAll('.hw-row, .tk-crow, .tk-ghead, .tk-kpi, .tk-hdetail');
+    for (var i = 0; i < nodes.length; i++) {
+      var el2 = nodes[i];
+      if (!el2.animate) { continue; }
+      el2.animate([{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'none' }],
+        { duration: 190, delay: Math.min(i * 14, 260), easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' });
     }
-    nodes = pageBox.querySelectorAll('[data-hc2]');
-    for (i = 0; i < nodes.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          HW_STAT.course = b.getAttribute('data-hc2');
-          AR.Bridge.haptic('light', b);
-          repaint();
-        });
-      })(nodes[i]);
+    void lvl;
+  }
+
+  /** 展开 / 收起的高度补间：高度从 0 长到内容高（反向收起再 hidden） */
+  function tkSlide(node, open, done) {
+    if (!node) { if (done) { try { done(); } catch (e) { } } return; }
+    var lvl = AR.Motion && AR.Motion.perfLevel ? AR.Motion.perfLevel() : 'full';
+    if (lvl === 'min' || !node.animate) {
+      node.hidden = !open;
+      if (done) { try { done(); } catch (e) { } }
+      return;
     }
-    nodes = pageBox.querySelectorAll('[data-hg]');
-    for (i = 0; i < nodes.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          var g = b.getAttribute('data-hg');
-          HW_STAT.closed[g] = !HW_STAT.closed[g];
-          b.classList.toggle('closed', !!HW_STAT.closed[g]);
-          var body = b.nextElementSibling;
-          if (body) { body.hidden = !!HW_STAT.closed[g]; }
-          AR.Bridge.haptic('light', b);
-        });
-      })(nodes[i]);
+    if (open) {
+      node.hidden = false;
+      node.style.overflow = 'hidden';
+      var h = node.scrollHeight;
+      var a = node.animate([{ height: '0px' }, { height: h + 'px' }],
+        { duration: 200, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'both' });
+      a.onfinish = function () {
+        node.style.overflow = '';
+        node.style.height = '';
+        if (a.cancel) { try { a.cancel(); } catch (e) { } }
+        if (done) { try { done(); } catch (e) { } }
+      };
+    } else {
+      var h2 = node.offsetHeight;
+      node.style.overflow = 'hidden';
+      var b = node.animate([{ height: h2 + 'px' }, { height: '0px' }],
+        { duration: 160, easing: 'cubic-bezier(.4,0,.6,1)', fill: 'both' });
+      b.onfinish = function () {
+        node.hidden = true;
+        node.style.overflow = '';
+        node.style.height = '';
+        if (b.cancel) { try { b.cancel(); } catch (e) { } }
+        if (done) { try { done(); } catch (e) { } }
+      };
     }
-    nodes = pageBox.querySelectorAll('[data-hi]');
-    for (i = 0; i < nodes.length; i++) {
-      (function (c) {
-        c.addEventListener('click', function () {
-          HW_STAT.heat = Number(c.getAttribute('data-hi'));
-          AR.Bridge.haptic('light', c);
-          repaint();
-        });
-      })(nodes[i]);
-    }
-    nodes = pageBox.querySelectorAll('[data-hc]');
-    for (i = 0; i < nodes.length; i++) {
-      (function (b) {
-        b.addEventListener('click', function () {
-          var id = b.getAttribute('data-hc');
-          HW_STAT.courseOpen = (HW_STAT.courseOpen === id) ? null : id;
-          AR.Bridge.haptic('light', b);
-          repaint();
-        });
-      })(nodes[i]);
-    }
-    nodes = pageBox.querySelectorAll('[data-hlink]');
-    for (i = 0; i < nodes.length; i++) {
-      (function (ln) {
-        ln.addEventListener('click', function () {
-          var id = ln.getAttribute('data-hlink');
-          openCourseHomework(id, '');
-        });
-      })(nodes[i]);
-    }
-    nodes = pageBox.querySelectorAll('[data-hclean]');
-    for (i = 0; i < nodes.length; i++) {
-      nodes[i].addEventListener('click', function () { cleanOldDone(); });
-    }
-    nodes = pageBox.querySelectorAll('[data-hrow]');
+  }
+
+  /** 重新画一页（数据、筛选、折叠、热力图选中都走这里），进场动画和任务数据分析一致 */
+  function hwStatPaint(pageBox, api) {
+    var D = AR.Store.taskStats ? AR.Store.taskStats() : null;
+    if (!D) { pageBox.innerHTML = '<p class="tk-muted">统计暂时算不出来。</p>'; return; }
+    pageBox.innerHTML = hwStatPageHTML(D);
+    playContentIn(pageBox);
+    hwStatBind(pageBox, api);
+    tkFadeRows(pageBox);
+  }
+
+  /** 绑定「记录行」的长按 / 删除 / 点击提示（记录页与按课程展开共用同一个实现） */
+  function hwStatBindRows(scope, api) {
+    if (!scope || !scope.querySelectorAll) { return; }
+    var nodes = scope.querySelectorAll('[data-hrow]');
+    var i;
     for (i = 0; i < nodes.length; i++) {
       (function (row) {
+        if (row.__hwB) { return; }
+        row.__hwB = 1;
         var id = row.getAttribute('data-hrow');
         var isDone = row.getAttribute('data-hdone') === '1';
         bindLongPress(row, function () {
@@ -8718,13 +8818,13 @@ var AR = window.AR || (window.AR = {});
             AR.Bridge.haptic('medium', row);
             toast('已找回');
             refreshHomework();
-            repaint();
+            api.repaint();
           } else {
             var t = AR.Store.taskById ? AR.Store.taskById(id) : null;
             if (t) { openHomeworkMenu(t); }
           }
         }, isDone ? 600 : 520);
-        var x = row.querySelector('.hwst-x');
+        var x = row.querySelector('.tk-x');
         if (x) {
           x.addEventListener('click', function (ev) {
             ev.stopPropagation();
@@ -8738,25 +8838,171 @@ var AR = window.AR || (window.AR = {});
                 AR.Store.removeTask(t2.id);
                 AR.Bridge.haptic('warn', $('modalCard'));
                 refreshHomework();
-                repaint();
+                api.repaint();
                 toastUndo('已删除作业记录：' + (t2.text || ''), '撤销', function () {
                   AR.Store.restore('tasks', t2.id);
                   refreshHomework();
-                  repaint();
+                  api.repaint();
                 });
               }
             });
           });
         }
-        row.addEventListener('click', function (ev) {
-          if (ev.target === row.querySelector('.hwst-x')) { return; }
+        row.addEventListener('click', function () {
           toast(isDone ? '已完成：长按可找回' : '长按可编辑 / 设截止日 / 删除');
         });
       })(nodes[i]);
     }
-    /* 空态时也允许点清理（记录页没有记录时） */
-    if (!nodes.length && HW_STAT.page === 'record') { /* 清理按钮已单独绑定 */ }
-    void todayK;
+  }
+
+  /** 「在记录页看全部 →」的绑定：记录页和按课程展开出来的块都要用 */
+  function hwStatBindLinks(scope, api) {
+    if (!scope || !scope.querySelectorAll) { return; }
+    var nodes = scope.querySelectorAll('[data-hlink]');
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].__hwB) { continue; }
+      nodes[i].__hwB = 1;
+      (function (ln) {
+        ln.addEventListener('click', function (ev) {
+          if (ev && ev.preventDefault) { ev.preventDefault(); }
+          var id = ln.getAttribute('data-hlink');
+          HW_STAT.course = id || 'all';
+          HW_STAT.state = 'all';
+          HW_STAT.day = '';
+          if (api.setPage) { api.setPage('record'); }
+        });
+      })(nodes[i]);
+    }
+  }
+
+  function hwStatBind(pageBox, api) {
+    var todayK = U.dateKey(new Date());
+    var i, nodes;
+
+    nodes = pageBox.querySelectorAll('[data-hk]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (c) {
+        c.style.cursor = 'pointer';
+        c.addEventListener('click', function () {
+          var k = c.getAttribute('data-hk');
+          HW_STAT.heat = (HW_STAT.heat === k) ? '' : k;
+          AR.Bridge.haptic('light', c);
+          api.repaint();
+        });
+      })(nodes[i]);
+    }
+
+    nodes = pageBox.querySelectorAll('[data-hs]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (b) {
+        b.addEventListener('click', function () {
+          HW_STAT.state = b.getAttribute('data-hs');
+          AR.Bridge.haptic('light', b);
+          api.repaint();
+        });
+      })(nodes[i]);
+    }
+
+    nodes = pageBox.querySelectorAll('[data-hc2]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (b) {
+        b.addEventListener('click', function () {
+          HW_STAT.course = b.getAttribute('data-hc2');
+          AR.Bridge.haptic('light', b);
+          api.repaint();
+        });
+      })(nodes[i]);
+    }
+
+    nodes = pageBox.querySelectorAll('[data-hg]');
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i].__hwB) { continue; }
+      nodes[i].__hwB = 1;
+      (function (b) {
+        b.addEventListener('click', function () {
+          var g = b.getAttribute('data-hg');
+          var bd = pageBox.querySelector('[data-hb="' + g + '"]');
+          var willFold = bd ? !bd.hidden : false;
+          b.classList.toggle('fold', willFold);
+          HW_STAT.fold[g] = willFold;
+          AR.Bridge.haptic('light', b);
+          tkSlide(bd, !willFold);
+        });
+      })(nodes[i]);
+    }
+
+    nodes = pageBox.querySelectorAll('[data-hc]');
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i].__hwB) { continue; }
+      nodes[i].__hwB = 1;
+      (function (b) {
+        b.addEventListener('click', function () {
+          var id = b.getAttribute('data-hc');
+          /* 开合状态直接看 DOM：只信 HW_STAT.courseOpen 会在重画/换页后错位 */
+          var curBody = (b.nextElementSibling && b.nextElementSibling.className.indexOf('tk-cbody') >= 0)
+            ? b.nextElementSibling : null;
+          var wasOpen = !!curBody;
+          /** 只允许一个课程展开：先把别的行残留的块删掉，否则会叠出两份 */
+          var strays = pageBox.querySelectorAll('.tk-cbody');
+          for (var s1 = 0; s1 < strays.length; s1++) {
+            if (strays[s1] !== b.nextElementSibling && strays[s1].parentNode) {
+              strays[s1].parentNode.removeChild(strays[s1]);
+            }
+          }
+          /* 记录页留下的「那天 / 某门课」筛选会和这里的展开打架：展开 = 明确的单门课视图，先清筛选 */
+          HW_STAT.day = '';
+          HW_STAT.course = 'all';
+          var oldBody = b.nextElementSibling && b.nextElementSibling.className.indexOf('tk-cbody') >= 0
+            ? b.nextElementSibling : null;
+          if (wasOpen) {
+            HW_STAT.courseOpen = null;
+            tkSlide(oldBody, false, function () { if (oldBody && oldBody.parentNode) { oldBody.parentNode.removeChild(oldBody); } });
+            b.classList.remove('on');
+          } else {
+            HW_STAT.courseOpen = id;
+            if (oldBody) { if (oldBody.parentNode) { oldBody.parentNode.removeChild(oldBody); } }
+            var all = pageBox.querySelectorAll('[data-hc]');
+            for (var q2 = 0; q2 < all.length; q2++) { all[q2].classList.remove('on'); }
+            b.classList.add('on');
+            b.insertAdjacentHTML('afterend', api.courseBody(id));
+            hwStatBindRows(b.nextElementSibling, api);
+            hwStatBindLinks(b.nextElementSibling, api);
+            tkSlide(b.nextElementSibling, true);
+          }
+          AR.Bridge.haptic('light', b);
+        });
+      })(nodes[i]);
+    }
+
+    nodes = pageBox.querySelectorAll('[data-hday]');
+    for (i = 0; i < nodes.length; i++) {
+      (function (ln) {
+        ln.addEventListener('click', function () {
+          HW_STAT.day = ln.getAttribute('data-hday') || '';
+          HW_STAT.state = 'all';
+          HW_STAT.course = 'all';
+          if (api.setPage) { api.setPage('record'); }
+        });
+      })(nodes[i]);
+    }
+
+    nodes = pageBox.querySelectorAll('[data-hdayclear]');
+    for (i = 0; i < nodes.length; i++) {
+      nodes[i].addEventListener('click', function () {
+        HW_STAT.day = '';
+        api.repaint();
+      });
+    }
+
+    hwStatBindLinks(pageBox, api);
+
+    nodes = pageBox.querySelectorAll('[data-hclean]');
+    for (i = 0; i < nodes.length; i++) {
+      nodes[i].addEventListener('click', function () { cleanOldDone(); api.repaint(); });
+    }
+
+    hwStatBindRows(pageBox, api);
+
   }
 
   /** 清理 30 天前的已完成（软删除，可在回收站恢复） */
@@ -8781,32 +9027,70 @@ var AR = window.AR || (window.AR = {});
   }
 
   /**
-   * 打开「作业统计」弹窗。page 可选 overview / trend / heat / course / record / insight。
+   * 打开「作业统计」弹窗。page 可选 overview / trend / course / record。
    * 记录页 = 老「作业记录」；其它入口（卡底按钮、设置里那一项）默认开总览。
    */
   function openHomeworkStats(page) {
     if (page) { HW_STAT.page = page; }
     if (!HW_STAT.page) { HW_STAT.page = 'overview'; }
     var st0 = AR.Store.taskStats ? AR.Store.taskStats() : { total: 0 };
-    var body = el('<div class="hwst"></div>');
-    var seg = el('<div class="segmented hwst-seg" id="hwStatSeg"></div>');
-    body.appendChild(seg);
-    var pageBox = el('<div class="hwst-page" id="hwStatPage"></div>');
+    var body = el('<div class="tk-stats"></div>');
+    var segWrap = el('<div class="tk-tabs-seg"></div>');
+    var seg = el('<div class="segmented" id="hwStatSeg"></div>');
+    segWrap.appendChild(seg);
+    body.appendChild(segWrap);
+    var pageBox = el('<div class="tk-statpage" id="hwStatPage"></div>');
     body.appendChild(pageBox);
 
-    function repaint() { hwStatPaint(pageBox, repaint); }
+    var api = {
+      repaint: repaint,
+      setPage: setPage,
+      courseBody: function (id) {
+        var D2 = AR.Store.taskStats ? AR.Store.taskStats() : null;
+        if (!D2) { return ''; }
+        for (var q = 0; q < D2.byCourse.length; q++) {
+          if (D2.byCourse[q].id === id) { return hwStatCourseBody(D2.byCourse[q], U.dateKey(new Date())); }
+        }
+        return '';
+      }
+    };
+    function repaint() { hwStatPaint(pageBox, api); }
+    function setPage(k) {
+      /* 换页就把展开状态归零：否则再进按课程点同一门课会先被判成「收起」 */
+      HW_STAT.courseOpen = null;
+      var all = seg.querySelectorAll('.seg');
+      for (var q = 0; q < all.length; q++) {
+        all[q].classList.toggle('active', all[q].getAttribute('data-page') === k);
+      }
+      syncSegPill(seg, true);
+      /** 切页：旧内容先淡出 90ms 再换，避免整块硬跳（v0.5.2a） */
+      var prev = pageBox;
+      var speed = Number((S.settings.appearance && S.settings.appearance.animationSpeed) || 1) || 1;
+      /* 上一次淡出还没播完就先撤掉：fill:both 会把容器钉在 opacity:0 */
+      if (pageBox.__fadeAnim) { try { pageBox.__fadeAnim.cancel(); } catch (e) { } pageBox.__fadeAnim = null; }
+      if (prev.animate && !(AR.Motion && AR.Motion.perfLevel && AR.Motion.perfLevel() === 'min')) {
+        var a = prev.animate([{ opacity: 1 }, { opacity: 0 }], { duration: Math.round(90 / speed), easing: 'linear', fill: 'both' });
+        pageBox.__fadeAnim = a;
+        a.onfinish = function () {
+          try { a.cancel(); } catch (e) { }   /* 撤掉 fill，opacity 回到 1 */
+          pageBox.__fadeAnim = null;
+          HW_STAT.page = k;
+          repaint();
+        };
+      } else {
+        HW_STAT.page = k;
+        repaint();
+      }
+    }
 
     for (var i = 0; i < HW_STAT_PAGES.length; i++) {
       (function (pg) {
-        var b = el('<button class="seg' + (HW_STAT.page === pg.k ? ' active' : '') + '" type="button">' + pg.t + '</button>');
+        var b = el('<button class="seg' + (HW_STAT.page === pg.k ? ' active' : '') + '" type="button"'
+          + ' data-page="' + pg.k + '">' + pg.t + '</button>');
         b.addEventListener('click', function () {
           if (HW_STAT.page === pg.k) { return; }
-          HW_STAT.page = pg.k;
-          var all = seg.querySelectorAll('.seg');
-          for (var q = 0; q < all.length; q++) { all[q].classList.toggle('active', all[q] === b); }
           AR.Bridge.haptic('light', b);
-          syncSegPill(seg, true);
-          repaint();
+          setPage(pg.k);
         });
         seg.appendChild(b);
       })(HW_STAT_PAGES[i]);
@@ -8814,8 +9098,8 @@ var AR = window.AR || (window.AR = {});
     repaint();
     openModal({
       title: '作业统计',
-      sub: '共 ' + (st0.total || 0) + ' 条 · 本学期 · 数字都来自同一份统计口径',
-      body: body, wide: true
+      sub: '共 ' + (st0.total || 0) + ' 条 · 本学期',
+      body: body
     });
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
@@ -9832,6 +10116,7 @@ var AR = window.AR || (window.AR = {});
     applyPerf();
     applyBgStyle();
     applyOdStyle();
+    applyHeatSize();
     Layout.profileKey = breakpointKey(document.documentElement.clientWidth);
     lastTodayKey = U.dateKey(new Date());
     show('today');
@@ -10768,8 +11053,15 @@ var AR = window.AR || (window.AR = {});
    */
   function applyOdStyle() {
     var v = S.settings.appearance.overdueStyle;
-    if (v !== 'solid' && v !== 'bar' && v !== 'bold') { document.body.removeAttribute('data-od'); return; }
+    if (v !== 'solid' && v !== 'glow' && v !== 'bold') { document.body.removeAttribute('data-od'); return; }
     document.body.setAttribute('data-od', v);
+  }
+
+  /** 热力图大小（设置 → 外观）：sm = 12px 方格靠左；lg = 铺满宽度、格子 24px */
+  function applyHeatSize() {
+    var v = S.settings.appearance && S.settings.appearance.heatSize;
+    if (v === 'lg') { document.body.setAttribute('data-heat', 'lg'); return; }
+    document.body.removeAttribute('data-heat');
   }
 
   function applyGlass() {
@@ -10833,6 +11125,7 @@ var AR = window.AR || (window.AR = {});
     applyGlass: applyGlass,
     applyBgStyle: applyBgStyle,
     applyOdStyle: applyOdStyle,
+    applyHeatSize: applyHeatSize,
     openHomeworkStats: openHomeworkStats,
     applyPerf: applyPerf,
     applyMotion: applyMotion,
@@ -11139,6 +11432,10 @@ var AR = window.AR || (window.AR = {});
         var cls = lv > 0 ? (' l' + lv) : '';
         /* 保住原来的灰底：这天既不要求做、也一条记录都没有 */
         if (lv === 0 && cnt === 0 && req === 0) { cls += ' none'; }
+        /* v0.5.2a：未来的日子不画格子（留白），今天描一圈主题色 —— 和作业统计的热力图同一套规则 */
+        var todayK0 = U.dateKey(new Date());
+        if (k > todayK0) { cls += ' future'; }
+        else if (k === todayK0) { cls += ' today'; }
         var sumTxt = Math.round(sum * 100) / 100;
         var tip = k + ' · ' + cnt + ' 次' + (sum ? (' · 共 ' + sumTxt + unit) : '');
         /* 有记录但净增为 0（回退平账 / 记了 0）：tooltip 说清楚，别让用户以为没记上 */
@@ -11282,14 +11579,14 @@ var AR = window.AR || (window.AR = {});
     void node.offsetHeight;
     node.classList.add('tk-expand');
     if (AR.Motion && AR.Motion.pose) {
-      try { AR.Motion.pose(node, 'contentIn'); } catch (e) { }
+      playContentIn(node);
     }
   }
 
   function tkPlayOpen(node, opening) {
     if (!node || !AR.Motion) { return; }
     try {
-      if (AR.Motion.pose) { AR.Motion.pose(node, opening ? 'contentIn' : 'listIn'); }
+      playContentIn(node, opening ? 'contentIn' : 'listIn');
     } catch (e) { }
   }
   /* ── 数据分析 ── */
@@ -11564,7 +11861,7 @@ var AR = window.AR || (window.AR = {});
       pageBox.innerHTML = tkStatPage(TK_STAT_PAGE, D);
       /* 内容进场：走统一的 AR.Motion，柱子再单独长出来 */
       if (AR.Motion && AR.Motion.pose) {
-        try { AR.Motion.pose(pageBox, 'contentIn'); } catch (e) { }
+        playContentIn(pageBox);
       }
       var bars = pageBox.querySelectorAll('.tk-cbar');
       for (var i = 0; i < bars.length; i++) { bars[i].style.animationDelay = (i * 9) + 'ms'; }

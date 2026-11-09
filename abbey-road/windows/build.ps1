@@ -11,7 +11,7 @@ $appDir    = Join-Path $projRoot 'app'
 $dist      = Join-Path $projRoot 'dist'
 $out       = Join-Path $root 'build'
 $assets    = Join-Path $root 'assets'
-$version   = '0.5.2'
+$version   = '0.5.2a'
 
 # 工具链目录：环境变量 $env:ABBEYROAD_WIN_TOOLS 或本地 build.local.ps1 覆盖，
 # 仓库里不留私人路径（Roslyn 编译器 + WebView2 SDK 解出来的 DLL）。
@@ -107,6 +107,21 @@ $setupArgs = @('/nologo', '/target:winexe', '/platform:x64', '/langversion:7.3',
              @((Join-Path $root 'installer\Installer.cs'))
 & $roslyn @setupArgs
 if ($LASTEXITCODE -ne 0) { throw '安装器编译失败' }
+
+# 7) 可选：代码签名（有证书环境变量才签，否则跳过）
+if ($env:ABBEYROAD_SIGN_PFX -or $env:ABBEYROAD_SIGN_THUMB) {
+    Write-Host '== 代码签名 =='
+    $signArgs = @('-File', $setupOut, (Join-Path $portableDir 'Allegro.exe'))
+    if ($env:ABBEYROAD_SIGN_PFX) { $signArgs += @('-Pfx', $env:ABBEYROAD_SIGN_PFX) }
+    if ($env:ABBEYROAD_SIGN_THUMB) { $signArgs += @('-Thumbprint', $env:ABBEYROAD_SIGN_THUMB) }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'sign-exe.ps1') @signArgs
+    if ($LASTEXITCODE -ne 0) { throw '代码签名失败' }
+    # 签名会改文件哈希，重新打一次便携包，保证 zip 里是签过的 exe
+    if (Test-Path $portableZip) { Remove-Item $portableZip -Force }
+    Compress-Archive -Path (Join-Path $portableDir '*') -DestinationPath $portableZip -Force
+} else {
+    Write-Host '== 跳过代码签名（设置 ABBEYROAD_SIGN_PFX 或 ABBEYROAD_SIGN_THUMB 后自动签）=='
+}
 
 Write-Host ''
 Write-Host 'DONE：'

@@ -1515,24 +1515,40 @@ var AR = window.AR || (window.AR = {});
      * 切换立刻生效（applyPerf 重挂 data-perf），存档进配置文件。
      */
     /**
-     * 作业逾期强调（v0.5.2）：作业行右侧那个红色截止日，逾期时怎么更醒目。
-     * both = 红底白字 + 行左侧竖条（默认）；solid / bar / bold 只取其中一种。
+     * 作业逾期强调（v0.5.3）：作业行右侧那个红色截止日，逾期时怎么更醒目。
+     * both = 红底白字 + 行左侧投影（默认）；solid / glow / bold 只取其中一种。
+     * v0.5.2 的第二档是「左侧竖条」（2px 实线），看着像给整行镶了红边，
+     * v0.5.3 换成「左侧投影」：12px 宽、从红渐到透明，旧存档里的 bar 会迁成 glow。
      */
     box.appendChild(el('<div class="field-label" style="margin-top:14px">作业逾期强调</div>'));
     box.appendChild(segmented([
       { label: '红底白字', value: 'solid' },
-      { label: '左侧竖条', value: 'bar' },
+      { label: '左侧投影', value: 'glow' },
       { label: '两者都要', value: 'both' },
       { label: '加粗', value: 'bold' }
-    ], (ap.overdueStyle === 'solid' || ap.overdueStyle === 'bar' || ap.overdueStyle === 'bold') ? ap.overdueStyle : 'both', function (v) {
+    ], (ap.overdueStyle === 'solid' || ap.overdueStyle === 'glow' || ap.overdueStyle === 'bold') ? ap.overdueStyle : 'both', function (v) {
       ap.overdueStyle = v;
       AR.Store.save(true);
       if (AR.UI.applyOdStyle) { AR.UI.applyOdStyle(); }
       AR.Bridge.haptic('medium', $('settingsGrid'));
-      AR.UI.toast(v === 'solid' ? '逾期：红底白字' : v === 'bar' ? '逾期：行左侧竖条' : v === 'bold' ? '逾期：日期加粗' : '逾期：红底白字 + 竖条');
+      AR.UI.toast(v === 'solid' ? '逾期：红底白字' : v === 'glow' ? '逾期：行左侧投影' : v === 'bold' ? '逾期：日期加粗' : '逾期：红底白字 + 投影');
     }));
     box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">'
-      + '只影响作业行右边那个红色截止日；没有截止日的作业不受影响。</p>'));
+      + '只影响作业行左边那层红光和右边那个红色截止日；没有截止日的作业不受影响。</p>'));
+
+    box.appendChild(el('<div class="field-label" style="margin-top:14px">热力图大小</div>'));
+    box.appendChild(segmented([
+      { label: '小（12px 方格）', value: 'sm' },
+      { label: '大（铺满宽度）', value: 'lg' }
+    ], ap.heatSize === 'lg' ? 'lg' : 'sm', function (v) {
+      ap.heatSize = v;
+      AR.Store.save(true);
+      if (AR.UI.applyHeatSize) { AR.UI.applyHeatSize(); }
+      AR.Bridge.haptic('medium', $('settingsGrid'));
+      AR.UI.toast(v === 'lg' ? '热力图：大（铺满宽度）' : '热力图：小（12px 方格）');
+    }));
+    box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">'
+      + '只影响作业统计 → 总览里那张 12 周热力图；小格子省地方，大格子更好点。</p>'));
 
     box.appendChild(el('<div class="field-label" style="margin-top:14px">流畅模式</div>'));
     box.appendChild(segmented([
