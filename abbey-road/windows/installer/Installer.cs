@@ -23,7 +23,7 @@ namespace AllegroSetup
         // 安装器是单独编译的（只编 installer/Installer.cs，拿不到 AppPaths），
         // 所以这里是独立的版本来源 —— 发布时与 windows/build.ps1 的 $version、
         // app/js/core.js 的 APP_VERSION、windows/src/AppPaths.cs 的 FallbackVersion 手工同步。
-        internal const string Version = "0.5.4";
+        internal const string Version = "0.5.3b";
         private const string ExeName = "Allegro.exe";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Allegro";
         // Same key / value name the app itself uses for bridge "setAutostart".

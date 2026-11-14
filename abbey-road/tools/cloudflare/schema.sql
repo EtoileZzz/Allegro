@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS blob_state (
   updated_at  INTEGER NOT NULL DEFAULT 0
 );
 
+-- 必须留这一行：Worker 的 PUT 是 CAS UPDATE，表里没有这行时永远 0 行受影响 → 客户端永远 409。
+-- （v0.5.3b 之前漏了它，日记云同步一次都没成功过。）
+INSERT OR IGNORE INTO blob_state (ns, rev, envelope, updated_at) VALUES ('whisper', 0, NULL, 0);
+
 CREATE TABLE IF NOT EXISTS blob_history (
   ns          TEXT NOT NULL,
   rev         INTEGER NOT NULL,

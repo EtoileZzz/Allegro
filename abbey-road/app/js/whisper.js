@@ -136,6 +136,7 @@
   }
   function save() {
     if (!ready || !S) { return; }
+    S.syncDirty = true;
     scheduleBlobSync();
     encryptText(JSON.stringify(S)).then(function (blob) {
       try { localStorage.setItem(LS_ENC, blob); localStorage.removeItem(LS); } catch (e) { }
@@ -260,22 +261,6 @@
   function groupByDay(list) { var out = [], map = {}; list.forEach(function (e) { var d = e.at.slice(0, 10); if (!map[d]) { map[d] = { d: d, items: [] }; out.push(map[d]); } map[d].items.push(e); }); return out; }
 
 
-  function openNow() {
-      bindThemeWatch();
-    var rt = $('whRoot');
-    var wasOpen = !!(rt && !rt.hasAttribute('hidden'));
-    if (rt) { rt.setAttribute('hidden', 'hidden'); }
-    session.unlocked = false;
-    if (wasOpen) { animAppIn(); }
-  }
-  /* 退出 Whisper 回到应用：复用应用已有的页面入场动画 */
-  function animAppIn() {
-    try {
-      var v = document.querySelector('.view:not([hidden])') || document.getElementById('view-today');
-      if (!v) { return; }
-      if (window.AR && AR.UI && AR.UI.enterRise) { AR.UI.enterRise(v); }
-    } catch (e) { }
-  }
   function enter() {
     if (!S.lock.enabled || session.unlocked) { afterUnlock(); return; }
     openLock();
@@ -339,18 +324,21 @@
   function tryBio() {
     if (!S.lock.hash && !S.lock.bio) { toast('先设置 PIN'); return; }
     if (!(window.AR && AR.Bridge && AR.Bridge.biometricVerify)) {
+      if (!S.lock.hash) { S.lock.enabled = false; save(); afterUnlock(); return; }
       toast('此设备不支持生物识别，请输入 PIN');
       return;
     }
-    if (window.AR && AR.Bridge && AR.Bridge.biometricVerify) {
-      try {
-        AR.Bridge.biometricVerify(function (ok) {
-          if (ok) { afterUnlock(); } else { toast('没有通过'); }
-        });
+    try {
+      var r = AR.Bridge.biometricVerify();
+      if (r && typeof r.then === 'function') {
+        r.then(function (ok) {
+          if (ok === true || ok === 'true' || (ok && (ok.ok === true || ok.success === true))) { afterUnlock(); }
+          else { toast('没有通过'); }
+        }).catch(function () { toast('生物识别失败'); });
         return;
-      } catch (e0) { }
-    }
-    return;
+      }
+      if (r === true || r === 'true') { afterUnlock(); return; }
+    } catch (e0) { toast('生物识别失败'); }
   }
 
   /* ── 列表 ── */
@@ -1681,6 +1669,7 @@
 
   function openNow() {
     bindThemeWatch();
+    try { syncBlob(); } catch (eS) { }
     try { applyTheme(); } catch (e0) { }
     var rt = $('whRoot');
     if (rt) { rt.removeAttribute('hidden'); }
@@ -1711,7 +1700,7 @@
     return !!(window.AR && AR.Sync && AR.Sync.blobPull && AR.Sync.blobPush && AR.Sync.status && AR.Sync.status().configured);
   }
   function scheduleBlobSync() {
-    if (!syncReady()) { return; }
+    if (!syncReady() || blobBusy) { return; }
     if (blobTimer) { clearTimeout(blobTimer); }
     blobTimer = setTimeout(function () { blobTimer = null; syncBlob(); }, 1200);
   }
@@ -1729,6 +1718,14 @@
     }
     for (id in map) { if (Object.prototype.hasOwnProperty.call(map, id)) { out.push(map[id]); } }
     return out;
+  }
+  /* 落盘但**不**标脏：同步跑完后把 syncRev / syncDirty=false 记下来，
+     否则每次重启都从 rev 0 开始推，白白撞一次 409。 */
+  function persistQuiet() {
+    if (!ready || !S) { return; }
+    encryptText(JSON.stringify(S)).then(function (blob) {
+      try { localStorage.setItem(LS_ENC, blob); } catch (e) { }
+    }).catch(function () { });
   }
   function mergeBlob(remote) {
     if (!remote) { return false; }
@@ -1752,37 +1749,85 @@
     return changed;
   }
   function syncBlob() {
-    if (!syncReady() || blobBusy || !S) { return; }
+    if (!syncReady() || blobBusy || !S || !ready) { return; }
     blobBusy = true;
     var ns = 'whisper';
     var attempt = 0;
-
     function one() {
       attempt++;
-      var rev = Number(S.syncRev) || 0;
       return AR.Sync.blobPull(ns).then(function (remote) {
+        var remoteRev = 0;
         if (remote && remote.data) {
-          if (mergeBlob(remote.data)) { renderShelf(); }
-          rev = Math.max(rev, Number(remote.rev) || 0);
+          remoteRev = Number(remote.rev) || 0;
+          var changed = mergeBlob(remote.data);
+          if (changed) {
+            /* 用本机设备密钥重新落盘（云端是口令密文，本机是设备密文） */
+            encryptText(JSON.stringify(S)).then(function (blob) {
+              try { localStorage.setItem(LS_ENC, blob); localStorage.removeItem(LS); } catch (e) { }
+            });
+            try { renderShelf(); } catch (e2) { }
+          }
         }
-        return AR.Sync.blobPush(ns, { books: S.books, entries: S.entries, personas: S.personas, at: Date.now() }, rev);
+        var rev = Math.max(Number(S.syncRev) || 0, remoteRev);
+        var localHas = !!((S.books && S.books.length) || (S.entries && S.entries.length));
+        /* 云端还空着（rev 0、没有密文）而本机已经有内容 → 必须推一次，
+           否则「装好同步之前写的日记」永远上不了云。 */
+        var needPush = !!S.syncDirty || (remoteRev === 0 && localHas);
+        if (!needPush) {
+          return { rev: rev, pushed: false };
+        }
+        var payload = { books: S.books, entries: S.entries, personas: S.personas, at: Date.now() };
+        return AR.Sync.blobPush(ns, payload, rev).then(function (r) { return { rev: (r && r.rev) || rev + 1, pushed: true }; });
       });
     }
-
     function step() {
       return one().then(function (r) {
         if (r && r.rev) { S.syncRev = r.rev; }
+        if (r && r.pushed) { S.syncDirty = false; }
         blobBusy = false;
+        persistQuiet();
+        /* 同步途中又存了盘（dirty 还挂着）→ 再排一次，别把最后一条丢在半路 */
+        if (S.syncDirty) { scheduleBlobSync(); }
       }).catch(function (err) {
         if (err && err.code === 'CONFLICT' && attempt < 3) {
-          var remoteRev = err.remote && err.remote.rev;
-          if (remoteRev != null) { S.syncRev = Number(remoteRev) || 0; }
+          var rr = err.remote && err.remote.rev;
+          if (rr != null) { S.syncRev = Number(rr) || 0; }
           return step();
         }
         blobBusy = false;
+        persistQuiet();
       });
     }
     step();
+  }
+
+  /* ── 返回：侧滑 / 返回键 / Esc ────────────────────────────
+     逐级退：弹层 → 目录 → 当前屏自己的返回按钮 → 书架 → 关掉日记回到应用。
+     任何一级都在日记内部消化掉，不会把 App 一起退出。 */
+  var BACK_BTN = {
+    shelf: 'shBack', whisper: 'wBack', settings: 'stBack', appset: 'asBack',
+    composer: 'cCancel', search: 'srBack', recall: 'rcBack', trash: 'trBack'
+  };
+  function currentScreen() {
+    for (var k in SC) {
+      if (!Object.prototype.hasOwnProperty.call(SC, k)) { continue; }
+      var el = $(SC[k]);
+      if (el && !el.hidden) { return k; }
+    }
+    return '';
+  }
+  /* true = 这次返回被日记吃掉了；false = 日记没开，交给应用 */
+  function backStep() {
+    var rt = $('whRoot');
+    if (!rt || rt.hasAttribute('hidden')) { return false; }
+    if (mask && mask.classList.contains('on')) { closeSheet(); return true; }
+    if (tocState.open) { closeToc(); return true; }
+    var cur = currentScreen();
+    if (cur === 'lock') { closeRoot(); return true; }
+    var btn = BACK_BTN[cur] ? $(BACK_BTN[cur]) : null;
+    if (btn) { btn.click(); return true; }
+    closeRoot();
+    return true;
   }
 
   /* 调试出口 */
@@ -1828,6 +1873,8 @@
     applyAll: function () { applyTheme(); applyAppHeat(); },
     lock: function () { var rt = $('whRoot'); if (rt) { rt.removeAttribute('hidden'); } openLock(); },
     changePin: function () { pendChange = true; var rt = $('whRoot'); if (rt) { rt.removeAttribute('hidden'); } openLock(); },
+    syncNow: function () { try { syncBlob(); } catch (e) { } },
+    handleBack: backStep,
     exportMd: buildMd
   };
 
@@ -1849,66 +1896,6 @@
 })();
 
 
-/* 宿主入口：长按底栏 / 侧栏「导入 · 我的」520ms（pointer + touch 双保险） */
-(function () {
-  var timer = null, sx = 0, sy = 0, fired = false;
-  function tabOf(e) {
-    var el = e.target;
-    if (!el || !el.closest) { return null; }
-    var t = el.closest('.nav-btn[data-nav="import"], .nav-btn[data-nav="mine"]');
-    if (!t) { return null; }
-    return (t.closest('.tabbar') || t.closest('.rail')) ? t : null;
-  }
-  function openWhisper() {
-    try {
-      if (window.__whisper && window.__whisper.open) { window.__whisper.open(); return; }
-      if (window.AR && AR.Whisper && AR.Whisper.open) { AR.Whisper.open(); return; }
-      if (window.AR && AR.UI && AR.UI.toast) { AR.UI.toast('Whisper 没加载出来'); }
-    } catch (err) {
-      try { if (window.AR && AR.UI && AR.UI.toast) { AR.UI.toast('Whisper 打不开：' + (err && err.message)); } } catch (e2) { }
-    }
-  }
-  function start(x, y) {
-    sx = x; sy = y; fired = false;
-    if (timer) { clearTimeout(timer); }
-    timer = setTimeout(function () { timer = null; fired = true; openWhisper(); }, 520);
-  }
-  function move(x, y) {
-    if (timer && (Math.abs(x - sx) > 8 || Math.abs(y - sy) > 8)) { clearTimeout(timer); timer = null; }
-  }
-  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
-
-  document.addEventListener('pointerdown', function (e) {
-    var t = tabOf(e);
-    if (!t) { return; }
-    start(e.clientX, e.clientY);
-  }, true);
-  document.addEventListener('pointermove', function (e) { move(e.clientX, e.clientY); }, true);
-  ['pointerup', 'pointercancel'].forEach(function (ev) { document.addEventListener(ev, stop, true); });
-
-  document.addEventListener('touchstart', function (e) {
-    var t = tabOf(e);
-    if (!t || !e.touches || !e.touches.length) { return; }
-    start(e.touches[0].clientX, e.touches[0].clientY);
-  }, { capture: true, passive: true });
-  document.addEventListener('touchmove', function (e) {
-    if (!e.touches || !e.touches.length) { return; }
-    move(e.touches[0].clientX, e.touches[0].clientY);
-  }, { capture: true, passive: true });
-  ['touchend', 'touchcancel'].forEach(function (ev) {
-    document.addEventListener(ev, stop, { capture: true, passive: true });
-  });
-
-  /* 电脑宽屏：双击侧栏同名项也能进（单击仍走原来的导航） */
-  document.addEventListener('dblclick', function (e) {
-    if (!tabOf(e)) { return; }
-    openWhisper();
-  }, true);
-  document.addEventListener('click', function (e) {
-    if (fired) { fired = false; e.preventDefault(); e.stopPropagation(); }
-  }, true);
-})();
-
 /* 对外 API */
 window.AR = window.AR || {};
 window.AR.Whisper = {
@@ -1927,6 +1914,9 @@ window.AR.Whisper = {
   changePin: function () { try { window.__whisper.changePin(); } catch (e) { } },
   openTrash: function () { try { window.__whisper.trash(); } catch (e) { } },
   openExport: function () { try { window.__whisper.exportSheet(); } catch (e) { } },
+  syncNow: function () { try { window.__whisper.syncNow(); } catch (e) { } },
+  /** 返回一步；true 表示日记把这次返回吃掉了（应用就别再处理） */
+  handleBack: function () { try { return !!window.__whisper.handleBack(); } catch (e) { return false; } },
   exportCurrent: function () { try { window.__whisper.exportCurrent(); } catch (e) { } },
   reset: function () { try { window.__whisper.resetAll(); } catch (e) { } }
 };

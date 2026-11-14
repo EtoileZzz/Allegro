@@ -636,12 +636,16 @@
 
   /** 推命名空间密文；409 时把最新版本一起抛出去，调用方合并后重推 */
   function blobPush(ns, data, ifMatchRev) {
+    /* 首次推送 ifMatchRev=0：服务端在 rev 0 上把空行补出来再 CAS（schema 里也有同样的种子行） */
     if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
     var rev = Math.max(0, Number(ifMatchRev) || 0);
     var next = rev + 1;
     var salt = blobSalt();
     return blobEncrypt(ns, next, data, salt).then(function (env) {
-      return apiCall('PUT', '/blob/' + encodeURIComponent(ns), { envelope: JSON.stringify(env) }, { 'If-Match': String(rev) });
+      /* 第 4 个参数是「版本号」，apiCall 自己拼 If-Match；
+         以前这里传了 {'If-Match': …} 对象，被 String() 成 "[object Object]"，
+         服务端解析成 NaN → 400 bad If-Match，日记同步就从来没成功过一次。 */
+      return apiCall('PUT', '/blob/' + encodeURIComponent(ns), { envelope: JSON.stringify(env) }, rev);
     }).then(function (res) {
       if (res.status === 200) { return { rev: Number((res.json || {}).rev) || next }; }
       if (res.status === 409) {

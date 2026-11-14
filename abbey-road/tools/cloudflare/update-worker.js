@@ -75,6 +75,12 @@ async function main() {
   const meta = {
     main_module: 'worker.js',
     compatibility_date: '2024-06-01',
+    /**
+     * 上传脚本时如果只列 d1 绑定，Cloudflare 会**删掉**没列出来的绑定 ——
+     * 包括 SYNC_TOKEN 这个 secret（secret 的值读不出来，只能别碰它）。
+     * keep_bindings 让服务端保留现有的 secret_text 绑定。
+     */
+    keep_bindings: ['secret_text'],
     bindings: [{ type: 'd1', name: 'DB', id: db.uuid }]
   };
   const parts = [];
@@ -85,6 +91,15 @@ async function main() {
   const body = Buffer.concat(parts);
   const up = await req('PUT', '/accounts/' + aid + '/workers/scripts/' + SCRIPT, body, { 'Content-Type': 'multipart/form-data; boundary=' + boundary });
   console.log('deploy status', up.status, up.body && up.body.success ? 'success' : (up.text || '').slice(0, 300));
+
+  /* 部署完必须回头确认 SYNC_TOKEN 还在：丢了它，所有客户端都会 401 */
+  const st = await req('GET', '/accounts/' + aid + '/workers/scripts/' + SCRIPT + '/settings');
+  const bindings = ((st.body && st.body.result && st.body.result.bindings) || []).map((b) => b.name + ':' + b.type);
+  console.log('bindings:', bindings.join(', ') || '（读不到）');
+  if (bindings.indexOf('SYNC_TOKEN:secret_text') < 0) {
+    console.log('!! SYNC_TOKEN 绑定不见了 —— 立刻去控制台补 secret，否则同步全是 401');
+    process.exitCode = 1;
+  }
 }
 
 main().catch((e) => { console.error('ERR', e.message); process.exitCode = 1; });

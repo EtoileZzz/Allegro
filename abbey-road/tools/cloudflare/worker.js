@@ -137,6 +137,11 @@ export default {
 
         const now = Date.now();
         const next = ifMatch + 1;
+        // 兜底：种子行不在时（新库 / 手动清理过）先补出来。
+        // 少了这一行，下面的 CAS UPDATE 永远 0 行受影响 → 客户端永远 409，第一次上传就卡死。
+        await env.DB.prepare(
+          'INSERT OR IGNORE INTO state (id, rev, envelope, updated_at) VALUES (1, 0, NULL, 0)'
+        ).run();
         // CAS：版本对不上就是 0 行受影响 —— 两台设备同时推不会互相覆盖
         const res = await env.DB.prepare(
           'UPDATE state SET rev = ?, envelope = ?, updated_at = ? WHERE id = 1 AND rev = ?'
@@ -198,6 +203,10 @@ export default {
 
           const now = Date.now();
           const next = ifMatch + 1;
+          // 同 /state：命名空间第一次上传时表里还没有这一行，先补 rev 0 的种子行
+          await env.DB.prepare(
+            'INSERT OR IGNORE INTO blob_state (ns, rev, envelope, updated_at) VALUES (?, 0, NULL, 0)'
+          ).bind(ns).run();
           const res = await env.DB.prepare(
             'UPDATE blob_state SET rev = ?, envelope = ?, updated_at = ? WHERE ns = ? AND rev = ?'
           ).bind(next, envelope, now, ns, ifMatch).run();

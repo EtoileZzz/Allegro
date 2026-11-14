@@ -53,6 +53,12 @@
 
   /* Android 返回键 / Windows Esc / 侧滑返回 */
   AR.onBack = function () {
+    /**
+     * 日记（Whisper）开着时先交给它逐级退：弹层 → 目录 → 上一屏 → 书架 → 关掉日记。
+     * 以前这里直接按应用逻辑走，日记的 fixed 覆盖层不会被关掉，
+     * 用户看到的就是「侧滑返回 = 直接退出应用」。
+     */
+    if (AR.Whisper && AR.Whisper.handleBack && AR.Whisper.handleBack()) { return; }
     if (AR.UI.modalOpen()) { AR.UI.closeModal(); return; }
     var ob = document.getElementById('onboarding');
     if (ob && !ob.hidden) { return; }          // 引导中不退出

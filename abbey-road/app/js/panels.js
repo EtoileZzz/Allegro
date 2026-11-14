@@ -1476,11 +1476,13 @@ var AR = window.AR || (window.AR = {});
     var bTrash = el('<button class="btn" type="button" style="flex:1 1 0">回收站</button>');
     bTrash.addEventListener('click', function () { W.openTrash(); });
     var bExport = el('<button class="btn" type="button" style="flex:1 1 0">导出 md</button>');
+    var bSync = el('<button class="btn" type="button" style="flex:1 1 0">立即同步</button>');
+    bSync.addEventListener('click', function () { AR.Bridge.haptic('light', bSync); if (W.syncNow) { W.syncNow(); AR.UI.toast('正在同步…'); } });
     bExport.addEventListener('click', function () {
       AR.Bridge.haptic('light', bExport);
       if (W.exportCurrent) { W.exportCurrent(); } else if (W.openExport) { W.openExport(); }
     });
-    row.appendChild(bTrash); row.appendChild(bExport);
+    row.appendChild(bTrash); row.appendChild(bExport); row.appendChild(bSync);
     box.appendChild(row);
     var bReset = el('<button class="btn" type="button" style="width:100%;margin-top:8px;color:var(--danger,#e5484d)">清空 Whisper 数据</button>');
     bReset.addEventListener('click', function () {
