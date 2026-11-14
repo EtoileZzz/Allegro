@@ -333,12 +333,13 @@
   $('bioBtn').addEventListener('click', tryBio);
   $('skipBtn').addEventListener('click', function () {
     S.lock.optional = true;
-    S.lock.enabled = S.lock.bio;   // 没 PIN 就只靠生物识别；设备不支持则等于不上锁
-    save(); toast(S.lock.enabled ? '没有 PIN，将只用生物识别' : '已关闭锁屏'); afterUnlock();
+    S.lock.enabled = false;   // 跳过就是不锁；下次不再拦
+    save(); toast('已关闭锁屏'); afterUnlock();
   });
   function tryBio() {
     if (!S.lock.hash && !S.lock.bio) { toast('先设置 PIN'); return; }
     if (!(window.AR && AR.Bridge && AR.Bridge.biometricVerify)) {
+      if (!S.lock.hash) { S.lock.enabled = false; save(); afterUnlock(); return; }
       toast('此设备不支持生物识别，请输入 PIN');
       return;
     }
