@@ -3825,6 +3825,78 @@ body[data-perf] .tk-statpage .tk-spark polyline { animation: none !important; }
 body[data-perf] .tk-statpage .tk-spark polyline { stroke-dasharray: none; stroke-dashoffset: 0; }
 
 
+/* ══════════ 年度 / 月度报告（v0.5.3）══════════ */
+/* 固定高度：切「年度 / 月度」时外框不动，只有内容区滚动 */
+.modal-card.modal-fixed { height: min(86vh, 780px); max-height: min(86vh, 780px); }
+.modal-card.modal-fixed .modal-scroll { flex: 1 1 auto; min-height: 0; }
+
+.tk-yr-seg { margin-bottom: 12px; }
+.tk-yr-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tk-yr-kpi { border: 1px solid var(--glass-stroke); border-radius: 11px; padding: 9px 10px; background: var(--glass-surface); min-width: 0; }
+.tk-yr-kl { font-size: 10.5px; color: var(--text-tertiary); }
+.tk-yr-kv { font-size: 18px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; color: var(--text-primary); line-height: 1.15; }
+.tk-yr-kv i { font-style: normal; font-size: 10px; font-weight: 400; color: var(--text-tertiary); margin-left: 1px; }
+.tk-yr-kbar { height: 4px; border-radius: 3px; background: rgba(128, 138, 156, .22); margin-top: 6px; overflow: hidden; }
+.tk-yr-kbar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.tk-yr-ks { font-size: 9.5px; color: var(--text-tertiary); margin-top: 4px; }
+.tk-yr-ks.dn { color: var(--danger); }
+
+.tk-yr-q { margin-bottom: 12px; }
+.tk-yr-qh { display: flex; align-items: baseline; gap: 8px; font-size: 10.5px; color: var(--text-tertiary); margin-bottom: 5px; }
+.tk-yr-qh b { font-size: 11.5px; color: var(--text-primary); }
+.tk-yr-qh span { margin-left: auto; font-variant-numeric: tabular-nums; }
+.tk-yr-hg { display: flex; gap: 8px; }
+.tk-yr-hdays { display: flex; flex-direction: column; gap: 3px; padding-top: 11px; font-size: 8px; color: var(--text-tertiary); }
+.tk-yr-hdays i { height: 10px; line-height: 10px; font-style: normal; }
+.tk-yr-hmain { min-width: 0; flex: 1 1 auto; }
+.tk-yr-hmonths { display: flex; gap: 3px; height: 10px; font-size: 8px; color: var(--text-tertiary); }
+.tk-yr-hmonths span { flex: 0 0 10px; white-space: nowrap; }
+.tk-yr-hgrid { display: flex; gap: 3px; }
+.tk-yr-hcol { display: flex; flex-direction: column; gap: 3px; }
+.tk-yr-cell { display: block; width: 10px; height: 10px; border-radius: 2px; background: var(--divider); }
+.tk-yr-cell.l1 { background: var(--accent); opacity: .32; }
+.tk-yr-cell.l2 { background: var(--accent); opacity: .6; }
+.tk-yr-cell.l3 { background: var(--accent); opacity: .95; }
+.tk-yr-cell.future { background: transparent; }
+.tk-yr-cell.today { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.tk-yr-cell.sel { box-shadow: inset 0 0 0 1.5px var(--text-primary); }
+
+/* 大号热力图设置也管报告 */
+body[data-heat="lg"] .tk-yr-hcol { flex: 1 1 0; }
+body[data-heat="lg"] .tk-yr-hgrid { gap: 4px; }
+body[data-heat="lg"] .tk-yr-hcol { gap: 4px; }
+body[data-heat="lg"] .tk-yr-cell { width: 100%; height: 20px; }
+body[data-heat="lg"] .tk-yr-hdays { gap: 4px; }
+body[data-heat="lg"] .tk-yr-hdays i { height: 20px; line-height: 20px; }
+body[data-heat="lg"] .tk-yr-hmonths span { flex: 1 1 0; }
+
+.tk-yr-chart { border: 1px solid var(--glass-stroke); border-radius: 11px; padding: 10px 10px 6px; background: var(--glass-surface); }
+.tk-yr-line { display: block; width: 100%; height: 66px; }
+.tk-yr-line .area { fill: var(--accent); opacity: .12; }
+.tk-yr-line .stroke { fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linejoin: round; }
+.tk-yr-axis { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--text-tertiary); margin-top: 4px; }
+
+.tk-yr-months { display: flex; align-items: flex-end; gap: 4px; height: 64px; }
+.tk-yr-m { flex: 1 1 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; border: 0; background: transparent; padding: 0; cursor: pointer; font: inherit; }
+.tk-yr-mb { width: 100%; border-radius: 2px 2px 0 0; background: var(--accent); opacity: .45; }
+.tk-yr-m.on .tk-yr-mb { opacity: .95; }
+.tk-yr-ml { font-size: 8px; color: var(--text-tertiary); margin-top: 2px; }
+
+.tk-yr-list { display: flex; flex-direction: column; gap: 6px; }
+.tk-yr-lrow { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.tk-yr-lnm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.tk-yr-ltrack { flex: 0 0 64px; height: 5px; border-radius: 3px; background: var(--divider); overflow: hidden; }
+.tk-yr-ltrack i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.tk-yr-lval { flex: 0 0 58px; text-align: right; font-size: 10.5px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.tk-yr-detail { font-size: 11px; color: var(--text-secondary); padding-top: 8px; min-height: 16px; }
+.tk-yr-monthnav { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px; }
+.tk-yr-mlabel { font-size: 12.5px; font-weight: 600; }
+
+/* 折线进场：和任务数据分析同一条曲线，流畅模式/减弱动画下直接画出来 */
+.tk-statpage .tk-yr-line .stroke { stroke-dasharray: 1200; stroke-dashoffset: 1200; animation: tkDraw 700ms var(--ease-emphasized) 60ms both; }
+@media (prefers-reduced-motion: reduce) { .tk-statpage .tk-yr-line .stroke { animation: none !important; stroke-dasharray: none; stroke-dashoffset: 0; } }
+body[data-perf] .tk-statpage .tk-yr-line .stroke { animation: none !important; stroke-dasharray: none; stroke-dashoffset: 0; }
+
 /* ── 作业统计（v0.5.3）：只补任务数据分析那套没有的三个部件 ──────
    热力图（12 周 × 7 天，真实周对齐、今天之后留白）、按课程的课程行、
    记录页的单行筛选与折叠分组。其余全部复用 .tk-* 现成样式。 */

@@ -9,7 +9,7 @@ var AR = window.AR || (window.AR = {});
 (function () {
   'use strict';
 
-var APP_VERSION = '0.5.2a';
+var APP_VERSION = '0.5.4';
   var SCHEMA_VERSION = 1;
   var STORAGE_KEY = 'abbeyroad.state.v1';
   var LAYOUT_KEY = 'abbeyroad.layout.v1';
@@ -4433,7 +4433,264 @@ function todoLongList() { return todoDailyList(); }
     FMT_SEP: FMT_SEP, FMT_HEADER: FMT_HEADER
   };
 
+  /* ══════════════════════════════════════════════════════════════
+     报告聚合（v0.5.3）：给「年度 / 月度报告」用的一次性聚合。
+
+     三条口径都沿用现有实现，不另立一套：
+       · hw     热力图 = 每天**完成**的条数（按 doneDay）；完成率 = 期间布置且已完成 ÷ 期间布置
+               按时率 = 有截止日的条目里「完成日 ≤ 截止日」或「已过期未做」的占比
+       · todo   热力图 = 每天**打卡次数**；达成率 = 打卡次数 ÷ 计划条目数（todoRequired 累加）
+       · agenda 热力图 = 每天（上课节数 + 日程事件数）
+
+     范围由调用方给（{from,to}），UI 用「第一笔记录 → 今天」当默认范围。
+     只读：不改任何字段、不进同步。
+     ══════════════════════════════════════════════════════════════ */
+
+  /** 某个域最早的一条记录（报告的默认起点）；没有就返回空串 */
+  function reportFirstDay(domain) {
+    var best = '', i, j, k;
+    if (domain === 'hw') {
+      var ts = state.tasks || [];
+      for (i = 0; i < ts.length; i++) {
+        if (ts[i].deletedAt) { continue; }
+        k = ts[i].date || (ts[i].done ? taskDoneDay(ts[i]) : '');
+        if (k && (!best || k < best)) { best = k; }
+      }
+    } else if (domain === 'todo') {
+      var todos = todoRaw();
+      for (i = 0; i < todos.length; i++) {
+        if (todos[i].deletedAt) { continue; }
+        var ents = todoLiveEntries(todos[i]);
+        for (j = 0; j < ents.length; j++) {
+          k = todoEntryDay(ents[j]);
+          if (k && (!best || k < best)) { best = k; }
+        }
+      }
+    } else {
+      var evs = state.events || [];
+      for (i = 0; i < evs.length; i++) {
+        if (evs[i].deletedAt) { continue; }
+        k = evs[i].date;
+        if (k && (!best || k < best)) { best = k; }
+      }
+    }
+    return best;
+  }
+
+  /**
+   * @param {'hw'|'todo'|'agenda'} domain
+   * @param {{from:string,to:string}} opts
+   */
+  function reportStats(domain, opts) {
+    opts = opts || {};
+    var todayK = dateKey(new Date());
+    var toK = opts.to || todayK;
+    if (toK > todayK) { toK = todayK; }
+    var fromK = opts.from || reportFirstDay(domain) || toK;
+    if (fromK > toK) { fromK = toK; }
+
+    var out = {
+      domain: domain, from: fromK, to: toK, days: dayDiff(toK, fromK) + 1,
+      byDay: {}, reqByDay: {},
+      hw: { assigned: 0, assignedDone: 0, done: 0, ok: 0, total: 0, overdue: 0, spendSum: 0, spendN: 0 },
+      todo: { count: 0, req: 0, okDays: 0, activeTasks: 0 },
+      agenda: { count: 0, cls: 0, ev: 0, activeDays: 0 },
+      byCourse: [], byTask: [],
+      months: {}, monthOrder: [],
+      streak: { cur: 0, best: 0 }, gap: { max: 0, from: '', to: '' }
+    };
+    function inRange(k) { return !!k && k >= fromK && k <= toK; }
+    function bucket(k) {
+      var mk = String(k).slice(0, 7);
+      if (!out.months[mk]) {
+        out.months[mk] = { k: mk, a: 0, ad: 0, d: 0, ok: 0, total: 0, overdue: 0,
+          spendSum: 0, spendN: 0, count: 0, req: 0, okDays: 0, cls: 0, ev: 0, act: 0 };
+        out.monthOrder.push(mk);
+      }
+      return out.months[mk];
+    }
+    function put(k, n) {
+      if (!inRange(k) || !n) { return; }
+      out.byDay[k] = (out.byDay[k] || 0) + n;
+    }
+    var i, j, k, t;
+
+    /* ── 作业 ── */
+    if (domain === 'hw') {
+      var tasks = state.tasks || [];
+      var cMap = {};
+      for (i = 0; i < tasks.length; i++) {
+        t = tasks[i];
+        if (t.deletedAt) { continue; }
+        var doneK = t.done ? taskDoneDay(t) : '';
+        if (t.date && inRange(t.date)) {
+          out.hw.assigned++;
+          bucket(t.date).a++;
+          if (t.done) { out.hw.assignedDone++; bucket(t.date).ad++; }
+          var ck = String(t.courseId || '');
+          if (!cMap[ck]) { cMap[ck] = { id: ck, a: 0, ad: 0 }; }
+          cMap[ck].a++;
+          if (t.done) { cMap[ck].ad++; }
+        }
+        if (doneK && inRange(doneK)) {
+          out.hw.done++;
+          bucket(doneK).d++;
+          put(doneK, 1);
+          if (t.date) {
+            var lag = dayDiff(doneK, t.date);
+            if (lag >= 0) {
+              out.hw.spendSum += lag; out.hw.spendN++;
+              bucket(doneK).spendSum += lag; bucket(doneK).spendN++;
+            }
+          }
+        }
+        if (t.due) {
+          if (t.done) {
+            if (doneK && inRange(doneK)) {
+              out.hw.total++;
+              bucket(doneK).total++;
+              if (doneK <= String(t.due)) { out.hw.ok++; bucket(doneK).ok++; }
+            }
+          } else if (String(t.due) < todayK && inRange(t.due)) {
+            out.hw.total++;
+            out.hw.overdue++;
+            bucket(t.due).total++;
+            bucket(t.due).overdue++;
+          }
+        }
+      }
+      out.byCourse = Object.keys(cMap).map(function (cid) {
+        var c = courseById(cid);
+        return {
+          id: cid, name: c ? c.name : '未分类', color: c ? colorHex(c.colorKey) : '',
+          a: cMap[cid].a, d: cMap[cid].ad,
+          rate: cMap[cid].a ? Math.round(cMap[cid].ad / cMap[cid].a * 100) : 0
+        };
+      }).sort(function (x, y) { return y.a - x.a; });
+    }
+
+    /* ── 任务打卡 ── */
+    if (domain === 'todo') {
+      var todos = todoRaw();
+      var tMap = {};
+      var d0 = parseDateKey(fromK), d1 = parseDateKey(toK);
+      for (i = 0; i < todos.length; i++) {
+        var td = todos[i];
+        if (td.deletedAt) { continue; }
+        var id = String(td.id || '');
+        var row = tMap[id];
+        if (!row) { row = tMap[id] = { id: id, name: td.text || '未命名', count: 0, req: 0, days: {} }; }
+        var ents = todoLiveEntries(td);
+        for (j = 0; j < ents.length; j++) {
+          k = todoEntryDay(ents[j]);
+          if (!inRange(k)) { continue; }
+          row.count++;
+          row.days[k] = 1;
+          out.todo.count++;
+          bucket(k).count++;
+          put(k, 1);
+        }
+        /* 计划条目：逐天累加 todoRequired（每天 / 指定星期 / 每 N 天 / 每周，都按条目算） */
+        for (var day = new Date(d0.getTime()); day <= d1; day = addDays(day, 1)) {
+          var req = todoRequired(td, day);
+          if (isFinite(req) && req > 0) {
+            row.req += req;
+            var dk2 = dateKey(day);
+            out.todo.req += req;
+            out.reqByDay[dk2] = (out.reqByDay[dk2] || 0) + req;
+            bucket(dk2).req += req;
+          }
+        }
+      }
+      /* 达标天：当天打卡次数 ≥ 当天计划条目 */
+      var rk = Object.keys(out.reqByDay);
+      for (i = 0; i < rk.length; i++) {
+        k = rk[i];
+        if ((out.byDay[k] || 0) >= out.reqByDay[k]) {
+          out.todo.okDays++;
+          bucket(k).okDays++;
+        }
+      }
+      var mkeys = out.monthOrder;
+      for (i = 0; i < mkeys.length; i++) {
+        var mm = out.months[mkeys[i]];
+        for (var dk3 in out.byDay) {
+          if (!Object.prototype.hasOwnProperty.call(out.byDay, dk3)) { continue; }
+          if (String(dk3).slice(0, 7) === mm.k) { mm.act++; }
+        }
+      }
+      out.byTask = Object.keys(tMap).map(function (id2) {
+        var r = tMap[id2];
+        var best = 0, cur = 0, prev = '';
+        Object.keys(r.days).sort().forEach(function (dk) {
+          if (prev && dayDiff(dk, prev) === 1) { cur++; } else { cur = 1; }
+          if (cur > best) { best = cur; }
+          prev = dk;
+        });
+        return { id: id2, name: r.name, count: r.count, req: r.req, best: best,
+          rate: r.req ? Math.round(r.count / r.req * 100) : 0 };
+      }).sort(function (x, y) { return y.count - x.count; });
+      out.todo.activeTasks = out.byTask.filter(function (r) { return r.count > 0; }).length;
+    }
+
+    /* ── 日程（上课节数 + 事件数）── */
+    if (domain === 'agenda') {
+      var sems = semesterList();
+      var d0a = parseDateKey(fromK), d1a = parseDateKey(toK);
+      for (var day2 = new Date(d0a.getTime()); day2 <= d1a; day2 = addDays(day2, 1)) {
+        var k2 = dateKey(day2);
+        var sem = null;
+        for (i = 0; i < sems.length; i++) {
+          var s0 = parseDateKey(sems[i].startDate);
+          if (!s0) { continue; }
+          var s1 = addDays(s0, (Number(sems[i].weekCount) || 20) * 7);
+          if (day2 >= s0 && day2 <= s1) { sem = sems[i]; break; }
+        }
+        var items = [];
+        try { items = dayItems(day2, sem) || []; } catch (e) { items = []; }
+        var cls = items.length;
+        var evs = eventsBetween(k2, k2) || [];
+        var evN = 0;
+        for (i = 0; i < evs.length; i++) { if (!evs[i].deletedAt) { evN++; } }
+        out.agenda.cls += cls;
+        out.agenda.ev += evN;
+        var v = cls + evN;
+        if (v) {
+          out.agenda.count += v;
+          out.agenda.activeDays++;
+          bucket(k2).cls += cls;
+          bucket(k2).ev += evN;
+          put(k2, v);
+        }
+      }
+    }
+
+    /* ── 连续 / 空窗 ── */
+    var keys = Object.keys(out.byDay).sort();
+    var run = 0, prevK = '';
+    for (i = 0; i < keys.length; i++) {
+      k = keys[i];
+      if (prevK && dayDiff(k, prevK) === 1) { run++; } else { run = 1; }
+      if (run > out.streak.best) { out.streak.best = run; }
+      if (prevK) {
+        var gap = dayDiff(k, prevK) - 1;
+        if (gap > out.gap.max) { out.gap = { max: gap, from: prevK, to: k }; }
+      }
+      prevK = k;
+    }
+    var cur = 0, cw = parseDateKey(toK);
+    while (cw) {
+      if ((out.byDay[dateKey(cw)] || 0) > 0) { cur++; cw = addDays(cw, -1); }
+      else { break; }
+      if (cur > 400) { break; }
+    }
+    out.streak.cur = cur;
+    out.monthOrder = out.monthOrder.slice().sort();
+    return out;
+  }
+
   AR.Store = {
+    reportStats: reportStats, reportFirstDay: reportFirstDay,
     load: load, save: save, storeStatus: storeStatus, get: get, reset: reset, reload: reload, migrate: migrate,
     currentSemester: currentSemester, periodsOf: periodsOf,
     courseById: courseById, teacherById: teacherById, locationById: locationById,

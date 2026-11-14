@@ -74,6 +74,8 @@ public class MainActivity extends Activity {
     private static final int REQ_IMPORT = 1002;
     /** Android 13+ 通知权限（课前提醒） */
     private static final int REQ_NOTIF = 1003;
+    /** 生物识别（Whisper 解锁） */
+    private static final int REQ_BIO = 1004;
 
     /** 外部文件导入上限：5MB。超出就中止，绝不整读进内存。 */
     private static final long MAX_IMPORT_BYTES = 5L * 1024 * 1024;
@@ -85,6 +87,8 @@ public class MainActivity extends Activity {
     static final String EXTRA_VIEW = "ar_view";
 
     private WebView web;
+    /** 生物识别请求 id（JS 侧生成，回来时回调 __whBioResult） */
+    private String pendingBioId = null;
     private String pendingExportContent = null;
     private String pendingExportMime = "application/json";
     private String pendingView = null;
@@ -475,6 +479,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String deviceName() {
             return (Build.MANUFACTURER + " " + Build.MODEL).trim();
+        }
+
+        /** 生物识别：要求调用方传一个 id，结果通过 window.__whBioResult(id, ok) 回传。 */
+        @JavascriptInterface
+        public void biometricVerify(final String reqId) {
+            runOnUiThread(new Runnable() {
+                public void run() { startBiometric(reqId); }
+            });
         }
 
         @JavascriptInterface
@@ -1480,9 +1492,62 @@ public class MainActivity extends Activity {
         return JSONObject.quote(s == null ? "" : s);
     }
 
+    /** 生物识别：API 28+ 用 BiometricPrompt；26/27 退到系统锁屏凭据 */
+    private void startBiometric(final String reqId) {
+        if (Build.VERSION.SDK_INT >= 28) {
+            try {
+                java.util.concurrent.Executor ex = new java.util.concurrent.Executor() {
+                    public void execute(Runnable r) { runOnUiThread(r); }
+                };
+                android.hardware.biometrics.BiometricPrompt.Builder b =
+                        new android.hardware.biometrics.BiometricPrompt.Builder(this)
+                                .setTitle("解锁 Whisper")
+                                .setNegativeButton("用 PIN", ex, new android.content.DialogInterface.OnClickListener() {
+                                    public void onClick(android.content.DialogInterface d, int w) { bioResult(reqId, false); }
+                                });
+                if (Build.VERSION.SDK_INT >= 29) { b.setDeviceCredentialAllowed(true); }
+                b.build().authenticate(new android.os.CancellationSignal(), ex,
+                        new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                            @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult r) { bioResult(reqId, true); }
+                            @Override public void onAuthenticationError(int code, CharSequence msg) { bioResult(reqId, false); }
+                        });
+                return;
+            } catch (Throwable t) {
+                Log.w(TAG, "biometric prompt failed", t);
+            }
+        }
+        try {
+            android.app.KeyguardManager km = (android.app.KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+            Intent i = km == null ? null : km.createConfirmDeviceCredentialIntent("解锁 Whisper", null);
+            if (i == null) { bioResult(reqId, false); return; }
+            pendingBioId = reqId;
+            startActivityForResult(i, REQ_BIO);
+        } catch (Throwable t) {
+            Log.w(TAG, "keyguard failed", t);
+            bioResult(reqId, false);
+        }
+    }
+
+    private void bioResult(final String reqId, final boolean ok) {
+        if (web == null) { return; }
+        web.post(new Runnable() {
+            public void run() {
+                try {
+                    web.evaluateJavascript("window.__whBioResult && window.__whBioResult('" + reqId + "'," + (ok ? "true" : "false") + ")", null);
+                } catch (Throwable t) { Log.w(TAG, "bio callback failed", t); }
+            }
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_BIO) {
+            String id = pendingBioId;
+            pendingBioId = null;
+            if (id != null) { bioResult(id, resultCode == RESULT_OK); }
+            return;
+        }
 
         if (requestCode == REQ_EXPORT) {
             if (resultCode != RESULT_OK || data == null || data.getData() == null) {

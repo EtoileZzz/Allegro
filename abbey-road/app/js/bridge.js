@@ -321,6 +321,30 @@ var AR = window.AR || (window.AR = {});
     return call('getautostart', []);
   }
 
+
+  /* ── 生物识别（Whisper 解锁用；Android 走 BiometricPrompt，Windows 走 Windows Hello） ── */
+  var bioPending = {};
+  window.__whBioResult = function (id, ok) {
+    var fn = bioPending[id];
+    if (fn) { delete bioPending[id]; fn(!!ok); }
+  };
+  function biometricVerify() {
+    if (hasAndroid && window.ARBridge && typeof window.ARBridge.biometricVerify === 'function') {
+      return new Promise(function (resolve) {
+        var id = 'bio' + (++seq);
+        bioPending[id] = resolve;
+        try { window.ARBridge.biometricVerify(id); } catch (e) { delete bioPending[id]; resolve(false); }
+        setTimeout(function () {
+          if (bioPending[id]) { delete bioPending[id]; resolve(false); }
+        }, 60000);
+      });
+    }
+    if (hasWebView2) {
+      return call('biometricVerify', []).then(function (r) { return r === true || r === 'true'; });
+    }
+    return Promise.resolve(false);
+  }
+
   function isNative() { return hasAndroid || hasWebView2; }
 
   AR.Bridge = {
@@ -333,6 +357,7 @@ var AR = window.AR || (window.AR = {});
     haptic: haptic,
     visualPulse: visualPulse,
     copy: copy,
+    biometricVerify: biometricVerify,
     share: share,
     shareFile: shareFile,
     listExports: listExports,

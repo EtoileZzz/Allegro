@@ -778,12 +778,15 @@ var AR = window.AR || (window.AR = {});
         quick: quickMine, panels: [panelMine] },
       { key: 'syncdata', icon: '💾', label: '数据与同步', desc: '导入、系统集成、备份与清空',
         quick: quickData, panels: [panelSync, panelCloudSync, panelIntegration, panelData] },
+      { key: 'whisper', icon: '📓', label: 'Whisper', desc: '笔记本 / 日记（长按底栏进入）',
+        panels: [panelWhisper] },
       { key: 'about', icon: 'ℹ️', label: '关于与帮助', desc: '版本、引导、反馈',
         quick: quickAbout, panels: [panelAbout] }
     ];
     // 开发者模式：长按底部「设置」开关。开启后作为**独立分类**出现在最后，
     // 故意不给 quick（首页不放任何高频项），只是多一个入口。
-    if (S.settings.appearance.devMode === true) {
+    try { if (localStorage.getItem('abbeyroad.whisper.seen') !== '1') { list = list.filter(function (c) { return c.key !== 'whisper'; }); } } catch (e0) { }
+  if (S.settings.appearance.devMode === true) {
       list.push({ key: 'dev', icon: '🧪', label: '开发者模式', desc: '过渡动画、弹窗玻璃、调试工具',
         panels: [panelDev] });
     }
@@ -1392,6 +1395,100 @@ var AR = window.AR || (window.AR = {});
         ? '开发者模式已开启：设置里多了「开发者模式」分类'
         : '开发者模式已关闭');
     }
+  }
+
+  /* Whisper：入口在长按底栏「导入 / 我的」；设置用应用原生组件，不再自建一套 */
+  function panelWhisper() {
+    var box = el('<div></div>');
+    if (!AR.Whisper || !AR.Whisper.state) {
+      box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">Whisper 还没加载好</p>'));
+      return panel('Whisper', box, 'whisper');
+    }
+    var W = AR.Whisper;
+    var WS = W.state();
+    function commit() { W.save(WS); W.apply(); }
+    function addSeg(label, opts, current, onPick) {
+      box.appendChild(el('<div class="field-label">' + esc(label) + '</div>'));
+      box.appendChild(segmented(opts, current, function (v) { onPick(v); }));
+    }
+
+    box.appendChild(el('<div class="field-label">模式</div>'));
+    box.appendChild(segmented([
+      { label: '跟随应用', value: 'app' }, { label: '纸', value: 'paper' }, { label: '夜', value: 'night' }
+    ], WS.theme.mode || 'app', function (v) { WS.theme.mode = v; WS.theme.name = ''; commit(); }));
+
+    var tokens = [
+      ['主文字 / 深色', 'base', 'dark'], ['浅色背景', 'base', 'light'], ['次级灰', 'base', 'mid'], ['微妙背景', 'base', 'subtle'],
+      ['主强调', 'accent', 'a1'], ['次强调', 'accent', 'a2'], ['第三强调', 'accent', 'a3']
+    ];
+    for (var ti = 0; ti < tokens.length; ti++) {
+      (function (tk) {
+        var cur = WS.theme[tk[1]][tk[2]];
+        var row = el('<div class="setting-row"><div class="setting-text"><div class="t">' + esc(tk[0]) + '</div><div class="d">' + String(cur).toUpperCase() + '</div></div></div>');
+        var dot = el('<span style="display:inline-block;width:18px;height:18px;border-radius:50%;background:' + cur + ';border:1px solid rgba(0,0,0,.15)"></span>');
+        var btn = el('<button class="chip-btn" type="button">选色</button>');
+        btn.addEventListener('click', function () {
+          AR.Bridge.haptic('light', btn);
+          AR.UI.openColorPicker(cur, function (hex) {
+            WS.theme[tk[1]][tk[2]] = hex;
+            WS.theme.name = '';
+            cur = hex;
+            dot.style.background = hex;
+            row.querySelector('.d').textContent = String(hex).toUpperCase();
+            commit();
+          });
+        });
+        var right = el('<div style="display:flex;align-items:center;gap:8px"></div>');
+        right.appendChild(dot); right.appendChild(btn);
+        row.appendChild(right);
+        box.appendChild(row);
+      })(tokens[ti]);
+    }
+
+    box.appendChild(el('<div class="field-label">列表与阅读</div>'));
+    addSeg('列表样式', [{ label: '书架', value: 'hero' }, { label: '双列', value: 'grid2' }, { label: '极简', value: 'min' }], WS.opts.shelf, function (v) { WS.opts.shelf = v; commit(); });
+    addSeg('排版', [{ label: '纸感', value: 'A' }, { label: '卡片流', value: 'C' }], WS.opts.layout, function (v) { WS.opts.layout = v; commit(); });
+    addSeg('按日期分组', [{ label: '开', value: 'on' }, { label: '关', value: 'off' }], WS.opts.grouped ? 'on' : 'off', function (v) { WS.opts.grouped = v === 'on'; commit(); });
+    addSeg('菜单样式', [{ label: '列表', value: 'list' }, { label: '动作格', value: 'grid' }], WS.opts.menu, function (v) { WS.opts.menu = v; commit(); });
+    addSeg('写作样式', [{ label: '底部', value: 'sheet' }, { label: '全屏', value: 'full' }], WS.opts.composer, function (v) { WS.opts.composer = v; commit(); });
+    addSeg('进入动效', [{ label: '开', value: 'on' }, { label: '关', value: 'off' }], WS.opts.enterFx === false ? 'off' : 'on', function (v) { WS.opts.enterFx = v === 'on'; commit(); });
+
+    box.appendChild(el('<div class="field-label">安全</div>'));
+    function lockRow(label, desc, get, set) {
+      var r = el('<div class="setting-row"><div class="setting-text"><div class="t">' + esc(label) + '</div><div class="d">' + esc(desc) + '</div></div>'
+        + '<label class="switch"><input type="checkbox"' + (get() ? ' checked' : '') + '><span class="track"></span><span class="knob"></span></label></div>');
+      var inp = r.querySelector('input');
+      inp.addEventListener('click', function () { setTimeout(function () { set(inp.checked); }, 0); });
+      inp.addEventListener('change', function () { set(inp.checked); });
+      box.appendChild(r);
+    }
+    lockRow('锁屏', '进入 Whisper 需要 PIN 或生物识别', function () { return WS.lock.enabled; }, function (v) { WS.lock.enabled = v; commit(); });
+    lockRow('生物识别', '指纹 / 面容 / Windows Hello', function () { return WS.lock.bio; }, function (v) { WS.lock.bio = v; commit(); });
+    var pinBtn = el('<button class="btn" type="button" style="width:100%;margin-top:10px">' + (WS.lock.hash ? '修改 PIN' : '设置 PIN') + '</button>');
+    pinBtn.addEventListener('click', function () {
+      AR.Bridge.haptic('light', pinBtn);
+      if (W.changePin && WS.lock.hash) { W.changePin(); } else if (W.openLock) { W.openLock(); }
+    });
+    box.appendChild(pinBtn);
+
+    box.appendChild(el('<div class="field-label">数据</div>'));
+    var row = el('<div style="display:flex;gap:8px;margin-top:6px"></div>');
+    var bTrash = el('<button class="btn" type="button" style="flex:1 1 0">回收站</button>');
+    bTrash.addEventListener('click', function () { W.openTrash(); });
+    var bExport = el('<button class="btn" type="button" style="flex:1 1 0">导出 md</button>');
+    bExport.addEventListener('click', function () {
+      AR.Bridge.haptic('light', bExport);
+      if (W.exportCurrent) { W.exportCurrent(); } else if (W.openExport) { W.openExport(); }
+    });
+    row.appendChild(bTrash); row.appendChild(bExport);
+    box.appendChild(row);
+    var bReset = el('<button class="btn" type="button" style="width:100%;margin-top:8px;color:var(--danger,#e5484d)">清空 Whisper 数据</button>');
+    bReset.addEventListener('click', function () {
+      if (window.confirm('清空所有日记？不可恢复')) { W.reset(); AR.UI.toast('已清空'); }
+    });
+    box.appendChild(bReset);
+    box.appendChild(el('<p class="muted" style="margin:10px 0 0;font-size:12px">热力图大小跟随「外观 → 热力图大小」的全局设置；Whisper 数据不进学期、不进同步。</p>'));
+    return panel('Whisper', box, 'whisper');
   }
 
   function panel(title, inner, key) {
@@ -2541,7 +2638,22 @@ var AR = window.AR || (window.AR = {});
         + '<div class="hwo-foot">本周完成 ' + doneWeek + ' 条 · 共 ' + all.length + ' 条</div></div>'));
     })();
     var logBtn = el('<button class="btn" type="button" style="margin-top:10px">作业统计…</button>');
+          /* 长按 520ms 直接看年度/月度报告 */
+     logBtn.addEventListener('pointerdown', function () {
+       if (logBtn.__yrTimer) { clearTimeout(logBtn.__yrTimer); }
+       logBtn.__yrTimer = setTimeout(function () {
+         logBtn.__yrTimer = null; logBtn.__yrHold = true;
+         try { AR.Bridge.haptic('medium', logBtn); } catch (e) { }
+         if (AR.UI.openYearReport) { AR.UI.openYearReport('hw'); }
+       }, 520);
+     });
+     ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (evt) {
+       logBtn.addEventListener(evt, function () {
+         if (logBtn.__yrTimer) { clearTimeout(logBtn.__yrTimer); logBtn.__yrTimer = null; }
+       });
+     });
     logBtn.addEventListener('click', function () {
+       if (logBtn.__yrHold) { logBtn.__yrHold = false; return; }
       AR.Bridge.haptic('light', logBtn);
       if (AR.UI.openHomeworkStats) { AR.UI.openHomeworkStats('overview'); }
     });

@@ -27,3 +27,21 @@ CREATE TABLE IF NOT EXISTS history (
 
 -- 可选：按时间清理旧历史（默认保留 20 版，Worker 每次写入后会自己裁一次）
 CREATE INDEX IF NOT EXISTS idx_history_rev ON history (rev DESC);
+
+-- ── 命名空间密文（v0.5.4：Whisper 日记同步） ──────────────────
+CREATE TABLE IF NOT EXISTS blob_state (
+  ns          TEXT PRIMARY KEY,
+  rev         INTEGER NOT NULL DEFAULT 0,
+  envelope    TEXT,
+  updated_at  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS blob_history (
+  ns          TEXT NOT NULL,
+  rev         INTEGER NOT NULL,
+  envelope    TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (ns, rev)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blob_history_ns_rev ON blob_history (ns, rev DESC);

@@ -574,7 +574,88 @@
       });
   }
 
+  /* ── 命名空间密文（v0.5.4：Whisper 日记） ────────────────────
+     独立 salt、独立派生、AAD 绑定 ns+rev；服务端只存密文。
+     与配置同步共用服务地址/令牌/口令，但钥匙是另一把。 */
+  var BLOB_AAD_PREFIX = 'ARS1W|';
+  var BLOB_SALT_KEY = 'allegro.sync.blobsalt.v1';
+  function blobSalt() {
+    try {
+      var v = localStorage.getItem(BLOB_SALT_KEY);
+      if (!v) { v = bytesToB64(randBytes(16)); localStorage.setItem(BLOB_SALT_KEY, v); }
+      return v;
+    } catch (e) { return bytesToB64(randBytes(16)); }
+  }
+
+  function blobAad(ns, rev) { return enc(BLOB_AAD_PREFIX + ns + '|' + rev); }
+
+  function blobDeriveKey(ns, saltB64) {
+    var pass = getPass();
+    if (!pass) { return Promise.reject(new Error('还没设置同步口令')); }
+    return deriveKey(pass, b64ToBytes(saltB64), ITER);
+  }
+
+  function blobEncrypt(ns, rev, obj, saltB64) {
+    return blobDeriveKey(ns, saltB64).then(function (key) {
+      var iv = randBytes(12);
+      return subtle().encrypt({ name: 'AES-GCM', iv: iv, additionalData: blobAad(ns, rev) }, key, enc(JSON.stringify(obj)))
+        .then(function (ctBuf) {
+          return {
+            v: 1,
+            ns: ns,
+            salt: saltB64,
+            iv: bytesToB64(iv),
+            ct: bytesToB64(new Uint8Array(ctBuf)),
+            rev: rev
+          };
+        });
+    });
+  }
+
+  function blobDecrypt(ns, env) {
+    return blobDeriveKey(ns, env.salt).then(function (key) {
+      return subtle().decrypt({ name: 'AES-GCM', iv: b64ToBytes(env.iv), additionalData: blobAad(ns, env.rev) }, key, b64ToBytes(env.ct))
+        .then(function (buf) { return JSON.parse(dec(buf)); });
+    });
+  }
+
+  /** 读命名空间密文：{ rev, data } / null（云端还没有） */
+  function blobPull(ns) {
+    if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
+    return apiCall('GET', '/blob/' + encodeURIComponent(ns)).then(function (res) {
+      if (res.status === 404) { return null; }
+      if (res.status !== 200) { throw classify(res); }
+      var env = res.json && res.json.envelope;
+      if (!env) { return { rev: Number(res.json && res.json.rev) || 0, data: null }; }
+      var parsed = typeof env === 'string' ? JSON.parse(env) : env;
+      return blobDecrypt(ns, parsed).then(function (data) {
+        return { rev: Number(parsed.rev) || 0, data: data };
+      });
+    });
+  }
+
+  /** 推命名空间密文；409 时把最新版本一起抛出去，调用方合并后重推 */
+  function blobPush(ns, data, ifMatchRev) {
+    if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
+    var rev = Math.max(0, Number(ifMatchRev) || 0);
+    var next = rev + 1;
+    var salt = blobSalt();
+    return blobEncrypt(ns, next, data, salt).then(function (env) {
+      return apiCall('PUT', '/blob/' + encodeURIComponent(ns), { envelope: JSON.stringify(env) }, { 'If-Match': String(rev) });
+    }).then(function (res) {
+      if (res.status === 200) { return { rev: Number((res.json || {}).rev) || next }; }
+      if (res.status === 409) {
+        var err = new Error('conflict');
+        err.code = 'CONFLICT';
+        err.remote = res.json || {};
+        throw err;
+      }
+      throw classify(res);
+    });
+  }
+
   AR.Sync = {
+    blobPull: blobPull, blobPush: blobPush,
     /* 配置 */
     config: config, setConfig: setConfig, clearConfig: clearConfig, isConfigured: isConfigured,
     /* 动作 */

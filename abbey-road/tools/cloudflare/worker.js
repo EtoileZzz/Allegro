@@ -15,6 +15,8 @@
  *   PUT  /state               条件写      → 需 If-Match: <rev>；成功 {rev}；落后 409 + 当前版本
  *   GET  /state/rev/<n>       读某个历史版本（回滚用）
  *   GET  /history?limit=20    历史版本列表（不含密文，只有版本号/大小/时间）
+ *   GET  /blob/:ns            读命名空间密文（ns 白名单：whisper） → {ns, rev, updatedAt, envelope}
+ *   PUT  /blob/:ns            条件写命名空间密文 → If-Match: <rev>；冲突 409
  *
  * 安全：
  *   · token 用长度固定 + 逐字节异或的常数时间比较
@@ -25,6 +27,17 @@
 const ALLOWED_ORIGIN = 'https://abbeyroad.local';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const HISTORY_KEEP = 20;
+const BLOB_NS = ['whisper'];      // 只允许这两种命名空间（以后要加就写在这里）
+const BLOB_MAX_BYTES = 5 * 1024 * 1024;
+
+function allowedNs(ns) {
+  return BLOB_NS.indexOf(ns) >= 0;
+}
+
+async function readBlob(env, ns) {
+  const row = await env.DB.prepare('SELECT rev, envelope, updated_at FROM blob_state WHERE ns = ?').bind(ns).first();
+  return row || { rev: 0, envelope: null, updated_at: 0 };
+}
 
 function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '';
@@ -145,6 +158,67 @@ export default {
         ).bind(HISTORY_KEEP).run();
 
         return json({ rev: next }, 200, cors);
+      }
+
+      const mBlob = /^\/blob\/([a-z0-9_-]{1,24})$/.exec(path);
+      if (mBlob) {
+        const ns = mBlob[1];
+        if (!allowedNs(ns)) { return json({ error: 'unknown namespace' }, 404, cors); }
+
+        if (request.method === 'GET') {
+          const row = await readBlob(env, ns);
+          return json({ ns: ns, rev: row.rev, updatedAt: row.updated_at, envelope: row.envelope }, 200, cors);
+        }
+
+        if (request.method === 'PUT') {
+          const ifMatchRaw = request.headers.get('If-Match');
+          if (ifMatchRaw == null) {
+            return json({ error: 'missing If-Match (expected current rev)' }, 428, cors);
+          }
+          const ifMatch = Number(String(ifMatchRaw).replace(/"/g, ''));
+          if (!Number.isFinite(ifMatch) || ifMatch < 0) {
+            return json({ error: 'bad If-Match' }, 400, cors);
+          }
+          const len = Number(request.headers.get('Content-Length') || 0);
+          if (len > BLOB_MAX_BYTES) { return json({ error: 'payload too large' }, 413, cors); }
+
+          let body;
+          try { body = await request.json(); } catch (e) { return json({ error: 'invalid json' }, 400, cors); }
+          const envelope = body && body.envelope;
+          if (typeof envelope !== 'string' || envelope.length === 0) {
+            return json({ error: 'missing envelope' }, 400, cors);
+          }
+          if (envelope.length > BLOB_MAX_BYTES) { return json({ error: 'envelope too large' }, 413, cors); }
+
+          let parsed;
+          try { parsed = JSON.parse(envelope); } catch (e) { return json({ error: 'envelope is not json' }, 400, cors); }
+          if (!parsed || !parsed.ct || !parsed.ns || parsed.ns !== ns) {
+            return json({ error: 'unsupported envelope' }, 400, cors);
+          }
+
+          const now = Date.now();
+          const next = ifMatch + 1;
+          const res = await env.DB.prepare(
+            'UPDATE blob_state SET rev = ?, envelope = ?, updated_at = ? WHERE ns = ? AND rev = ?'
+          ).bind(next, envelope, now, ns, ifMatch).run();
+
+          const changes = res && res.meta ? res.meta.changes : 0;
+          if (!changes) {
+            const cur = await readBlob(env, ns);
+            return json({ error: 'conflict', ns: ns, rev: cur.rev, updatedAt: cur.updated_at, envelope: cur.envelope }, 409, cors);
+          }
+
+          await env.DB.prepare(
+            'INSERT OR REPLACE INTO blob_history (ns, rev, envelope, updated_at) VALUES (?, ?, ?, ?)'
+          ).bind(ns, next, envelope, now).run();
+          await env.DB.prepare(
+            'DELETE FROM blob_history WHERE ns = ? AND rev NOT IN (SELECT rev FROM blob_history WHERE ns = ? ORDER BY rev DESC LIMIT ?)'
+          ).bind(ns, ns, HISTORY_KEEP).run();
+
+          return json({ ns: ns, rev: next }, 200, cors);
+        }
+
+        return json({ error: 'method not allowed' }, 405, cors);
       }
 
       const mRev = /^\/state\/rev\/(\d+)$/.exec(path);

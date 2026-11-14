@@ -1090,10 +1090,11 @@ var AR = window.AR || (window.AR = {});
     /* 卡底：作业记录 + 添加作业（和任务卡同一个位置） */
     var foot = el('<div class="tk-foot"></div>');
     var logBtn = el('<button class="tk-fbtn" type="button">作业统计…</button>');
-    logBtn.addEventListener('click', function () {
+    /* 点按 = 统计弹窗；长按 520ms = 年度/月度报告 */
+    bindTapHold(logBtn, function () {
       AR.Bridge.haptic('light', logBtn);
       openHomeworkStats('overview');
-    });
+    }, function () { openYearReport('hw'); });
     var addBtn = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 添加作业</button>');
     addBtn.addEventListener('click', function () {
       AR.Bridge.haptic('light', addBtn);
@@ -1585,7 +1586,7 @@ var AR = window.AR || (window.AR = {});
     }
     paint();
 
-    openModal({ title: '日程总览', sub: todayK + ' · 共 ' + all.length + ' 条', body: body, wide: true, actions: [] });
+    openModal({ title: '日程总览', sub: todayK + ' · 共 ' + all.length + ' 条', body: body, wide: true, actions: [], fixed: true });
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
     }
@@ -1730,9 +1731,10 @@ var AR = window.AR || (window.AR = {});
     /* 卡底：日程总览 + 添加日程（与任务模块同一个位置） */
     var foot = el('<div class="tk-foot"></div>');
     var ovBtn = el('<button class="tk-fbtn" type="button">日程总览</button>');
-    ovBtn.addEventListener('click', function () {
+    /* 点按 = 日程总览；长按 520ms = 年度/月度报告 */
+    bindTapHold(ovBtn, function () {
       AR.Bridge.haptic('light', ovBtn); openAgendaOverview();
-    });
+    }, function () { openYearReport('agenda'); });
     var addBtn = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 添加日程</button>');
     addBtn.addEventListener('click', function () {
       AR.Bridge.haptic('light', addBtn);
@@ -5550,6 +5552,7 @@ var AR = window.AR || (window.AR = {});
     root.classList.remove('closing');
     // 表单类弹窗（课程编辑）要宽一点，普通弹窗保持窄卡片
     card.classList[opts.wide ? 'add' : 'remove']('modal-wide');
+    card.classList[opts.fixed ? 'add' : 'remove']('modal-fixed');
     card.innerHTML = '';
     var head = el('<div class="modal-head"><div><h3 class="modal-title">' + U.escapeHtml(opts.title || '') + '</h3>'
       + (opts.sub ? '<p class="modal-sub">' + U.escapeHtml(opts.sub) + '</p>' : '') + '</div>'
@@ -9099,6 +9102,7 @@ var AR = window.AR || (window.AR = {});
     openModal({
       title: '作业统计',
       sub: '共 ' + (st0.total || 0) + ' 条 · 本学期',
+      fixed: true,
       body: body
     });
     if (typeof requestAnimationFrame === 'function') {
@@ -11102,6 +11106,402 @@ var AR = window.AR || (window.AR = {});
     root.style.setProperty('--dur-focus', Math.round(300 / speed) + 'ms');
   }
 
+  /* ══════════════════════════════════════════════════════════════
+     年度 / 月度报告（v0.5.3）
+
+     入口：长按卡底的三个按钮（作业统计… / 数据分析 / 日程总览）520ms。
+     三个入口各看各的域（hw / todo / agenda），口径都在 AR.Store.reportStats
+     里算好，这里只管排版；复用 .tk-* 的视觉与 AR.Motion 的进场。
+     ══════════════════════════════════════════════════════════════ */
+
+  var YR = { domain: 'hw', mode: 'year', year: 0, month: 0, sel: '' };
+  var YR_META = {
+    hw: { name: '作业', unit: '条' },
+    todo: { name: '任务', unit: '次' },
+    agenda: { name: '日程', unit: '项' }
+  };
+
+  function yrPct(a, b) { return b ? Math.round(a / b * 100) : 0; }
+
+  function yrKpi(label, value, unit, barPct, sub, subCls) {
+    return '<div class="tk-yr-kpi"><div class="tk-yr-kl">' + U.escapeHtml(label) + '</div>'
+      + '<div class="tk-yr-kv">' + value + (unit ? '<i>' + U.escapeHtml(unit) + '</i>' : '') + '</div>'
+      + (barPct != null ? '<div class="tk-yr-kbar"><i style="width:' + Math.max(0, Math.min(100, barPct)) + '%"></i></div>' : '')
+      + (sub ? '<div class="tk-yr-ks' + (subCls ? ' ' + subCls : '') + '">' + sub + '</div>' : '')
+      + '</div>';
+  }
+
+  /** 热力图分档：按整段最大值分四档（和 12 周贡献图同一套观感） */
+  function yrLevel(v, mx) {
+    if (!v) { return ''; }
+    var t = v / (mx || 1);
+    return t <= 0.25 ? ' l1' : (t <= 0.55 ? ' l2' : ' l3');
+  }
+
+  /**
+   * 一段热力图（季度块 / 单月）：从周一铺到周日，范围外的日子留白。
+   * byDay: { 'YYYY-MM-DD': n }
+   */
+  function yrGridHTML(byDay, firstK, lastK, mx, todayK) {
+    var first = U.parseDateKey(firstK), last = U.parseDateKey(lastK);
+    if (!first || !last) { return ''; }
+    var start = U.mondayOf(first);
+    var cols = Math.max(1, Math.ceil((Math.round((U.parseDateKey(lastK) - U.parseDateKey(U.dateKey(start))) / 86400000) + 1) / 7));
+    var grid = '', mh = '', lastM = -1;
+    for (var c = 0; c < cols; c++) {
+      var cells = '';
+      for (var r = 0; r < 7; r++) {
+        var day = U.addDays(start, c * 7 + r);
+        var k = U.dateKey(day);
+        var inRange = k >= firstK && k <= lastK;
+        var future = k > todayK;
+        var v = byDay[k] || 0;
+        cells += '<i class="tk-yr-cell' + (inRange && !future ? yrLevel(v, mx) : ' future')
+          + (k === todayK ? ' today' : '') + (YR.sel === k ? ' sel' : '') + '"'
+          + (inRange && !future ? ' data-yr-cell="' + k + '"' : '') + '></i>';
+      }
+      var colDay = U.addDays(start, c * 7);
+      var m = colDay.getMonth();
+      /* 只在「这一列确实落在范围内」且月份变了的时候打标签，否则会把前一个月的 3 月也写出来 */
+      var colInRange = U.dateKey(colDay) >= firstK && U.dateKey(colDay) <= lastK;
+      mh += '<span>' + (m !== lastM && colInRange ? ((m + 1) + ' 月') : '') + '</span>';
+      lastM = m;
+      grid += '<div class="tk-yr-hcol">' + cells + '</div>';
+    }
+    return '<div class="tk-yr-hg">'
+      + '<div class="tk-yr-hdays"><i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><i>日</i></div>'
+      + '<div class="tk-yr-hmain"><div class="tk-yr-hmonths">' + mh + '</div>'
+      + '<div class="tk-yr-hgrid">' + grid + '</div></div></div>';
+  }
+
+  /** 折线：0–100 的比率 / 任意值都行，外部先归一 */
+  function yrLineHTML(vals, tail) {
+    var W = 300, H = 66, pad = 6, mx = 1, i;
+    for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
+    var pts = [];
+    for (i = 0; i < vals.length; i++) {
+      var x = pad + (vals.length > 1 ? i * ((W - pad * 2) / (vals.length - 1)) : 0);
+      var y = H - pad - (vals[i] / mx) * (H - pad * 2);
+      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    return '<div class="tk-yr-chart"><svg class="tk-yr-line" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none">'
+      + '<polygon class="area" points="' + pts.join(' ') + ' ' + (W - pad) + ',' + (H - pad) + ' ' + pad + ',' + (H - pad) + '"/>'
+      + '<polyline class="stroke" points="' + pts.join(' ') + '"/></svg>'
+      + '<div class="tk-yr-axis"><span>起点</span><span>' + U.escapeHtml(tail || '') + '</span><span>现在</span></div></div>';
+  }
+
+  function yrBarsHTML(vals, labels, unit) {
+    var mx = 1, i, h = '';
+    for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
+    for (i = 0; i < vals.length; i++) {
+      h += '<button class="tk-yr-m' + (i === YR.month && YR.mode === 'month' ? ' on' : '') + '" type="button"'
+        + ' data-yr-m="' + i + '" title="' + labels[i] + ' · ' + vals[i] + ' ' + unit + '">'
+        + '<span class="tk-yr-mb" style="height:' + Math.max(3, Math.round(vals[i] / mx * 46)) + 'px"></span>'
+        + '<span class="tk-yr-ml">' + labels[i] + '</span></button>';
+    }
+    return '<div class="tk-yr-months">' + h + '</div>';
+  }
+
+  function yrRowsHTML(list, unit) {
+    var h = '';
+    for (var i = 0; i < list.length && i < 8; i++) {
+      var r = list[i];
+      h += '<div class="tk-yr-lrow"><span class="tk-yr-lnm">' + U.escapeHtml(r.n) + '</span>'
+        + '<span class="tk-yr-ltrack"><i style="width:' + Math.max(0, Math.min(100, r.p)) + '%"></i></span>'
+        + '<span class="tk-yr-lval">' + r.v + '</span></div>';
+    }
+    return h ? ('<div class="tk-yr-list">' + h + '</div>') : '<p class="tk-muted">还没有记录。</p>';
+  }
+
+  function yrDetailText(byDay, unit) {
+    if (!YR.sel) { return '点一个格子看那天。'; }
+    var d = U.parseDateKey(YR.sel);
+    if (!d) { return '点一个格子看那天。'; }
+    return '<b>' + (d.getMonth() + 1) + ' 月 ' + d.getDate() + ' 日 · '
+      + U.WEEKDAY_NAMES[U.weekdayOf(d)] + '</b> · ' + (byDay[YR.sel] || 0) + ' ' + unit;
+  }
+
+  function yrRange() {
+    var today = new Date();
+    var toK = U.dateKey(today);
+    var first = AR.Store.reportFirstDay ? AR.Store.reportFirstDay(YR.domain) : '';
+    var fromK = U.dateKey(U.addDays(today, -364));
+    if (first && first > fromK && first <= toK) { fromK = first; }
+    return { fromK: fromK, toK: toK, today: today };
+  }
+
+  function yrMonthRange(year, month) {
+    var first = new Date(year, month, 1);
+    var last = new Date(year, month + 1, 0);
+    var today = new Date();
+    var fromK = U.dateKey(first);
+    var toK = U.dateKey(last > today ? today : last);
+    if (toK < fromK) { toK = fromK; }
+    return { fromK: fromK, toK: toK };
+  }
+
+  function yrPrevMonthStats() {
+    var y = YR.month === 0 ? YR.year - 1 : YR.year;
+    var m = YR.month === 0 ? 11 : YR.month - 1;
+    var r = yrMonthRange(y, m);
+    return AR.Store.reportStats(YR.domain, { from: r.fromK, to: r.toK });
+  }
+
+  function yrKPIs(R, prevR) {
+    var D = YR_META[YR.domain], active = Object.keys(R.byDay).length;
+    if (YR.domain === 'hw') {
+      var rate = yrPct(R.hw.assignedDone, R.hw.assigned);
+      var ontime = yrPct(R.hw.ok, R.hw.total);
+      if (YR.mode === 'year') {
+        return '<div class="tk-yr-kpis">'
+          + yrKpi('累计完成', R.hw.done, '条', null, R.days + ' 天')
+          + yrKpi('活跃天', active, '天', null, '占 ' + yrPct(active, R.days) + '%')
+          + yrKpi('最长连续', R.streak.best, '天', null, '当前 ' + R.streak.cur + ' 天')
+          + yrKpi('布置完成率', rate + '%', '', rate, R.hw.assignedDone + ' / ' + R.hw.assigned + ' 条布置')
+          + yrKpi('按时完成率', ontime + '%', '', ontime, '按 ' + R.hw.total + ' 条有截止日')
+          + yrKpi('逾期未完成', R.hw.overdue, '条', null, R.hw.overdue ? '需要清账' : '没有逾期', R.hw.overdue ? 'dn' : '')
+          + '</div>';
+      }
+      var avg = R.hw.spendN ? (Math.round(R.hw.spendSum / R.hw.spendN * 10) / 10) : 0;
+      var delta = R.hw.done - (prevR ? prevR.hw.done : 0);
+      return '<div class="tk-yr-kpis">'
+        + yrKpi('本月完成', R.hw.done, '条', null, (YR.month + 1) + ' 月')
+        + yrKpi('活跃天', active, '天', null, '共 ' + R.days + ' 天')
+        + yrKpi('布置完成率', rate + '%', '', rate, R.hw.assignedDone + ' / ' + R.hw.assigned + ' 条')
+        + yrKpi('按时完成率', ontime + '%', '', ontime, '按 ' + R.hw.total + ' 条')
+        + yrKpi('平均用时', avg, '天', null, '布置 → 勾掉')
+        + yrKpi('比上月', (delta >= 0 ? '+' : '−') + Math.abs(delta), '条', null,
+          '上月 ' + (prevR ? prevR.hw.done : 0) + ' 条', delta < 0 ? 'dn' : '')
+        + '</div>';
+    }
+    if (YR.domain === 'todo') {
+      var trate = yrPct(R.todo.count, R.todo.req);
+      if (YR.mode === 'year') {
+        return '<div class="tk-yr-kpis">'
+          + yrKpi('打卡次数', R.todo.count, '次', null, R.days + ' 天')
+          + yrKpi('活跃天', active, '天', null, '占 ' + yrPct(active, R.days) + '%')
+          + yrKpi('最长连续', R.streak.best, '天', null, '当前 ' + R.streak.cur + ' 天')
+          + yrKpi('计划达成率', trate + '%', '', Math.min(100, trate), R.todo.count + ' / ' + R.todo.req + ' 计划条目')
+          + yrKpi('平均每天', (Math.round(R.todo.count / R.days * 10) / 10), '次', null, '按自然日算')
+          + yrKpi('参与任务', R.todo.activeTasks, '项', null, '共 ' + R.byTask.length + ' 项')
+          + '</div>';
+      }
+      var tdelta = R.todo.count - (prevR ? prevR.todo.count : 0);
+      return '<div class="tk-yr-kpis">'
+        + yrKpi('本月打卡', R.todo.count, '次', null, (YR.month + 1) + ' 月')
+        + yrKpi('活跃天', active, '天', null, '共 ' + R.days + ' 天')
+        + yrKpi('计划达成率', trate + '%', '', Math.min(100, trate), R.todo.count + ' / ' + R.todo.req + ' 计划条目')
+        + yrKpi('平均每天', (Math.round(R.todo.count / R.days * 10) / 10), '次', null, '按自然日算')
+        + yrKpi('达标天数', R.todo.okDays, '天', null, '完成 ≥ 计划')
+        + yrKpi('比上月', (tdelta >= 0 ? '+' : '−') + Math.abs(tdelta), '次', null,
+          '上月 ' + (prevR ? prevR.todo.count : 0) + ' 次', tdelta < 0 ? 'dn' : '')
+        + '</div>';
+    }
+    return '<div class="tk-yr-kpis">'
+      + yrKpi('累计活动', R.agenda.count, '项', null, R.days + ' 天')
+      + yrKpi('有活动', R.agenda.activeDays, '天', null, '占 ' + yrPct(R.agenda.activeDays, R.days) + '%')
+      + yrKpi('最长连续', R.streak.best, '天', null, '当前 ' + R.streak.cur + ' 天')
+      + yrKpi('上课', R.agenda.cls, '节', null, '按课表展开')
+      + yrKpi('日程事件', R.agenda.ev, '个', null, '手动添加的')
+      + yrKpi('平均每天', (Math.round(R.agenda.count / R.days * 10) / 10), '项', null, '')
+      + '</div>';
+  }
+
+  function yrYearBody() {
+    var R = yrRange();
+    var S = AR.Store.reportStats(YR.domain, { from: R.fromK, to: R.toK });
+    var mx = 1, k;
+    for (k in S.byDay) { if (S.byDay[k] > mx) { mx = S.byDay[k]; } }
+    var months = S.monthOrder.slice();
+    var h = yrKPIs(S, null);
+    h += '<div class="tk-shead">全年热力图 · 一格 = 一天</div>';
+    for (var g = 0; g < months.length; g += 3) {
+      var chunk = months.slice(g, g + 3);
+      var firstM = chunk[0].split('-');
+      var lastM = chunk[chunk.length - 1].split('-');
+      var firstK = chunk[0] + '-01';
+      var lastDay = new Date(Number(lastM[0]), Number(lastM[1]), 0).getDate();
+      var lastK = chunk[chunk.length - 1] + '-' + (lastDay < 10 ? '0' + lastDay : lastDay);
+      var sub = 0;
+      for (var dk in S.byDay) {
+        if (dk >= firstK && dk <= lastK) { sub += S.byDay[dk]; }
+      }
+      h += '<div class="tk-yr-q"><div class="tk-yr-qh"><b>' + (Number(firstM[1])) + '–' + (Number(lastM[1])) + ' 月</b>'
+        + '<span>' + sub + ' ' + YR_META[YR.domain].unit + '</span></div>'
+        + yrGridHTML(S.byDay, firstK, lastK, mx, R.toK) + '</div>';
+    }
+    /* 走势：作业看每月布置完成率，任务看每月打卡次数 */
+    var vals = [], labels = [], i;
+    for (i = 0; i < months.length; i++) {
+      var m0 = S.months[months[i]];
+      labels.push(String(Number(months[i].slice(5, 7))));
+      vals.push(YR.domain === 'hw' ? yrPct(m0.ad, m0.a) : (YR.domain === 'todo' ? m0.count : m0.d + m0.cls + m0.ev));
+    }
+    if (YR.domain === 'hw') {
+      h += '<div class="tk-shead">每月布置完成率</div>' + yrLineHTML(vals, '按布置条数算');
+    }
+    h += '<div class="tk-shead">' + (YR.domain === 'hw' ? '每月完成条数' : (YR.domain === 'todo' ? '每月打卡次数' : '每月活动数')) + '</div>'
+      + yrBarsHTML(YR.domain === 'hw' ? months.map(function (m) { return S.months[m].d; }) : months.map(function (m) { return S.months[m].count; }),
+        labels, YR_META[YR.domain].unit);
+    if (YR.domain === 'todo' && S.byTask.length) {
+      var rows = S.byTask.slice(0, 8).map(function (t) {
+        return { n: t.name, v: t.count + ' / ' + t.req, p: t.rate };
+      });
+      h += '<div class="tk-shead">按任务 · 次数 / 计划</div>' + yrRowsHTML(rows, '次');
+    }
+    if (YR.domain === 'hw') {
+      var ins = '';
+      ins += '<div class="tk-ins"><span class="tk-ic">!</span><p>最长 <b>' + S.gap.max + ' 天</b>没动作业'
+        + (S.gap.from ? ('（' + hwShortDate(S.gap.from) + ' → ' + hwShortDate(S.gap.to) + '）') : '') + '。</p></div>';
+      ins += '<div class="tk-ins"><span class="tk-ic">☆</span><p>当前连续 <b>' + S.streak.cur + ' 天</b>，'
+        + '最长连续 <b>' + S.streak.best + ' 天</b>。</p></div>';
+      h += ins;
+    }
+    h += '<div class="tk-yr-detail">' + yrDetailText(S.byDay, YR_META[YR.domain].unit) + '</div>';
+    h += '<p class="tk-muted">范围：' + R.fromK + ' → ' + R.toK + '（从第一笔记录算起）。</p>';
+    return h;
+  }
+
+  function yrMonthBody() {
+    var r = yrMonthRange(YR.year, YR.month);
+    var S = AR.Store.reportStats(YR.domain, { from: r.fromK, to: r.toK });
+    var prev = yrPrevMonthStats();
+    var mx = 1, k;
+    for (k in S.byDay) { if (S.byDay[k] > mx) { mx = S.byDay[k]; } }
+    var h = '<div class="tk-yr-monthnav">'
+      + '<button class="chip-btn" type="button" data-yr-ym="-1">‹</button>'
+      + '<span class="tk-yr-mlabel">' + YR.year + ' 年 ' + (YR.month + 1) + ' 月</span>'
+      + '<button class="chip-btn" type="button" data-yr-ym="1">›</button></div>';
+    h += yrKPIs(S, prev);
+    h += '<div class="tk-shead">当月热力图 · 点格子看那天</div>'
+      + yrGridHTML(S.byDay, r.fromK, r.toK, mx, U.dateKey(new Date()));
+    if (YR.domain === 'hw' && S.byCourse.length) {
+      var rows = S.byCourse.map(function (c) { return { n: c.name, v: c.d + ' / ' + c.a, p: c.rate }; });
+      h += '<div class="tk-shead">本月按课程 · 完成 / 布置</div>' + yrRowsHTML(rows, '条');
+    }
+    if (YR.domain === 'todo' && S.byTask.length) {
+      var rows2 = S.byTask.map(function (t) { return { n: t.name, v: t.count + ' / ' + t.req, p: t.rate }; });
+      h += '<div class="tk-shead">本月按任务 · 次数 / 计划</div>' + yrRowsHTML(rows2, '次');
+    }
+    h += '<div class="tk-yr-detail">' + yrDetailText(S.byDay, YR_META[YR.domain].unit) + '</div>';
+    return h;
+  }
+
+  /** 长按 520ms 打开报告；长按触发后吞掉那次 click */
+  function bindTapHold(node, onTap, onHold, ms) {
+    if (!node || !node.addEventListener) { return; }
+    var timer = null, sx = 0, sy = 0, fired = false, pid = null;
+    function clearTimer() { if (timer) { clearTimeout(timer); timer = null; } }
+    node.addEventListener('pointerdown', function (ev) {
+      if (ev.button != null && ev.button !== 0) { return; }
+      fired = false;
+      sx = ev.clientX; sy = ev.clientY;
+      try { if (node.setPointerCapture) { node.setPointerCapture(ev.pointerId); pid = ev.pointerId; } } catch (e) { }
+      clearTimer();
+      timer = setTimeout(function () {
+        timer = null;
+        fired = true;
+        AR.Bridge.haptic('medium', node);
+        try { onHold(); } catch (e) { }
+      }, ms || 520);
+    });
+    node.addEventListener('pointermove', function (ev) {
+      if (Math.abs(ev.clientX - sx) > 8 || Math.abs(ev.clientY - sy) > 8) { clearTimer(); }
+    });
+    node.addEventListener('pointerup', function () {
+      clearTimer();
+      try { if (pid != null && node.releasePointerCapture) { node.releasePointerCapture(pid); } } catch (e) { }
+      pid = null;
+    });
+    node.addEventListener('pointercancel', function () { clearTimer(); });
+    node.addEventListener('click', function (ev) {
+      if (fired) { fired = false; if (ev.preventDefault) { ev.preventDefault(); } ev.stopPropagation(); return; }
+      try { onTap(); } catch (e) { }
+    });
+  }
+
+  function openYearReport(domain) {
+    YR.domain = domain || 'hw';
+    YR.mode = 'year';
+    var now = new Date();
+    YR.year = now.getFullYear();
+    YR.month = now.getMonth();
+    YR.sel = '';
+    var body = el('<div class="tk-yr"></div>');
+    var segWrap = el('<div class="tk-yr-seg"><div class="segmented" id="yrSeg"></div></div>');
+    var seg = segWrap.firstChild;
+    body.appendChild(segWrap);
+    var pageBox = el('<div class="tk-statpage" id="yrPage"></div>');
+    body.appendChild(pageBox);
+    var PAGES = [{ k: 'year', t: '年度' }, { k: 'month', t: '月度' }];
+    for (var i = 0; i < PAGES.length; i++) {
+      (function (pg) {
+        var b = el('<button class="seg' + (YR.mode === pg.k ? ' active' : '') + '" type="button" data-yr-page="' + pg.k + '">' + pg.t + '</button>');
+        b.addEventListener('click', function () {
+          if (YR.mode === pg.k) { return; }
+          YR.mode = pg.k;
+          YR.sel = '';
+          var all = seg.querySelectorAll('.seg');
+          for (var q = 0; q < all.length; q++) { all[q].classList.toggle('active', all[q] === b); }
+          syncSegPill(seg, true);
+          AR.Bridge.haptic('light', b);
+          paint();
+        });
+        seg.appendChild(b);
+      })(PAGES[i]);
+    }
+    function paint() {
+      pageBox.innerHTML = YR.mode === 'year' ? yrYearBody() : yrMonthBody();
+      playContentIn(pageBox);
+      var head = $('modalCard') && $('modalCard').querySelector('.modal-title');
+      if (head) { head.textContent = YR_META[YR.domain].name + (YR.mode === 'year' ? '年度报告' : '月度报告'); }
+      var cells = pageBox.querySelectorAll('[data-yr-cell]');
+      for (var c = 0; c < cells.length; c++) {
+        (function (cell) {
+          cell.addEventListener('click', function () {
+            YR.sel = (YR.sel === cell.getAttribute('data-yr-cell')) ? '' : cell.getAttribute('data-yr-cell');
+            AR.Bridge.haptic('light', cell);
+            paint();
+          });
+        })(cells[c]);
+      }
+      var bars = pageBox.querySelectorAll('[data-yr-m]');
+      for (var m = 0; m < bars.length; m++) {
+        (function (bar) {
+          bar.addEventListener('click', function () {
+            YR.mode = 'month';
+            YR.month = Number(bar.getAttribute('data-yr-m'));
+            YR.sel = '';
+            var all = seg.querySelectorAll('.seg');
+            for (var q = 0; q < all.length; q++) { all[q].classList.toggle('active', all[q].getAttribute('data-yr-page') === 'month'); }
+            syncSegPill(seg, true);
+            paint();
+          });
+        })(bars[m]);
+      }
+      var nav = pageBox.querySelectorAll('[data-yr-ym]');
+      for (var n = 0; n < nav.length; n++) {
+        (function (btn) {
+          btn.addEventListener('click', function () {
+            var d = Number(btn.getAttribute('data-yr-ym'));
+            YR.month += d;
+            if (YR.month < 0) { YR.month = 11; YR.year--; }
+            if (YR.month > 11) { YR.month = 0; YR.year++; }
+            YR.sel = '';
+            AR.Bridge.haptic('light', btn);
+            paint();
+          });
+        })(nav[n]);
+      }
+      void head;
+    }
+    paint();
+    openModal({ title: YR_META[YR.domain].name + '年度报告', sub: '', body: body, fixed: true });
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
+    }
+  }
+
   AR.UI = {
     init: init,
     show: show,
@@ -11127,6 +11527,7 @@ var AR = window.AR || (window.AR = {});
     applyOdStyle: applyOdStyle,
     applyHeatSize: applyHeatSize,
     openHomeworkStats: openHomeworkStats,
+    openYearReport: openYearReport,
     applyPerf: applyPerf,
     applyMotion: applyMotion,
     applyLayout: applyLayout,
@@ -11384,6 +11785,46 @@ var AR = window.AR || (window.AR = {});
     if (i > arr.length - 1) { i = arr.length - 1; }
     return arr[i];
   }
+  /** 全局贡献图（v0.5.3）：最近 12 周「所有任务合计」的每日打卡次数 */
+  function tkGhAllHTML() {
+    var today = new Date();
+    var todayK = U.dateKey(today);
+    var mon = U.addDays(U.mondayOf(today), -11 * 7);
+    var monK = U.dateKey(mon);
+    var sums = {}, vals = [], i, j;
+    var todos = AR.Store.todoList ? AR.Store.todoList() : [];
+    for (i = 0; i < todos.length; i++) {
+      var ents = AR.Store.todoLiveEntries ? AR.Store.todoLiveEntries(todos[i]) : (todos[i].entries || []);
+      for (j = 0; j < ents.length; j++) {
+        var k = AR.Store.todoEntryDay ? AR.Store.todoEntryDay(ents[j]) : '';
+        if (!k || k < monK || k > todayK) { continue; }
+        sums[k] = (sums[k] || 0) + 1;
+      }
+    }
+    Object.keys(sums).forEach(function (k2) { if (sums[k2] > 0) { vals.push(sums[k2]); } });
+    vals.sort(function (a, b) { return a - b; });
+    var p25 = tkPctl(vals, .25), p50 = tkPctl(vals, .5), p75 = tkPctl(vals, .75);
+    var cols = '', w, wd;
+    for (w = 0; w < 12; w++) {
+      var cells = '';
+      for (wd = 0; wd < 7; wd++) {
+        var dk = U.dateKey(U.addDays(mon, w * 7 + wd));
+        var v = sums[dk] || 0;
+        var lv = 0;
+        if (v > 0) { lv = v <= p25 ? 1 : (v <= p50 ? 2 : (v <= p75 ? 3 : 4)); }
+        cells += '<i class="tk-gh-cell' + (lv ? ' l' + lv : '') + (dk > todayK ? ' future' : '')
+          + (dk === todayK ? ' today' : '') + '" title="' + dk + ' · ' + v + ' 次"></i>';
+      }
+      cols += '<div class="tk-gh-col">' + cells + '</div>';
+    }
+    return '<div class="tk-gh"><div class="tk-gh-days">'
+      + '<i>一</i><i>二</i><i>三</i><i>四</i><i>五</i><i>六</i><i>日</i></div>'
+      + '<div class="tk-gh-main"><div class="tk-gh-grid">' + cols + '</div></div></div>'
+      + '<div class="tk-gh-legend"><span>少</span>'
+      + '<i class="tk-gh-cell"></i><i class="tk-gh-cell l1"></i><i class="tk-gh-cell l2"></i>'
+      + '<i class="tk-gh-cell l3"></i><i class="tk-gh-cell l4"></i><span>多</span></div>';
+  }
+
   /* ── 贡献图：12 周 × 7 天，配色随主题色 ── */
   function tkGhGrid(t) {
     var mon = U.addDays(U.mondayOf(new Date()), -(TK_GH_WEEKS - 1) * 7);
@@ -11769,6 +12210,7 @@ var AR = window.AR || (window.AR = {});
         + tkStatKpi('当前连续', D.bestCur, '天', null, null)
         + tkStatKpi('最长连续', D.bestEver, '天', null, null)
         + '</div>';
+      h += '<div class="tk-shead">最近 12 周 · 所有任务合计</div>' + tkGhAllHTML();
       h += '<div class="tk-shead">近 30 天 · 每天完成次数</div>' + tkStatBars(D.daily);
       h += '<div class="tk-shead">星期分布</div>';
       for (i = 0; i < 7; i++) {
@@ -11868,7 +12310,7 @@ var AR = window.AR || (window.AR = {});
     }
     paintPage();
 
-    openModal({ title: '任务数据分析', sub: U.dateKey(new Date()), body: body, actions: [] });
+    openModal({ title: '任务数据分析', sub: U.dateKey(new Date()), body: body, actions: [], fixed: true });
     /* 弹窗进 DOM 之后再量滑块（否则 offsetWidth=0 画不出来） */
     if (typeof requestAnimationFrame === 'function') {
       requestAnimationFrame(function () { try { syncSegPill(seg, false); } catch (e) { } });
@@ -11932,7 +12374,9 @@ var AR = window.AR || (window.AR = {});
     /* ── 卡底按钮 ── */
     var foot = el('<div class="tk-foot"></div>');
     var stBtn = el('<button class="tk-fbtn" type="button">数据分析</button>');
-    stBtn.addEventListener('click', function () { AR.Bridge.haptic('light', stBtn); openTaskStats(); });
+    /* 点按 = 数据分析；长按 520ms = 年度/月度报告 */
+    bindTapHold(stBtn, function () { AR.Bridge.haptic('light', stBtn); openTaskStats(); },
+      function () { openYearReport('todo'); });
     var addBtn = el('<button class="tk-fbtn tk-fbtn-p" type="button">＋ 新建任务</button>');
     addBtn.addEventListener('click', function () { AR.Bridge.haptic('light', addBtn); openTaskEdit(null); });
     foot.appendChild(stBtn); foot.appendChild(addBtn);
