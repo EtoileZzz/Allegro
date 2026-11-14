@@ -1849,7 +1849,7 @@
 })();
 
 
-/* 宿主入口：长按底栏「导入 / 我的」520ms（委托到 document，底栏被重渲染也不会丢） */
+/* 宿主入口：长按底栏 / 侧栏「导入 · 我的」520ms（pointer + touch 双保险） */
 (function () {
   var timer = null, sx = 0, sy = 0, fired = false;
   function tabOf(e) {
@@ -1859,25 +1859,51 @@
     if (!t) { return null; }
     return (t.closest('.tabbar') || t.closest('.rail')) ? t : null;
   }
+  function openWhisper() {
+    try {
+      if (window.__whisper && window.__whisper.open) { window.__whisper.open(); return; }
+      if (window.AR && AR.Whisper && AR.Whisper.open) { AR.Whisper.open(); return; }
+      if (window.AR && AR.UI && AR.UI.toast) { AR.UI.toast('Whisper 没加载出来'); }
+    } catch (err) {
+      try { if (window.AR && AR.UI && AR.UI.toast) { AR.UI.toast('Whisper 打不开：' + (err && err.message)); } } catch (e2) { }
+    }
+  }
+  function start(x, y) {
+    sx = x; sy = y; fired = false;
+    if (timer) { clearTimeout(timer); }
+    timer = setTimeout(function () { timer = null; fired = true; openWhisper(); }, 520);
+  }
+  function move(x, y) {
+    if (timer && (Math.abs(x - sx) > 8 || Math.abs(y - sy) > 8)) { clearTimeout(timer); timer = null; }
+  }
+  function stop() { if (timer) { clearTimeout(timer); timer = null; } }
+
   document.addEventListener('pointerdown', function (e) {
     var t = tabOf(e);
     if (!t) { return; }
-    sx = e.clientX; sy = e.clientY; fired = false;
-    if (timer) { clearTimeout(timer); }
-    timer = setTimeout(function () { timer = null; fired = true; try { window.__whisper.open(); } catch (err) { } }, 520);
+    start(e.clientX, e.clientY);
   }, true);
-  document.addEventListener('pointermove', function (e) {
-    if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) { clearTimeout(timer); timer = null; }
-  }, true);
-  /* 电脑宽屏：双击左侧栏同名项也能进（单击仍走原来的导航） */
-  document.addEventListener('dblclick', function (e) {
+  document.addEventListener('pointermove', function (e) { move(e.clientX, e.clientY); }, true);
+  ['pointerup', 'pointercancel'].forEach(function (ev) { document.addEventListener(ev, stop, true); });
+
+  document.addEventListener('touchstart', function (e) {
     var t = tabOf(e);
-    if (!t) { return; }
-    try { window.__whisper.open(); } catch (err) { }
-  }, true);
-  ['pointerup', 'pointercancel'].forEach(function (ev) {
-    document.addEventListener(ev, function () { if (timer) { clearTimeout(timer); timer = null; } }, true);
+    if (!t || !e.touches || !e.touches.length) { return; }
+    start(e.touches[0].clientX, e.touches[0].clientY);
+  }, { capture: true, passive: true });
+  document.addEventListener('touchmove', function (e) {
+    if (!e.touches || !e.touches.length) { return; }
+    move(e.touches[0].clientX, e.touches[0].clientY);
+  }, { capture: true, passive: true });
+  ['touchend', 'touchcancel'].forEach(function (ev) {
+    document.addEventListener(ev, stop, { capture: true, passive: true });
   });
+
+  /* 电脑宽屏：双击侧栏同名项也能进（单击仍走原来的导航） */
+  document.addEventListener('dblclick', function (e) {
+    if (!tabOf(e)) { return; }
+    openWhisper();
+  }, true);
   document.addEventListener('click', function (e) {
     if (fired) { fired = false; e.preventDefault(); e.stopPropagation(); }
   }, true);
@@ -1889,15 +1915,7 @@ window.AR.Whisper = {
   open: function () { try { window.__whisper.open(); } catch (e) { } },
   close: function () { try { window.__whisper.close(); } catch (e) { } },
   data: function () { try { return window.__whisper.state(); } catch (e) { return null; } },
-  state: function () {
-    try {
-      var s0 = window.__whisper && window.__whisper.state ? window.__whisper.state() : null;
-      if (s0) { return s0; }
-      var raw = localStorage.getItem('abbeyroad.whisper.v1');
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
-  },
-  setState: function (o) { try { S = o; save(); } catch (e) { } },
+  state: function () { try { return window.__whisper.state(); } catch (e) { return null; } },
   save: function (o) {
     try {
       if (o && typeof o === 'object' && window.__whisper && window.__whisper.setState) { window.__whisper.setState(o); return; }
@@ -1909,17 +1927,6 @@ window.AR.Whisper = {
   changePin: function () { try { window.__whisper.changePin(); } catch (e) { } },
   openTrash: function () { try { window.__whisper.trash(); } catch (e) { } },
   openExport: function () { try { window.__whisper.exportSheet(); } catch (e) { } },
-  /* 从应用设置里直接导出当前本（不弹 Whisper 浮层） */
-  exportCurrent: function () {
-   whenReady(function () {
-    try {
-      var files = buildMd('single');
-      if (!files || !files.length) { toast('还没有内容'); return; }
-      var text = files.map(function (f) { return '# ' + f.name + '\n\n' + f.text; }).join('\n\n');
-      if (window.AR && AR.Bridge && AR.Bridge.shareText) { AR.Bridge.shareText('Whisper 导出', text); return; }
-      toast('已生成 ' + text.length + ' 字符的 Markdown');
-    } catch (e) { }
-   });
-  },
+  exportCurrent: function () { try { window.__whisper.exportCurrent(); } catch (e) { } },
   reset: function () { try { window.__whisper.resetAll(); } catch (e) { } }
 };
