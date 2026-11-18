@@ -4794,6 +4794,7 @@ function renderLongTaskList(host) {
   AR.Panels = {
     renderImport: renderImport,
     renderSettings: renderSettings,
+    openSettingsCat: openSettingsCat,
     resetSettingsHome: resetSettingsHome,
     settingsBackStep: settingsBackStep,
     settingsGoHome: settingsGoHome,

@@ -228,21 +228,21 @@ const ENTER_PIN = `(function(code){
   return true;
 })`;
 const VIS = `(function(){
-  var ids = ['s-lock','s-shelf','s-whisper','s-settings','s-composer','s-search','s-recall','s-trash','s-appset'];
+  var ids = ['s-lock','s-shelf','s-whisper','s-composer','s-search','s-recall','s-trash'];
   var on = [];
   ids.forEach(function (id) { var el = document.getElementById(id); if (el && !el.hidden) { on.push(id); } });
   var root = document.getElementById('whRoot');
   var sheetOn = !!(document.getElementById('sheet') && document.getElementById('sheet').classList.contains('on'));
   var tocOn = !!(document.getElementById('toc') && document.getElementById('toc').classList.contains('on'));
   var cpOpen = !!(window.AR && AR.UI && AR.UI.colorPickerOpen && AR.UI.colorPickerOpen());
-  return { open: !!root && !root.hasAttribute('hidden'), screens: on, sheetOn: sheetOn, tocOn: tocOn, cpOpen: cpOpen, exit: window.__exit || 0 };
+  return { open: !!root && !root.hasAttribute('hidden'), sheetOnly: !!(root && root.classList.contains('wh-sheet-only')), screens: on, sheetOn: sheetOn, tocOn: tocOn, cpOpen: cpOpen, exit: window.__exit || 0 };
 })()`;
 const TOAST_INFO = `(function(){
   var t = document.getElementById('toast');
   if (!t) { return null; }
   var cs = getComputedStyle(t);
   var r = t.getBoundingClientRect();
-  return { on: t.classList.contains('on'), text: t.innerText, display: cs.display, w: r.width, h: r.height, hasBtn: !!t.querySelector('button') };
+  return { on: t.classList.contains('on'), text: t.innerText, display: cs.display, visibility: cs.visibility, opacity: cs.opacity, w: r.width, h: r.height, hasBtn: !!t.querySelector('button') };
 })()`;
 
 (async () => {
@@ -723,6 +723,37 @@ const TOAST_INFO = `(function(){
       JSON.stringify({ cardImg, plainLen: plainRes.length }));
     await page.shot('09-评论与单条日记卡片图.png');
     await page.ev("AR.onBack(); true"); // 关卡片预览 sheet
+    await sleep(1700);
+
+    /* 再打开一次长按动作表校验全量单色 SVG 图标（不被 app.css .ico 实底色块盖住）与闲置 #toast 不露白点，并截图保存 */
+    const actionCheck = await page.ev(`(function(){
+      var ent = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
+      ent.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 111, isPrimary: true }));
+      return new Promise(function(r){ setTimeout(function(){
+        ent.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 111, isPrimary: true }));
+        var t = document.getElementById('toast');
+        var tcs = t ? getComputedStyle(t) : null;
+        var ico = document.querySelector('#sheet .row .ico');
+        var ics = ico ? getComputedStyle(ico) : null;
+        r({
+          gridSvg: document.querySelectorAll('#sheet .ea-grid button i svg.wh-svg').length,
+          rowSvg: document.querySelectorAll('#sheet .row .ico svg.wh-svg').length,
+          icoBg: ics ? ics.backgroundColor : '',
+          toastOn: !!(t && t.classList.contains('on')),
+          toastOpacity: tcs ? tcs.opacity : '',
+          toastVis: tcs ? tcs.visibility : '',
+          noDemoScreens: !document.getElementById('s-settings') && !document.getElementById('s-appset')
+        });
+      }, 600); });
+    })()`);
+    ok('长按动作表全部改用单色 SVG 图标（无底色方块）、闲置 #toast 彻底隐藏（无白点）且 demo 屏已移除',
+      actionCheck && actionCheck.gridSvg === 4 && actionCheck.rowSvg === 5
+      && (actionCheck.icoBg === 'rgba(0, 0, 0, 0)' || actionCheck.icoBg === 'transparent')
+      && !actionCheck.toastOn && (actionCheck.toastOpacity === '0' || actionCheck.toastVis === 'hidden')
+      && actionCheck.noDemoScreens,
+      JSON.stringify(actionCheck));
+    await page.shot('09b-长按动作表SVG与无白点.png');
+    await page.ev("AR.onBack(); true"); // 关动作表
     await sleep(150);
 
     /* ── 5c. 私密笔记本长按标题解锁与隐藏防漏 + 退出自动重新隐藏 ── */
@@ -777,6 +808,48 @@ const TOAST_INFO = `(function(){
       cloudBtnProg && cloudBtnProg.found && cloudBtnProg.btnCount >= 3
       && cloudBtnProg.text.indexOf('课表与配置云同步') >= 0 && cloudBtnProg.text.indexOf('同步 Whisper 配图') >= 0,
       JSON.stringify({ found: cloudBtnProg && cloudBtnProg.found, count: cloudBtnProg && cloudBtnProg.btnCount }));
+
+    /* ── 5e. 从主设置进回收站 / 导出 / 导入的来源返回 ── */
+    await page.ev(`(function(){
+      AR.UI.show('settings');
+      if (AR.Panels && AR.Panels.openSettingsCat) { AR.Panels.openSettingsCat('whisper'); }
+      return true;
+    })()`);
+    await sleep(120);
+    await page.ev(`(function(){
+      AR.Whisper.openTrash();
+      var st = document.getElementById('s-lock');
+      if (st && !st.hidden) {
+        '123456'.split('').forEach(function(d){ var b = document.querySelector('#pad [data-k="'+d+'"]'); if (b) b.click(); });
+      }
+      return true;
+    })()`);
+    await sleep(250);
+    const inTrash = await page.ev(VIS);
+    await page.shot('11-主设置进回收站.png');
+    await page.ev('AR.onBack(); true');
+    await sleep(180);
+    const afterTrashBack = await page.ev(VIS);
+    ok('主设置进回收站后按返回直接关闭 Whisper 回主设置（不再进 demo 设置页）',
+      inTrash.open && inTrash.screens.indexOf('s-trash') >= 0 && !afterTrashBack.open && afterTrashBack.screens.length === 0,
+      JSON.stringify({ inTrash, afterTrashBack }));
+
+    await page.ev(`(function(){
+      AR.Whisper.openExport();
+      var st = document.getElementById('s-lock');
+      if (st && !st.hidden) {
+        '123456'.split('').forEach(function(d){ var b = document.querySelector('#pad [data-k="'+d+'"]'); if (b) b.click(); });
+      }
+      return true;
+    })()`);
+    await sleep(220);
+    const expVis = await page.ev(VIS);
+    await page.ev('AR.onBack(); true');
+    await sleep(260);
+    const afterExpBack = await page.ev(VIS);
+    ok('主设置进导出日记以独立蒙层弹出且关闭后直接退回主设置',
+      expVis.open && expVis.sheetOnly && expVis.sheetOn && !afterExpBack.open,
+      JSON.stringify({ expVis, afterExpBack }));
 
     /* ── 6. 控制台必须干净 ── */
     ok('全程控制台没有 error / 未捕获异常', page.errors.length === 0, page.errors.slice(0, 3).join(' | '));

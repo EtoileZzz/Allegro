@@ -166,9 +166,13 @@
 .wh-root .acthead .m{flex:1 1 auto;min-width:0}
 .wh-root .acthead .m .l{font-size:10.5px;color:var(--w-mid)}
 .wh-root .acthead .m .x{font-family:var(--font-serif);font-size:13px;line-height:1.6;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.wh-root .sheet .row .ico{width:18px;text-align:center;color:var(--w-mid);font-size:13px}
+.wh-root .sheet .row .ico{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 18px;background:transparent!important;color:var(--w-mid);font-size:13px}
 .wh-root .sheet .row.danger{color:var(--w-a1)}
-.wh-root .sheet .row.danger .ico{color:var(--w-a1)}
+.wh-root .sheet .row.danger .ico{background:transparent!important;color:var(--w-a1)}
+.wh-root .wh-svg{width:16px;height:16px;display:block;flex:0 0 auto}
+.wh-root .sheet .row .ico .wh-svg{width:15px;height:15px}
+.wh-root .wh-lock-ic{display:inline-flex;align-items:center;vertical-align:-2px;color:var(--w-a1)}
+.wh-root .wh-lock-ic .wh-svg{width:12px;height:12px}
 .wh-root .trash{padding:8px 14px 28px}
 .wh-root .trash .sec{font-size:10.5px;color:var(--w-mid);margin:16px 2px 6px;letter-spacing:.5px}
 .wh-root .trash .trow{display:flex;align-items:flex-start;gap:10px;padding:11px 2px;border-top:1px solid var(--w-subtle)}
@@ -179,7 +183,8 @@
 .wh-root .trash .trow .acts{flex:0 0 auto;display:flex;flex-direction:column;gap:4px}
 .wh-root .trash .trow button{border:1px solid var(--w-subtle);background:transparent;color:var(--w-fg);font:inherit;font-size:10.5px;padding:4px 8px;border-radius:8px;cursor:pointer}
 .wh-root .trash .trow button.del{color:var(--w-a1);border-color:var(--w-a1)}
-.wh-root .trash .empty{font-size:11.5px;color:var(--w-mid);padding:8px 2px}
+.wh-root .trash .empty{font-size:11.5px;color:var(--w-mid);padding:8px 2px;text-align:left}
+.wh-root #trClear{width:auto;padding:0 8px;font-size:12.5px;white-space:nowrap;color:var(--w-a1)}
 .wh-root .stats4{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
 .wh-root .stats4 .s{border:1px solid var(--w-subtle);border-radius:12px;padding:10px 11px}
 .wh-root .stats4 .s .k{font-size:10px;color:var(--w-mid)}
@@ -222,8 +227,9 @@
 .wh-root .personachips button{font-family:var(--font-serif);border:1px solid var(--w-subtle);background:transparent;color:var(--w-mid);font:inherit;font-size:11.5px;padding:5px 10px;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
 .wh-root .personachips button.on{border-color:var(--w-a1);color:var(--w-a1)}
 .wh-root .composer .save{border:0;border-radius:12px;background:var(--w-a1);color:#fff;font:inherit;font-size:13px;font-weight:600;padding:12px;cursor:pointer;width:100%;margin-top:10px}
-.wh-root .toast{position:absolute;left:50%;bottom:100px;transform:translate(-50%,10px);background:var(--w-fg);color:var(--w-bg);font-size:12px;padding:9px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.2s;z-index:30;max-width:80%;display:flex;align-items:center}
-.wh-root .toast.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+.wh-root .toast{position:absolute;left:50%;bottom:100px;transform:translate(-50%,10px);background:var(--w-fg);color:var(--w-bg);font-size:12px;padding:9px 14px;border-radius:12px;opacity:0;visibility:hidden;pointer-events:none;transition:.2s;animation:none!important;z-index:30;max-width:80%;display:flex;align-items:center}
+.wh-root .toast:empty{padding:0;border:0}
+.wh-root .toast.on{opacity:1;visibility:visible;transform:translate(-50%,0);pointer-events:auto;animation:none!important}
 .wh-root .topbar .title b{font-family:var(--font-serif);font-size:15px;letter-spacing:.3px}
 .wh-root .book .name{font-family:var(--font-serif);font-size:17px;letter-spacing:.2px}
 .wh-root .shelf.min .book .name{font-size:15.5px}
@@ -270,11 +276,6 @@
 .wh-root .books.min .book .name{font-size:15px}
 .wh-root .books.min .book .spine{width:3px;height:22px;align-self:center}
 .wh-root .books .arch{font-family:var(--font-serif);font-size:10.5px;letter-spacing:1px;color:var(--w-mid);margin:16px 16px 4px}
-.wh-root .appset{padding:6px 14px 26px}
-.wh-root .appset .sec{font-family:var(--font-serif);font-size:11px;letter-spacing:1px;color:var(--w-mid);margin:16px 2px 6px}
-.wh-root .appset .row{display:flex;align-items:center;gap:10px;width:100%;padding:13px 2px;border:0;border-top:1px solid var(--w-subtle);background:transparent;color:var(--w-fg);font:inherit;font-size:13px;text-align:left;cursor:pointer}
-.wh-root .appset .row:first-of-type{border-top:0}
-.wh-root .appset .row .r{margin-left:auto;color:var(--w-mid);font-size:11.5px}
 .wh-root .heat{margin:2px 0 6px}
 .wh-root .heat .months{display:flex;gap:3px;margin:0 0 4px 0;font-size:9px;color:var(--w-mid);font-family:var(--font-serif);letter-spacing:.5px}
 .wh-root .heat .grid{display:flex;gap:2px}
@@ -297,6 +298,7 @@
 
 /* ── 宿主适配（手写，勿被生成覆盖） ── */
 .wh-root{position:fixed;inset:0;z-index:9500;display:flex;flex-direction:column;overflow:hidden;background:var(--w-bg);color:var(--w-fg);border:0;border-radius:0;box-shadow:none;max-width:none;height:auto;width:auto}
+.wh-root.wh-sheet-only{background:transparent!important}
 .wh-root[hidden]{display:none!important}
 body.wh-open{overflow:hidden}
 
@@ -306,9 +308,10 @@ body.wh-open{overflow:hidden}
 .wh-root .row{background:transparent!important}
 .wh-root .row .r{color:var(--w-mid)}
 .wh-root .btn{background:transparent;color:var(--w-mid);border:0;box-shadow:none}
+.wh-root .dot{box-shadow:none}
 .wh-root .chip{background:var(--w-subtle);color:var(--w-fg)}
-.wh-root .field{color:var(--w-mid)}
-.wh-root .sheet .row{border-top:1px solid var(--w-subtle)}
+.wh-root .field{color:var(--w-mid);margin-bottom:0}
+.wh-root .sheet .row{border-top:1px solid var(--w-subtle);flex-wrap:nowrap}
 .wh-root .toast{background:var(--w-fg);color:var(--w-bg)}
 
 /* 深色下略提对比 */
@@ -340,7 +343,8 @@ body.wh-open{overflow:hidden}
 .wh-root .entry-media.n1 .m-thumb img{height:auto;max-height:240px;object-fit:contain}
 .wh-root .entry-media .m-miss{display:flex;align-items:center;justify-content:center;padding:12px;font-size:11px;color:var(--w-mid);text-align:center;min-height:64px}
 .wh-root .media-bar{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
-.wh-root .media-pick{border:1px dashed var(--w-mid);background:transparent;color:var(--w-fg);font:inherit;font-size:11.5px;padding:5px 10px;border-radius:999px;cursor:pointer}
+.wh-root .media-pick{border:1px dashed var(--w-mid);background:transparent;color:var(--w-fg);font:inherit;font-size:11.5px;padding:5px 10px;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.wh-root .media-pick .wh-svg{width:14px;height:14px}
 .wh-root .media-draft{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 .wh-root .media-draft .md-item{position:relative;width:58px;height:58px;border-radius:10px;overflow:hidden;border:1px solid var(--w-subtle);background:var(--w-subtle)}
 .wh-root .media-draft .md-item img{width:100%;height:100%;object-fit:cover;display:block}
@@ -367,8 +371,9 @@ body.wh-open{overflow:hidden}
 
 /* ── 长按优化动作格 + 卡片图预览 ── */
 .wh-root .ea-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 8px}
-.wh-root .ea-grid button{border:1px solid var(--w-subtle);background:transparent;color:var(--w-fg);border-radius:12px;padding:10px 4px;font:inherit;font-size:11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px}
-.wh-root .ea-grid button i{font-style:normal;font-size:16px;line-height:1}
+.wh-root .ea-grid button{border:1px solid var(--w-subtle);background:transparent;color:var(--w-fg);border-radius:12px;padding:10px 4px;font:inherit;font-size:11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:5px}
+.wh-root .ea-grid button i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;line-height:1}
+.wh-root .ea-grid button i .wh-svg{width:18px;height:18px}
 .wh-root .ea-grid button:hover{border-color:var(--w-mid)}
 .wh-root .card-preview-wrap{background:var(--w-subtle);border-radius:12px;padding:8px;text-align:center;max-height:50vh;overflow-y:auto}
 .wh-root .card-preview-wrap img{max-width:100%;height:auto;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);display:block;margin:0 auto}

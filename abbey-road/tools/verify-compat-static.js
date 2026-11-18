@@ -999,6 +999,20 @@ ok('C14b Windows 四处版本号与 APP_VERSION 一致',
     && whCss.indexOf('.wh-sync-btn') >= 0
     && whCss.indexOf('.ea-grid') >= 0);
 
+  ok('C227 Whisper 清理 demo 残留屏/原型文案、全换单色 SVG、隔离 .toast 动画并补齐外部入口返回栈',
+    whJs.indexOf('id=\\"s-settings\\"') < 0
+    && whJs.indexOf('id=\\"s-appset\\"') < 0
+    && whJs.indexOf('原型模拟') < 0
+    && whJs.indexOf('function svgIco(') >= 0
+    && !/[\u{1F300}-\u{1FAFF}]/u.test(whJs)
+    && whJs.indexOf("if (ret === 'close') { closeRoot(); return; }") >= 0
+    && whJs.indexOf('function openStandaloneAction(') >= 0
+    && panels5.indexOf('openSettingsCat: openSettingsCat') >= 0
+    && whCss.indexOf('animation:none!important') >= 0
+    && whCss.indexOf('background:transparent!important') >= 0
+    && whCss.indexOf('#trClear') >= 0
+    && whCss.indexOf('.wh-root.wh-sheet-only') >= 0);
+
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

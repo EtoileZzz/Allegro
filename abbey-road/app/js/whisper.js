@@ -1,8 +1,8 @@
-/* 由 demo 自动生成；改结构请改 demo 再生成 */
+/* Whisper 模块 */
 (function () {
   'use strict';
   if (document.getElementById('whRoot')) { return; }
-  var tpl = "<div class=\"wh-root\" id=\"whRoot\" hidden>\n\n  <section class=\"screen lock\" id=\"s-lock\" hidden>\n    <div class=\"icn\">✦</div>\n    <div style=\"text-align:center\"><h2 id=\"lockTitle\">输入 PIN</h2><p id=\"lockSub\">Whisper 已上锁</p></div>\n    <div class=\"pin\" id=\"pinDots\"></div>\n    <div class=\"pad\" id=\"pad\"></div>\n    <button class=\"linkrow\" id=\"bioBtn\">使用生物识别（原型模拟）</button>\n    <button class=\"linkrow\" id=\"skipBtn\" style=\"color:var(--w-mid)\">先不设锁，直接进入</button>\n  </section>\n\n  <section class=\"screen\" id=\"s-shelf\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"shBack\">‹</button>\n      <span style=\"width:68px;flex:0 0 auto\"></span>\n      <div class=\"title\"><b id=\"shTitle\" style=\"font-family:var(--font-serif);font-size:17px;letter-spacing:.6px\">Whisper</b><span id=\"shSub\"></span></div>\n      <button class=\"btn\" id=\"shSearch\">⌕</button>\n      <button class=\"btn\" id=\"shRecall\" title=\"回顾\">◷</button>\n      <button class=\"btn\" id=\"shNew\">＋</button>\n    </div>\n    <div class=\"scroll\"><div class=\"shelf\" id=\"shelfList\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-whisper\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"wBack\">‹</button>\n      <div class=\"title\"><b id=\"wTitle\" style=\"font-family:var(--font-serif);font-size:21px;letter-spacing:.5px;max-width:250px\">—</b><span id=\"wSub\" style=\"display:none\"></span></div>\n      <button class=\"btn\" id=\"wMenu\">⋯</button>\n    </div>\n    <div class=\"pullhint\" id=\"pullHint\">下拉写一条</div>\n    <div class=\"scroll\" id=\"wBody\"></div>\n    <button class=\"fab\" id=\"wWrite\">✎</button>\n  </section>\n\n  <section class=\"screen\" id=\"s-appset\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"asBack\">‹</button><div class=\"title\"><b>设置</b><span>应用</span></div><span style=\"width:30px\"></span></div>\n    <div class=\"scroll\"><div class=\"appset\" id=\"appsetList\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-settings\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"stBack\">‹</button>\n      <div class=\"title\"><b>Whisper 设置</b><span>只影响 Whisper 内部</span></div>\n      <span style=\"width:30px\"></span>\n    </div>\n    <div class=\"scroll\"><div class=\"settings\" id=\"settingsList\"></div></div>\n  </section>\n\n  <section class=\"screen composer\" id=\"s-composer\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"cCancel\">✕</button>\n      <div class=\"title\"><b>写一条</b><span id=\"cWhen\"></span></div>\n      <button class=\"btn\" id=\"cSave\">✓</button>\n    </div>\n    <div class=\"body\">\n      <textarea id=\"cText\"></textarea>\n      <div class=\"media-bar\"><button class=\"media-pick\" type=\"button\" id=\"cImgBtn\">🖼 添加图片</button><input type=\"file\" id=\"cImgIn\" accept=\"image/*\" multiple style=\"display:none\"></div>\n      <div class=\"media-draft\" id=\"cMediaList\"></div>\n      <div class=\"meta\">\n        <div class=\"field\" style=\"margin-top:0\">Persona</div>\n        <div class=\"personachips\" id=\"cPersona\"></div>\n        <div class=\"field\">写进</div>\n        <div class=\"personachips\" id=\"cBook\"></div>\n        <button class=\"save\" id=\"cSave2\">保存</button>\n      </div>\n    </div>\n  </section>\n\n  <section class=\"screen\" id=\"s-search\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"srBack\">‹</button><div class=\"title\"><b>搜索</b><span id=\"srSub\">当前本</span></div><button class=\"btn\" id=\"srScope\" style=\"width:auto;padding:0 8px;font-size:11.5px;color:var(--w-a2)\">当前本</button></div>\n    <div class=\"searchbar\"><input id=\"srInput\" placeholder=\"搜标题或正文…\" autocomplete=\"off\"><button class=\"x\" id=\"srClear\">✕</button></div>\n    <div class=\"scroll\"><div class=\"sres\" id=\"srBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-trash\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"trBack\">‹</button><div class=\"title\"><b>回收站</b><span id=\"trSub\"></span></div><button class=\"btn\" id=\"trClear\">清空</button></div>\n    <div class=\"scroll\"><div class=\"trash\" id=\"trBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-recall\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"rcBack\">‹</button><div class=\"title\"><b style=\"font-size:24px;letter-spacing:.6px\">回顾</b><span style=\"display:none\"></span></div><span style=\"width:30px\"></span></div>\n    <div class=\"scroll\"><div class=\"recall\" id=\"rcBody\"></div></div>\n  </section>\n\n  <div class=\"toc-mask\" id=\"tocMask\"></div>\n  <div class=\"toc from-right\" id=\"toc\"><div class=\"th\"><div class=\"tt\"><b>目录</b><span id=\"tocSub\"></span></div><button class=\"tc\" id=\"tocClose\">✕</button></div><div class=\"tl\" id=\"tocList\"></div></div>\n\n  <div class=\"sheet-mask\" id=\"mask\"></div>\n  <div class=\"sheet\" id=\"sheet\"></div>\n  <div class=\"wh-lightbox\" id=\"whLightbox\" hidden><div class=\"wh-lb-top\"><span id=\"lbTitle\"></span><button type=\"button\" id=\"lbSave\">保存原图</button><button type=\"button\" id=\"lbClose\">关闭</button></div><div class=\"wh-lb-stage\"><img id=\"lbImg\" alt=\"\"></div><div class=\"wh-lb-nav\"><button type=\"button\" id=\"lbPrev\">‹ 上一张</button><button type=\"button\" id=\"lbNext\">下一张 ›</button></div></div>\n  <div class=\"toast\" id=\"toast\"></div></div>";
+  var tpl = "<div class=\"wh-root\" id=\"whRoot\" hidden>\n\n  <section class=\"screen lock\" id=\"s-lock\" hidden>\n    <div class=\"icn\">✦</div>\n    <div style=\"text-align:center\"><h2 id=\"lockTitle\">输入 PIN</h2><p id=\"lockSub\">Whisper 已上锁</p></div>\n    <div class=\"pin\" id=\"pinDots\"></div>\n    <div class=\"pad\" id=\"pad\"></div>\n    <button class=\"linkrow\" id=\"bioBtn\">使用生物识别</button>\n    <button class=\"linkrow\" id=\"skipBtn\" style=\"color:var(--w-mid)\">先不设锁，直接进入</button>\n  </section>\n\n  <section class=\"screen\" id=\"s-shelf\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"shBack\">‹</button>\n      <span style=\"width:68px;flex:0 0 auto\"></span>\n      <div class=\"title\"><b id=\"shTitle\" style=\"font-family:var(--font-serif);font-size:17px;letter-spacing:.6px\">Whisper</b><span id=\"shSub\"></span></div>\n      <button class=\"btn\" id=\"shSearch\">⌕</button>\n      <button class=\"btn\" id=\"shRecall\" title=\"回顾\">◷</button>\n      <button class=\"btn\" id=\"shNew\">＋</button>\n    </div>\n    <div class=\"scroll\"><div class=\"shelf\" id=\"shelfList\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-whisper\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"wBack\">‹</button>\n      <div class=\"title\"><b id=\"wTitle\" style=\"font-family:var(--font-serif);font-size:21px;letter-spacing:.5px;max-width:250px\">—</b><span id=\"wSub\" style=\"display:none\"></span></div>\n      <button class=\"btn\" id=\"wMenu\">⋯</button>\n    </div>\n    <div class=\"pullhint\" id=\"pullHint\">下拉写一条</div>\n    <div class=\"scroll\" id=\"wBody\"></div>\n    <button class=\"fab\" id=\"wWrite\">✎</button>\n  </section>\n\n  <section class=\"screen composer\" id=\"s-composer\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"cCancel\">✕</button>\n      <div class=\"title\"><b>写一条</b><span id=\"cWhen\"></span></div>\n      <button class=\"btn\" id=\"cSave\">✓</button>\n    </div>\n    <div class=\"body\">\n      <textarea id=\"cText\"></textarea>\n      <div class=\"media-bar\"><button class=\"media-pick\" type=\"button\" id=\"cImgBtn\">添加图片</button><input type=\"file\" id=\"cImgIn\" accept=\"image/*\" multiple style=\"display:none\"></div>\n      <div class=\"media-draft\" id=\"cMediaList\"></div>\n      <div class=\"meta\">\n        <div class=\"field\" style=\"margin-top:0\">Persona</div>\n        <div class=\"personachips\" id=\"cPersona\"></div>\n        <div class=\"field\">写进</div>\n        <div class=\"personachips\" id=\"cBook\"></div>\n        <button class=\"save\" id=\"cSave2\">保存</button>\n      </div>\n    </div>\n  </section>\n\n  <section class=\"screen\" id=\"s-search\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"srBack\">‹</button><div class=\"title\"><b>搜索</b><span id=\"srSub\">当前本</span></div><button class=\"btn\" id=\"srScope\" style=\"width:auto;padding:0 8px;font-size:11.5px;color:var(--w-a2)\">当前本</button></div>\n    <div class=\"searchbar\"><input id=\"srInput\" placeholder=\"搜标题或正文…\" autocomplete=\"off\"><button class=\"x\" id=\"srClear\">✕</button></div>\n    <div class=\"scroll\"><div class=\"sres\" id=\"srBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-trash\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"trBack\">‹</button><div class=\"title\"><b>回收站</b><span id=\"trSub\"></span></div><button class=\"btn\" id=\"trClear\">清空</button></div>\n    <div class=\"scroll\"><div class=\"trash\" id=\"trBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-recall\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"rcBack\">‹</button><div class=\"title\"><b style=\"font-size:24px;letter-spacing:.6px\">回顾</b><span style=\"display:none\"></span></div><span style=\"width:30px\"></span></div>\n    <div class=\"scroll\"><div class=\"recall\" id=\"rcBody\"></div></div>\n  </section>\n\n  <div class=\"toc-mask\" id=\"tocMask\"></div>\n  <div class=\"toc from-right\" id=\"toc\"><div class=\"th\"><div class=\"tt\"><b>目录</b><span id=\"tocSub\"></span></div><button class=\"tc\" id=\"tocClose\">✕</button></div><div class=\"tl\" id=\"tocList\"></div></div>\n\n  <div class=\"sheet-mask\" id=\"mask\"></div>\n  <div class=\"sheet\" id=\"sheet\"></div>\n  <div class=\"wh-lightbox\" id=\"whLightbox\" hidden><div class=\"wh-lb-top\"><span id=\"lbTitle\"></span><button type=\"button\" id=\"lbSave\">保存原图</button><button type=\"button\" id=\"lbClose\">关闭</button></div><div class=\"wh-lb-stage\"><img id=\"lbImg\" alt=\"\"></div><div class=\"wh-lb-nav\"><button type=\"button\" id=\"lbPrev\">‹ 上一张</button><button type=\"button\" id=\"lbNext\">下一张 ›</button></div></div>\n  <div class=\"toast\" id=\"toast\"></div></div>";
   var holder = document.createElement('div');
   holder.innerHTML = tpl;
   var node = holder.firstChild;
@@ -554,11 +554,35 @@
     stage.style.setProperty('--w-a1-26', hexToRgba(t.accent.a1, 0.26));
   }
 
+  /* ── 单色线性 SVG 图标（Windows / Android 外观一致） ── */
+  var WH_ICONS = {
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    comment: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+    copy: '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    persona: '<circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"/>',
+    move: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>',
+    'export': '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+    trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+    palette: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" fill-opacity=".28"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+  };
+  function svgIco(name) {
+    var b = WH_ICONS[name] || '';
+    return '<svg class="wh-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + b + '</svg>';
+  }
+  if ($('cImgBtn')) { $('cImgBtn').innerHTML = svgIco('image') + '<span>添加图片</span>'; }
+
   /* ── 屏幕 ── */
-  var SC = { lock: 's-lock', shelf: 's-shelf', whisper: 's-whisper', settings: 's-settings', composer: 's-composer', search: 's-search', recall: 's-recall', trash: 's-trash', appset: 's-appset' };
+  var SC = { lock: 's-lock', shelf: 's-shelf', whisper: 's-whisper', composer: 's-composer', search: 's-search', recall: 's-recall', trash: 's-trash' };
   function show(name) {
     var rt = $('whRoot');
-    if (rt) { rt.removeAttribute('hidden'); document.body.classList.add('wh-open'); }
+    if (rt) {
+      rt.classList.remove('wh-sheet-only');
+      rt.removeAttribute('hidden');
+      document.body.classList.add('wh-open');
+    }
     Object.keys(SC).forEach(function (k) {
       var el = $(SC[k]);
       if (k === name) { el.hidden = false; el.classList.remove('in'); void el.offsetWidth; el.classList.add('in'); }
@@ -568,7 +592,7 @@
   function toast(m) {
     var rt = $('whRoot');
     var t = $('toast');
-    if (t && rt && !rt.hasAttribute('hidden')) {
+    if (t && rt && !rt.hasAttribute('hidden') && !rt.classList.contains('wh-sheet-only')) {
       t.innerHTML = '';
       t.textContent = m;
       t.classList.add('on');
@@ -1011,7 +1035,7 @@
     var b = bookById(S.last.bid);
     if (!b || !isBookVisible(b)) { b = visibleBooks()[0] || null; }
     if (!b) { renderShelf(); show('shelf'); return; }
-    $('wTitle').textContent = b.name + (b.hidden ? ' 🔒' : '');
+    $('wTitle').innerHTML = esc(b.name) + (b.hidden ? ' <span class="wh-lock-ic">' + svgIco('lock') + '</span>' : '');
     var all = entriesOf(b.id);
     var list = all.filter(function (e) { return S.opts.filter === 'all' || e.pid === S.opts.filter; });
     $('wSub').textContent = (b.sortDir === 'asc' ? '正序 · 旧→新' : '');
@@ -1055,178 +1079,13 @@
     });
     return h;
   }
-  /* ── 设置页 ── */
-  function openSettings() { renderSettings(); show('settings'); }
+  /* ── 设置跳转（统一走主应用设置 → Whisper） ── */
   function openAppSettings() {
     closeRoot();
-    try { var tab = document.querySelector('.tabbar .nav-btn[data-nav="settings"]'); if (tab) { tab.click(); } } catch (e0) { }
-    setTimeout(function () {
-      try {
-        var back = document.getElementById('setBackBtn');
-        if (back) { back.click(); }
-        setTimeout(function () {
-          try { var h = document.querySelector('#set-whisper .set-cat-head'); if (h) { h.click(); } } catch (e2) { }
-        }, 220);
-      } catch (e1) { }
-    }, 320);
-  }
-  function renderSettings() {
-    var t = S.theme;
-    var h = '';
-    h += '<div class="sec">外观</div>';
-    h += rowSeg('模式', 'mode', t.mode === 'night' ? 2 : (t.mode === 'app' ? 0 : 1), ['跟随应用', '纸', '夜']);
-    h += rowAction('主题预设', PRESETS[t.name] ? PRESETS[t.name].name : '自定义', 'preset');
-    h += colorRow('主文字 / 深色', t.base.dark, 'base.dark');
-    h += colorRow('浅色背景', t.base.light, 'base.light');
-    h += colorRow('次级灰', t.base.mid, 'base.mid');
-    h += colorRow('微妙背景', t.base.subtle, 'base.subtle');
-    h += colorRow('主强调', t.accent.a1, 'accent.a1');
-    h += colorRow('次强调', t.accent.a2, 'accent.a2');
-    h += colorRow('第三强调', t.accent.a3, 'accent.a3');
-    h += '<div class="sec">列表与阅读</div>';
-    h += rowSeg('列表样式', 'shelf', ({ hero: 0, grid2: 1, min: 2 })[S.opts.shelf] || 0, ['书架', '双列', '极简']);
-    h += rowSeg('排版', 'layout', S.opts.layout === 'C' ? 1 : 0, ['纸感', '卡片流']);
-    h += rowSeg('正文字体', 'font', S.opts.font === 'serif' ? 1 : 0, ['手机字体', '衬线宋']);
-    h += rowSeg('按日期分组', 'grouped', S.opts.grouped ? 0 : 1, ['开', '关']);
-    h += rowSeg('菜单样式', 'menu', S.opts.menu === 'grid' ? 1 : 0, ['列表', '动作格']);
-    h += rowSeg('写作样式', 'composer', S.opts.composer === 'full' ? 1 : 0, ['底部', '全屏']);
-    h += '<div class="sec">Persona与安全</div>';
-    h += rowAction('管理 Persona', S.personas.length + ' 位', 'personas');
-    h += rowAction('锁屏', S.lock.enabled ? (S.lock.hash ? (canBio() && S.lock.bio ? 'PIN + 生物识别' : 'PIN') : '仅生物识别') : '关闭', 'lock');
-    h += rowSeg('进入动效', 'enterFx', S.opts.enterFx === false ? 1 : 0, ['开', '关']);
-    h += rowAction('回收站', deletedEntries().length + deletedBooks().length ? (deletedEntries().length + deletedBooks().length) + ' 项' : '空', 'trash');
-    h += rowAction('导出日记 / 备份', '', 'export');
-    h += rowAction('导入日记本 (.md / .json)', '', 'import');
-    h += '<div class="sec">云同步（与课表独立开关）</div>';
-    var syncCfg = (window.AR && AR.Sync && AR.Sync.config) ? AR.Sync.config() : { syncWhisperEnabled: true, syncWhisperMedia: true };
-    h += rowSeg('日记云同步', 'whSync', syncCfg.syncWhisperEnabled !== false ? 0 : 1, ['开', '关']);
-    h += rowSeg('同步图片（云端压缩）', 'whMediaSync', syncCfg.syncWhisperMedia !== false ? 0 : 1, ['开', '关']);
-    h += '<button type="button" class="wh-sync-btn" id="whSetSyncBtn"><span class="spb-fill"></span><span class="spb-txt">立即同步 Whisper</span></button>';
-    h += '<div class="sec">其它</div>';
-    h += rowAction('清空 Whisper 数据', '', 'reset');
-    h += '';
-    $('settingsList').innerHTML = h;
-    Array.prototype.forEach.call($('settingsList').querySelectorAll('[data-act]'), function (el) {
-      el.onclick = function () { onSetting(el.getAttribute('data-act'), el.getAttribute('data-arg')); };
-    });
-    Array.prototype.forEach.call($('settingsList').querySelectorAll('[data-seg]'), function (el) {
-      Array.prototype.forEach.call(el.querySelectorAll('span'), function (sp, idx) {
-        sp.onclick = function (ev) {
-          ev.stopPropagation();
-          onSeg(el.getAttribute('data-seg'), idx);
-        };
-      });
-    });
-    var sb = $('whSetSyncBtn');
-    if (sb) {
-      sb.onclick = function () {
-        if (!(window.AR && AR.Sync && AR.Sync.isConfigured && AR.Sync.isConfigured())) {
-          toast('请先在主设置 → 云同步里填好服务端信息');
-          return;
-        }
-        var fill = sb.querySelector('.spb-fill');
-        var txt = sb.querySelector('.spb-txt');
-        sb.disabled = true;
-        if (fill) { fill.style.width = '10%'; }
-        if (txt) { txt.textContent = '准备同步…'; }
-        syncBlob(true, function (pct, msg) {
-          if (fill) { fill.style.width = Math.max(5, Math.min(100, Number(pct) || 0)) + '%'; }
-          if (txt && msg) { txt.textContent = msg; }
-        }).then(function () {
-          if (fill) { fill.style.width = '100%'; }
-          if (txt) { txt.textContent = '同步完成 ✓'; }
-          toast('Whisper 同步完成');
-          setTimeout(function () { sb.disabled = false; if (fill) { fill.style.width = '0%'; } if (txt) { txt.textContent = '立即同步 Whisper'; } }, 900);
-        }, function (err) {
-          sb.disabled = false;
-          if (fill) { fill.style.width = '0%'; }
-          if (txt) { txt.textContent = '立即同步 Whisper'; }
-          toast((err && err.message) || '同步失败');
-        });
-      };
-    }
-  }
-  function rowAction(label, right, act, arg) {
-    return '<button class="row" data-act="' + act + '"' + (arg ? ' data-arg="' + arg + '"' : '') + '>' + label
-      + '<span class="r">' + esc(right || '') + ' ›</span></button>';
-  }
-  function rowSeg(label, key, idx, opts) {
-    var s = '<span class="seg" data-seg="' + key + '">';
-    opts.forEach(function (o, i) { s += '<span class="' + (i === idx ? 'on' : '') + '">' + o + '</span>'; });
-    s += '</span>';
-    return '<div class="row" style="cursor:default">' + label + '<span class="r">' + s + '</span></div>';
-  }
-  function colorRow(label, hex, act) {
-    return '<button class="row" data-act="color" data-arg="' + act + '">' + label
-      + '<span class="r"><span class="chip" style="background:' + hex + '"></span>' + hex.toUpperCase() + ' ›</span></button>';
-  }
-  function onSeg(key, idx) {
-    if (key === 'mode') { S.theme.mode = ['app', 'paper', 'night'][idx]; delete PRESETS[S.theme.name]; S.theme.name = ''; applyTheme(); save(); renderSettings(); return; }
-    if (key === 'shelf') { S.opts.shelf = ['hero', 'grid2', 'min'][idx]; save(); renderShelf(); renderSettings(); return; }
-    if (key === 'layout') { S.opts.layout = idx === 1 ? 'C' : 'A'; save(); renderSettings(); return; }
-    if (key === 'font') { S.opts.font = idx === 1 ? 'serif' : 'ui'; applyFont(); save(); renderSettings(); return; }
-    if (key === 'grouped') { S.opts.grouped = idx === 0; save(); renderSettings(); return; }
-    if (key === 'menu') { S.opts.menu = idx === 1 ? 'grid' : 'list'; save(); renderSettings(); return; }
-    if (key === 'composer') { S.opts.composer = idx === 1 ? 'full' : 'sheet'; save(); renderSettings(); return; }
-    if (key === 'enterFx') { S.opts.enterFx = idx === 0; save(); renderSettings(); return; }
-    if (key === 'whSync' && window.AR && AR.Sync && AR.Sync.setConfig) {
-      AR.Sync.setConfig({ syncWhisperEnabled: idx === 0 }); renderSettings(); toast(idx === 0 ? '已开启 Whisper 云同步' : '已关闭 Whisper 云同步'); return;
-    }
-    if (key === 'whMediaSync' && window.AR && AR.Sync && AR.Sync.setConfig) {
-      AR.Sync.setConfig({ syncWhisperMedia: idx === 0 }); renderSettings(); toast(idx === 0 ? '已开启图片压缩云同步' : '已关闭图片云同步'); return;
-    }
-  }
-  function onSetting(act, arg) {
-    if (act === 'preset') { sheetPreset(); return; }
-    if (act === 'color') {
-      pickColor(getPath(arg), function (v) {
-        setPath(arg, v);
-        if (S.theme.name) { delete PRESETS[S.theme.name]; S.theme.name = ''; }
-        applyTheme(); save(); renderSettings();
-      });
-      return;
-    }
-    if (act === 'personas') { sheetPersonas(); return; }
-    if (act === 'lock') { sheetLock(); return; }
-    if (act === 'trash') { openTrash(); return; }
-    if (act === 'export') { sheetExport(); return; }
-    if (act === 'import') { openImportSheet(); return; }
-    if (act === 'reset') {
-      var hasSync = syncReady();
-      var btns = '<button id="rsCancel">取消</button>'
-        + '<button id="rsLocal" class="' + (hasSync ? '' : 'primary') + '">仅清本机</button>'
-        + (hasSync ? '<button class="primary" id="rsAll">清空本机+云端</button>' : '');
-      openSheet('<h3>清空 Whisper 数据？</h3><p style="font-size:11.5px;color:var(--w-mid);line-height:1.7">本机全部日记本、条目与 Persona 将被清空，不可恢复。</p><div class="btns">' + btns + '</div>', function () {
-        $('rsCancel').onclick = closeSheet;
-        $('rsLocal').onclick = function () { closeSheet(); resetAll({ clearCloud: false }); };
-        if ($('rsAll')) {
-          $('rsAll').onclick = function () {
-            closeSheet();
-            resetAll({ clearCloud: true }).catch(function (e) { toast((e && e.message) || '云端清空失败，已保留本地数据'); });
-          };
-        }
-      });
-      return;
-    }
-  }
-  function sheetPreset() {
-    var h = '<h3>主题预设</h3>';
-    Object.keys(PRESETS).forEach(function (k) {
-      h += '<button class="row" data-pk="' + k + '">' + PRESETS[k].name
-        + '<span class="r"><span class="chip" style="background:' + PRESETS[k].base.light + '"></span>'
-        + '<span class="chip" style="background:' + PRESETS[k].accent.a1 + '"></span>'
-        + '<span class="chip" style="background:' + PRESETS[k].accent.a2 + '"></span>'
-        + '<span class="chip" style="background:' + PRESETS[k].accent.a3 + '"></span></span></button>';
-    });
-    openSheet(h, function () {
-      Array.prototype.forEach.call(sheet.querySelectorAll('[data-pk]'), function (b) {
-        b.onclick = function () {
-          S.theme = JSON.parse(JSON.stringify(PRESETS[b.getAttribute('data-pk')]));
-          S.theme.name = b.getAttribute('data-pk');
-          applyTheme(); save(); closeSheet(); renderSettings(); toast('已切换：' + S.theme.name);
-        };
-      });
-    });
+    try {
+      if (window.AR && AR.UI && AR.UI.show) { AR.UI.show('settings'); }
+      if (window.AR && AR.Panels && AR.Panels.openSettingsCat) { AR.Panels.openSettingsCat('whisper'); }
+    } catch (e0) { }
   }
   /* 取色统一走 app 的取色器（不要再实现第二套） */
   function pickColor(initialHex, onPick) {
@@ -1735,16 +1594,16 @@
       + '<div class="m"><div class="l">' + esc(e.at.slice(0, 10)) + ' ' + e.at.slice(11) + (p.n ? ' · ' + esc(p.n) : '') + extraMeta + '</div>'
       + '<div class="x">' + esc(e.x) + '</div></div></div>'
       + '<div class="ea-grid">'
-      + '<button type="button" data-ea="edit"><i>✎</i><span>编辑</span></button>'
-      + '<button type="button" data-ea="comment"><i>💬</i><span>评论</span></button>'
-      + '<button type="button" data-ea="image"><i>🖼</i><span>生成图片</span></button>'
-      + '<button type="button" data-ea="copy"><i>⧉</i><span>复制纯文本</span></button>'
+      + '<button type="button" data-ea="edit"><i>' + svgIco('edit') + '</i><span>编辑</span></button>'
+      + '<button type="button" data-ea="comment"><i>' + svgIco('comment') + '</i><span>评论</span></button>'
+      + '<button type="button" data-ea="image"><i>' + svgIco('image') + '</i><span>生成图片</span></button>'
+      + '<button type="button" data-ea="copy"><i>' + svgIco('copy') + '</i><span>复制纯文本</span></button>'
       + '</div>'
-      + '<button class="row" data-ea="persona"><span class="ico">◉</span>换 Persona<span class="r">' + esc(p.n || '无') + ' ›</span></button>'
-      + '<button class="row" data-ea="move"><span class="ico">⇄</span>移到其他日记本<span class="r">' + esc(bk ? bk.name : '') + ' ›</span></button>'
-      + '<button class="row" data-ea="retime"><span class="ico">🕒</span>修改记录时间<span class="r">' + esc(e.at) + ' ›</span></button>'
-      + '<button class="row" data-ea="exportTxt"><span class="ico">📤</span>导出单条纯文本 (.txt)<span class="r">›</span></button>'
-      + '<button class="row danger" data-ea="delete"><span class="ico">🗑</span>删除<span class="r">可撤销</span></button>';
+      + '<button class="row" data-ea="persona"><span class="ico">' + svgIco('persona') + '</span>换 Persona<span class="r">' + esc(p.n || '无') + ' ›</span></button>'
+      + '<button class="row" data-ea="move"><span class="ico">' + svgIco('move') + '</span>移到其他日记本<span class="r">' + esc(bk ? bk.name : '') + ' ›</span></button>'
+      + '<button class="row" data-ea="retime"><span class="ico">' + svgIco('clock') + '</span>修改记录时间<span class="r">' + esc(e.at) + ' ›</span></button>'
+      + '<button class="row" data-ea="exportTxt"><span class="ico">' + svgIco('export') + '</span>导出单条纯文本 (.txt)<span class="r">›</span></button>'
+      + '<button class="row danger" data-ea="delete"><span class="ico">' + svgIco('trash') + '</span>删除<span class="r">可撤销</span></button>';
     openSheet(h, function () {
       Array.prototype.forEach.call(sheet.querySelectorAll('[data-ea]'), function (b) {
         b.onclick = function () {
@@ -1854,7 +1713,7 @@
   function editEntry(e) {
     var edMedia = Array.isArray(e.media) ? e.media.slice() : [];
     var h = '<h3>编辑</h3><textarea id="edText">' + esc(e.x) + '</textarea>'
-      + '<div class="media-bar"><button class="media-pick" type="button" id="edImgBtn">🖼 添加图片</button><input type="file" id="edImgIn" accept="image/*" multiple style="display:none"></div>'
+      + '<div class="media-bar"><button class="media-pick" type="button" id="edImgBtn">' + svgIco('image') + '<span>添加图片</span></button><input type="file" id="edImgIn" accept="image/*" multiple style="display:none"></div>'
       + '<div class="media-draft" id="edMediaList"></div>'
       + '<div class="btns"><button id="edCancel">取消</button><button class="primary" id="edSave">保存</button></div>';
     openSheet(h, function () {
@@ -2195,7 +2054,12 @@
   });
 
   /* ── 回收站 ── */
-  function openTrash() { renderTrash(); show('trash'); }
+  var trashReturnTo = '';
+  function openTrash(returnTo) {
+    trashReturnTo = returnTo || (currentScreen() === 'whisper' ? 'whisper' : 'shelf');
+    renderTrash();
+    show('trash');
+  }
   function renderTrash() {
     var es = deletedEntries(), bs = deletedBooks();
     $('trSub').textContent = (es.length + bs.length) + ' 项';
@@ -2237,7 +2101,17 @@
       };
     });
   }
-  $('trBack').addEventListener('click', function () { openSettings(); });
+  $('trBack').addEventListener('click', function () {
+    var ret = trashReturnTo;
+    trashReturnTo = '';
+    if (ret === 'close') { closeRoot(); return; }
+    if (ret === 'whisper') {
+      var curB = bookById(S.last.bid);
+      if (curB && isBookVisible(curB)) { renderWhisper(); show('whisper'); return; }
+    }
+    renderShelf();
+    show('shelf');
+  });
   $('trClear').addEventListener('click', function () {
     if (!deletedEntries().length && !deletedBooks().length) { toast('回收站是空的'); return; }
     openSheet('<h3>清空回收站？</h3><div class="btns"><button id="tcc">取消</button><button class="primary" id="tco" style="background:var(--w-a1)">清空</button></div>', function () {
@@ -2334,12 +2208,10 @@
     var st = $('whRoot');
     if (st) { st.setAttribute('data-heat', globalHeatSize()); }
   }
-  $('asBack').addEventListener('click', function () { closeRoot(); });
 
   /* ── 事件 ── */
   $('shBack').addEventListener('click', function () { closeRoot(); });
   $('wBack').addEventListener('click', function () { S.last.view = 'shelf'; save(); renderShelf(); show('shelf'); });
-  $('stBack').addEventListener('click', function () { show(S.last.view === 'read' ? 'whisper' : 'shelf'); });
   /* 长按书架顶部「Whisper」标题：验证 PIN/生物识别显现私密日记本；已显现则再次隐藏 */
   (function () {
     var titleEl = $('shTitle');
@@ -2383,7 +2255,7 @@
     var h = '<h3>' + esc(b.name) + '</h3>'
       + '<button class="row" data-ba="rename">重命名<span class="r">›</span></button>'
       + '<button class="row" data-ba="sortDir">阅读顺序<span class="r">' + (isAsc ? '正序（旧→新）' : '倒序（新→旧）') + ' ›</span></button>'
-      + '<button class="row" data-ba="secret">' + (b.hidden ? '取消私密隐藏' : '设为私密笔记本') + '<span class="r">' + (b.hidden ? '🔒' : '›') + '</span></button>'
+      + '<button class="row" data-ba="secret">' + (b.hidden ? '取消私密隐藏' : '设为私密笔记本') + '<span class="r">' + (b.hidden ? '<span class="wh-lock-ic">' + svgIco('lock') + '</span>' : '›') + '</span></button>'
       + '<button class="row" data-ba="export">导出这本<span class="r">›</span></button>'
       + '<button class="row" data-ba="archive">' + (b.archived ? '取消归档' : '归档') + '<span class="r">›</span></button>'
       + '<button class="row" data-ba="delete">删除这本<span class="r" style="color:var(--w-a1)">›</span></button>';
@@ -2437,9 +2309,55 @@
   $('shRecall').addEventListener('click', function () { openRecall(); });
 
   /* sheet */
-  var mask = $('mask'), sheet = $('sheet');
-  function openSheet(html, after) { sheet.innerHTML = html; sheet.classList.add('on'); mask.classList.add('on'); if (after) { after(); } }
-  function closeSheet() { sheet.classList.remove('on'); mask.classList.remove('on'); }
+  var mask = $('mask'), sheet = $('sheet'), sheetExitT = null;
+  function openSheet(html, after) {
+    clearTimeout(sheetExitT); sheetExitT = null;
+    var rt = $('whRoot');
+    if (rt && rt.hasAttribute('hidden')) {
+      rt.removeAttribute('hidden');
+      document.body.classList.add('wh-open');
+      rt.classList.add('wh-sheet-only');
+    }
+    sheet.innerHTML = html;
+    sheet.classList.add('on');
+    mask.classList.add('on');
+    if (after) { after(); }
+  }
+  function closeSheet() {
+    sheet.classList.remove('on');
+    mask.classList.remove('on');
+    var rt = $('whRoot');
+    if (rt && rt.classList.contains('wh-sheet-only')) {
+      clearTimeout(sheetExitT);
+      sheetExitT = setTimeout(function () {
+        sheetExitT = null;
+        if (!sheet.classList.contains('on') && rt.classList.contains('wh-sheet-only')) {
+          closeRoot();
+        }
+      }, 180);
+    }
+  }
+  function hideAllScreens() {
+    Object.keys(SC).forEach(function (k) {
+      var el = $(SC[k]);
+      if (el) { el.hidden = true; el.classList.remove('in'); }
+    });
+  }
+  function openStandaloneAction(fn) {
+    var fromOutside = !currentScreen();
+    requireUnlock(function () {
+      if (fromOutside) {
+        var rt = $('whRoot');
+        hideAllScreens();
+        if (rt) {
+          rt.removeAttribute('hidden');
+          document.body.classList.add('wh-open');
+          rt.classList.add('wh-sheet-only');
+        }
+      }
+      fn();
+    });
+  }
   mask.addEventListener('click', closeSheet);
 
   /* 菜单 */
@@ -2498,7 +2416,7 @@
     var h = '<h3>切换日记本</h3>';
     var vis = visibleBooks();
     if (!vis.length) { h += '<p style="font-size:12px;color:var(--w-mid)">还没有日记本</p>'; }
-    vis.forEach(function (b) { h += '<button class="row" data-bid="' + b.id + '">' + esc(b.name) + (b.hidden ? ' 🔒' : '') + '<span class="r">' + (b.id === S.last.bid ? '当前' : entriesOf(b.id).length + ' 条') + '</span></button>'; });
+    vis.forEach(function (b) { h += '<button class="row" data-bid="' + b.id + '">' + esc(b.name) + (b.hidden ? ' <span class="wh-lock-ic">' + svgIco('lock') + '</span>' : '') + '<span class="r">' + (b.id === S.last.bid ? '当前' : entriesOf(b.id).length + ' 条') + '</span></button>'; });
     openSheet(h, function () {
       Array.prototype.forEach.call(sheet.querySelectorAll('[data-bid]'), function (b) {
         b.onclick = function () { S.last = { view: 'read', bid: b.getAttribute('data-bid') }; save(); closeSheet(); renderWhisper(); };
@@ -2514,55 +2432,6 @@
         b.onclick = function () { S.opts.filter = b.getAttribute('data-f'); save(); closeSheet(); renderWhisper(); };
       });
     });
-  }
-
-  /* Persona */
-  function sheetPersonas() {
-    var h = '<h3>Persona</h3>';
-    S.personas.forEach(function (p) {
-      h += '<div class="row" style="cursor:default"><span class="dot" style="background:' + p.c + '"></span>' + esc(p.n)
-        + '<span class="r"><button data-edit="' + p.id + '" style="border:0;background:transparent;color:var(--w-a2);font:inherit;font-size:11px;cursor:pointer">改名/换色</button>'
-        + (S.personas.length > 1 ? ' <button data-del="' + p.id + '" style="border:0;background:transparent;color:var(--w-a1);font:inherit;font-size:11px;cursor:pointer">删除</button>' : '')
-        + '</span></div>';
-    });
-    h += '<div class="btns"><button id="pAdd" class="primary">＋ 新建 Persona</button></div>';
-    openSheet(h, function () {
-      $('pAdd').onclick = function () { editPersona(null); };
-      Array.prototype.forEach.call(sheet.querySelectorAll('[data-edit]'), function (b) { b.onclick = function () { editPersona(b.getAttribute('data-edit')); }; });
-      Array.prototype.forEach.call(sheet.querySelectorAll('[data-del]'), function (b) {
-        b.onclick = function () {
-          var id = b.getAttribute('data-del');
-          addTombstone('personas', id);
-          S.personas = S.personas.filter(function (p) { return p.id !== id; });
-          S.entries.forEach(function (e) { if (e.pid === id) { e.pid = null; stampNow(e); } });
-          if (S.opts.filter === id) { S.opts.filter = 'all'; }
-          save(); closeSheet(); renderWhisper(); toast('已删除');
-        };
-      });
-    });
-  }
-  function editPersona(id) {
-    var p = id ? personaById(id) : { id: '', n: '', c: S.theme.accent.a2 };
-    function renderForm(name, color) {
-      var h = '<h3>' + (id ? '编辑 Persona' : '新建 Persona') + '</h3><input class="inp" id="pName" value="' + esc(name) + '">'
-        + '<button class="row" id="pColor">颜色<span class="r"><span class="chip" style="background:' + color + '"></span>' + color.toUpperCase() + ' ›</span></button>'
-        + '<div class="btns"><button id="pCancel">取消</button><button class="primary" id="pOk">保存</button></div>';
-      openSheet(h, function () {
-        $('pColor').onclick = function () {
-          var nm = $('pName').value;
-          pickColor(color, function (v) { renderForm(nm, v); });
-        };
-        $('pCancel').onclick = closeSheet;
-        $('pOk').onclick = function () {
-          var nm = ($('pName').value || '').trim();
-          if (!nm) { toast('先起个名字'); return; }
-          if (id) { p.n = nm; p.c = color; stampNow(p); }
-          else { var np = { id: uid('p'), n: nm, c: color }; stampNow(np); S.personas.push(np); }
-          save(); closeSheet(); renderWhisper(); renderSettings(); toast('已保存');
-        };
-      });
-    }
-    renderForm(p.n, p.c);
   }
   function sheetExport() {
     var h = '<h3>导出日记</h3>'
@@ -2948,37 +2817,6 @@
       };
     });
   }
-  function sheetLock() {
-    var bioSupported = canBio();
-    var h = '<h3>锁定与解锁</h3>'
-      + '<button class="row" data-l="toggle">锁屏<span class="r">' + (S.lock.enabled ? '开' : '关') + ' ›</span></button>'
-      + (bioSupported ? '<button class="row" data-l="bio">生物识别<span class="r">' + (S.lock.bio ? '开' : '关') + ' ›</span></button>' : '')
-      + '<button class="row" data-l="pin">' + (S.lock.hash ? '修改 PIN' : '设置 PIN') + '<span class="r">›</span></button>'
-      + '<p style="font-size:10.5px;color:var(--w-mid);line-height:1.6;margin:10px 2px 0">'
-      + (bioSupported ? 'PIN 可选，没设时只走生物识别。' : '当前设备不支持生物识别，仅支持 6 位 PIN。') + '</p>';
-    openSheet(h, function () {
-      Array.prototype.forEach.call(sheet.querySelectorAll('[data-l]'), function (b) {
-        b.onclick = function () {
-          var k = b.getAttribute('data-l');
-          if (k === 'toggle') {
-            if (!S.lock.enabled && !S.lock.hash && !(bioSupported && S.lock.bio)) {
-              closeSheet();
-              pendChange = false; pinStage = 'set'; session.unlocked = false; openLock();
-              toast('请先设置 6 位 PIN');
-              return;
-            }
-            S.lock.enabled = !S.lock.enabled; save(); closeSheet(); renderSettings(); toast(S.lock.enabled ? '已上锁' : '已关闭锁屏');
-          }
-          else if (k === 'bio') { S.lock.bio = !S.lock.bio; save(); closeSheet(); renderSettings(); }
-          else if (k === 'pin') {
-            closeSheet();
-            if (S.lock.hash) { pendChange = true; pinStage = 'verify'; session.unlocked = false; openLock(); }
-            else { pendChange = false; pinStage = 'set'; session.unlocked = false; openLock(); }
-          }
-        };
-      });
-    });
-  }
 
   /* 写作 */
   $('wWrite').addEventListener('click', openComposer);
@@ -3027,7 +2865,7 @@
   }
   function bookChipsHTML() {
     return visibleBooks().map(function (b) {
-      return '<button data-b="' + b.id + '"' + (b.id === draft.bid ? ' class="on"' : '') + '>' + esc(b.name) + (b.hidden ? ' 🔒' : '') + '</button>';
+      return '<button data-b="' + b.id + '"' + (b.id === draft.bid ? ' class="on"' : '') + '>' + esc(b.name) + (b.hidden ? ' <span class="wh-lock-ic">' + svgIco('lock') + '</span>' : '') + '</button>';
     }).join('');
   }
   function bindPersonaChips(root) {
@@ -3057,9 +2895,9 @@
     if (pp.tmp) { toast('临时 Persona 用完即弃'); return; }
     var h = '<div class="acthead"><span class="dot" style="background:' + pp.c + ';width:7px;height:7px;border-radius:50%;display:block"></span>'
       + '<div class="m"><div class="l">Persona</div><div class="x">' + esc(pp.n) + '</div></div></div>'
-      + '<button class="row" data-pa="rename"><span class="ico">✎</span>改名</button>'
-      + '<button class="row" data-pa="color"><span class="ico">◐</span>换颜色</button>'
-      + '<button class="row danger" data-pa="delete"><span class="ico">🗑</span>删除</button>';
+      + '<button class="row" data-pa="rename"><span class="ico">' + svgIco('edit') + '</span>改名</button>'
+      + '<button class="row" data-pa="color"><span class="ico">' + svgIco('palette') + '</span>换颜色</button>'
+      + '<button class="row danger" data-pa="delete"><span class="ico">' + svgIco('trash') + '</span>删除</button>';
     openSheet(h, function () {
       Array.prototype.forEach.call(sheet.querySelectorAll('[data-pa]'), function (b) {
         b.onclick = function () {
@@ -3097,7 +2935,7 @@
 
   function renderWriteSheet() {
     var h = '<h3>写一条</h3><textarea id="wText">' + esc(draft.text || '') + '</textarea>'
-      + '<div class="media-bar"><button class="media-pick" type="button" id="wsImgBtn">🖼 添加图片</button><input type="file" id="wsImgIn" accept="image/*" multiple style="display:none"></div>'
+      + '<div class="media-bar"><button class="media-pick" type="button" id="wsImgBtn">' + svgIco('image') + '<span>添加图片</span></button><input type="file" id="wsImgIn" accept="image/*" multiple style=\"display:none\"></div>'
       + '<div class="media-draft" id="wsMediaList"></div>'
       + '<div class="field">Persona</div><div class="pick" id="wP">' + personaChipsHTML() + '</div>'
       + '<div class="field">写进</div><div class="pick" id="wB">' + bookChipsHTML() + '</div>'
@@ -3216,9 +3054,16 @@
     enter();
   }
   function hideRootOnly() {
+    clearTimeout(sheetExitT); sheetExitT = null;
     var rt = $('whRoot');
     var wasOpen = !!(rt && !rt.hasAttribute('hidden'));
-    if (rt) { rt.setAttribute('hidden', 'hidden'); }
+    hideAllScreens();
+    if (rt) {
+      rt.classList.remove('wh-sheet-only');
+      rt.setAttribute('hidden', 'hidden');
+    }
+    sheet.classList.remove('on');
+    mask.classList.remove('on');
     document.body.classList.remove('wh-open');
     return wasOpen;
   }
@@ -3371,7 +3216,6 @@
       else if (cur === 'trash') { renderTrash(); }
       else if (cur === 'recall') { renderRecall(); }
       else if (cur === 'search') { renderSearch(); }
-      else if (cur === 'settings') { renderSettings(); }
     } catch (eR) { }
   }
   function syncMediaStep(report) {
@@ -3578,10 +3422,12 @@
      逐级退：弹层 → 目录 → 当前屏自己的返回按钮 → 书架 → 关掉日记回到应用。
      任何一级都在日记内部消化掉，不会把 App 一起退出。 */
   var BACK_BTN = {
-    shelf: 'shBack', whisper: 'wBack', settings: 'stBack', appset: 'asBack',
+    shelf: 'shBack', whisper: 'wBack',
     composer: 'cCancel', search: 'srBack', recall: 'rcBack', trash: 'trBack'
   };
   function currentScreen() {
+    var rt = $('whRoot');
+    if (!rt || rt.hasAttribute('hidden')) { return ''; }
     for (var k in SC) {
       if (!Object.prototype.hasOwnProperty.call(SC, k)) { continue; }
       var el = $(SC[k]);
@@ -3614,8 +3460,8 @@
   window.__whisper = {
     state: function () { return S; },
     theme: function () { return S ? S.theme : null; },
-    setTheme: function (p) { S.theme = JSON.parse(JSON.stringify(PRESETS[p])); S.theme.name = p; applyTheme(); save(); renderSettings(); },
-    setColor: function (path, v) { setPath(path, v); applyTheme(); save(); renderSettings(); },
+    setTheme: function (p) { S.theme = JSON.parse(JSON.stringify(PRESETS[p])); S.theme.name = p; applyTheme(); save(); },
+    setColor: function (path, v) { setPath(path, v); applyTheme(); save(); },
     opts: function (k, v) { if (v === undefined) { return S.opts[k]; } S.opts[k] = v; save(); },
     open: function () {
       try { localStorage.setItem('abbeyroad.whisper.seen', '1'); } catch (e0) { }
@@ -3628,7 +3474,6 @@
     whenReady: whenReady,
     openShelf: function () { requireUnlock(function () { S.last.view = 'shelf'; save(); renderShelf(); show('shelf'); }); },
     openBook: function (bid) { requireUnlock(function () { S.last = { view: 'read', bid: bid }; save(); renderWhisper(); show('whisper'); playEnterFx(); }); },
-    openSettings: function () { requireUnlock(openSettings); },
     toc: function (dir) { openToc(dir || 'right'); },
     closeToc: closeToc,
     lockState: function () {
@@ -3637,8 +3482,11 @@
     },
     persist: save,
     setState: function (o) { if (!o) { return; } S = normalize(o); save(); try { applyTheme(); } catch (e0) { } },
-    trash: function () { requireUnlock(openTrash); },
-    exportSheet: function () { requireUnlock(sheetExport); },
+    trash: function () {
+      var fromOutside = !currentScreen();
+      requireUnlock(function () { openTrash(fromOutside ? 'close' : ''); });
+    },
+    exportSheet: function () { openStandaloneAction(sheetExport); },
     exportCurrent: function () {
       requireUnlock(function () {
         try {
@@ -3658,7 +3506,7 @@
     applyAll: function () { applyTheme(); applyAppHeat(); },
     consumePendingImport: consumePendingImport,
     importText: importWhisperText,
-    openImport: openImportSheet,
+    openImport: function () { openStandaloneAction(openImportSheet); },
     unlockSecret: openSecretUnlock,
     hideSecret: hideSecretMode,
     entryCardImage: function (eid) {

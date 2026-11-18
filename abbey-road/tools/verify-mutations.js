@@ -184,8 +184,8 @@ if (withE2E) {
   expect('M14 whisper.js openTrash 绕过解锁门禁',
     WHISPER,
     whisperOrig.replace(
-      "trash: function () { requireUnlock(openTrash); },",
-      "trash: openTrash,"
+      "    trash: function () {\n      var fromOutside = !currentScreen();\n      requireUnlock(function () { openTrash(fromOutside ? 'close' : ''); });\n    },",
+      "    trash: function () { openTrash(); },"
     ),
     'verify-whisper-e2e.js');
 }
@@ -284,6 +284,32 @@ expect('M26 sync.js 忽略 syncWhisperMedia === false 开关',
     "function isWhisperMediaSyncEnabled() { return isWhisperSyncEnabled(); }"
   ),
   'verify-whisper-sync.js');
+
+if (withE2E) {
+  expect('M27 whisper.js trBack 不再在 trashReturnTo === close 时关闭（重现退回内部屏bug）',
+    WHISPER,
+    whisperOrig.replace(
+      "if (ret === 'close') { closeRoot(); return; }",
+      "if (ret === '__never__') { closeRoot(); return; }"
+    ),
+    'verify-whisper-e2e.js');
+
+  expect('M28 whisper.css 去掉 .wh-root .toast 的 animation:none!important 与 visibility:hidden（重现中下方白点）',
+    WHISPER_CSS,
+    whisperCssOrig.replace(
+      "visibility:hidden;pointer-events:none;transition:.2s;animation:none!important;",
+      "pointer-events:none;transition:.2s;"
+    ),
+    'verify-whisper-e2e.js');
+
+  expect('M29 whisper.css 去掉 .wh-root .sheet .row .ico 透明背景隔离（重现图标变色块）',
+    WHISPER_CSS,
+    whisperCssOrig.replace(
+      "background:transparent!important;color:var(--w-mid)",
+      "color:var(--w-mid)"
+    ),
+    'verify-whisper-e2e.js');
+}
 
 /* 复原后必须全绿 */
 for (const chk of ['verify-compat-static.js', 'verify-sync.js', 'verify-whisper-sync.js', 'verify-report.js', 'verify-reminders.js', 'verify-tasks-compat.js', 'test-logic.js', 'verify-panels-dom.js']) {
