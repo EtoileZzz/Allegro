@@ -189,12 +189,65 @@ var AR = window.AR || (window.AR = {});
         if (typeof res === 'string' && res) {
           if (AR.UI && AR.UI.toast) { AR.UI.toast(res); }
         } else if (hasAndroid && AR.UI && AR.UI.toast) {
-          AR.UI.toast('选微信就能把配置文件发出去');
+          var isCfg = !title || String(title).indexOf('配置') >= 0;
+          AR.UI.toast(isCfg ? '选微信就能把配置文件发出去' : '已存到「下载 / Allegro」并拉起分享');
         }
         return res;
       });
     }
     return exportText(fileName, content, mime);
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    var parts = String(dataUrl || '').split(',');
+    var head = parts[0] || '';
+    var m = /data:([^;]+);base64/i.exec(head);
+    var mime = m ? m[1] : 'image/png';
+    var raw = atob(parts[1] || '');
+    var arr = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) { arr[i] = raw.charCodeAt(i); }
+    return new Blob([arr], { type: mime });
+  }
+
+  function saveImage(fileName, dataUrl) {
+    var name = fileName || 'whisper-card.png';
+    if (hasAndroid || hasWebView2) {
+      return call('saveImage', [name, String(dataUrl || '')]);
+    }
+    try {
+      var blob = dataUrlToBlob(dataUrl);
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 800);
+      if (AR.UI && AR.UI.toast) { AR.UI.toast('已保存图片 ' + name); }
+    } catch (e) {
+      if (AR.UI && AR.UI.toast) { AR.UI.toast('保存图片失败'); }
+    }
+    return Promise.resolve('ok');
+  }
+
+  function shareImage(fileName, dataUrl, title) {
+    var name = fileName || 'whisper-card.png';
+    if (hasAndroid || hasWebView2) {
+      return call('shareImage', [name, String(dataUrl || ''), title || 'Whisper 日记']).then(function (res) {
+        if (typeof res === 'string' && res && res !== 'ok' && AR.UI && AR.UI.toast) {
+          AR.UI.toast(res);
+        }
+        return res;
+      });
+    }
+    try {
+      var blob = dataUrlToBlob(dataUrl);
+      if (navigator.share && navigator.canShare && window.File) {
+        var f = new File([blob], name, { type: blob.type || 'image/png' });
+        if (navigator.canShare({ files: [f] })) {
+          return navigator.share({ files: [f], title: title || 'Whisper 日记' }).catch(function () { return saveImage(name, dataUrl); });
+        }
+      }
+    } catch (e) { }
+    return saveImage(name, dataUrl);
   }
 
   function importText() {
@@ -322,13 +375,23 @@ var AR = window.AR || (window.AR = {});
   }
 
 
-  /* ── 生物识别（Whisper 解锁用；Android 走 BiometricPrompt，Windows 走 Windows Hello） ── */
+  /* ── 生物识别（Whisper 解锁用；Android 走 BiometricPrompt，Windows/Web 明确不支持） ── */
   var bioPending = {};
   window.__whBioResult = function (id, ok) {
     var fn = bioPending[id];
     if (fn) { delete bioPending[id]; fn(!!ok); }
   };
+  function canBiometric() {
+    if (hasAndroid && window.ARBridge) {
+      if (typeof window.ARBridge.canBiometric === 'function') {
+        try { return !!window.ARBridge.canBiometric(); } catch (e) { return false; }
+      }
+      return typeof window.ARBridge.biometricVerify === 'function';
+    }
+    return false;
+  }
   function biometricVerify() {
+    if (!canBiometric()) { return Promise.resolve(false); }
     if (hasAndroid && window.ARBridge && typeof window.ARBridge.biometricVerify === 'function') {
       return new Promise(function (resolve) {
         var id = 'bio' + (++seq);
@@ -338,9 +401,6 @@ var AR = window.AR || (window.AR = {});
           if (bioPending[id]) { delete bioPending[id]; resolve(false); }
         }, 60000);
       });
-    }
-    if (hasWebView2) {
-      return call('biometricVerify', []).then(function (r) { return r === true || r === 'true'; });
     }
     return Promise.resolve(false);
   }
@@ -357,9 +417,12 @@ var AR = window.AR || (window.AR = {});
     haptic: haptic,
     visualPulse: visualPulse,
     copy: copy,
+    canBiometric: canBiometric,
     biometricVerify: biometricVerify,
     share: share,
     shareFile: shareFile,
+    saveImage: saveImage,
+    shareImage: shareImage,
     listExports: listExports,
     readTextUri: readTextUri,
     exportText: exportText,

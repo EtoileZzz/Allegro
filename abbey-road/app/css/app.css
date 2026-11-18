@@ -2233,7 +2233,7 @@ body { text-size-adjust: 100%; }
 .cp { display: flex; flex-direction: column; gap: 12px; }
 /* 取色器是独立浮层：盖在编辑器上面，关掉后编辑器还在 */
 .cp-root {
-  position: fixed; inset: 0; z-index: calc(var(--z-modal) + 6);
+  position: fixed; inset: 0; z-index: 9600;
   display: flex; align-items: center; justify-content: center;
   padding: 16px; box-sizing: border-box;
 }
@@ -4141,3 +4141,26 @@ body[data-perf] .agv-pane.agv-in { animation: none !important; }
   min-width: 26px; text-align: center; font-weight: 700;
   font-variant-numeric: tabular-nums; color: var(--text-primary);
 }
+
+/* ── 同步按钮内置进度条（v0.5.5） ── */
+.btn.sync-prog-btn {
+  position: relative;
+  overflow: hidden;
+}
+.btn.sync-prog-btn .sync-prog-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  background: var(--accent-soft);
+  transition: width 220ms var(--ease-standard);
+  pointer-events: none;
+  z-index: 0;
+}
+.btn.primary.sync-prog-btn .sync-prog-fill {
+  background: rgba(255, 255, 255, 0.24);
+}
+.btn.sync-prog-btn .sync-prog-label {
+  position: relative;
+  z-index: 1;
+}
+

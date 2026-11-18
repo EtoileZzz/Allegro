@@ -134,6 +134,9 @@
       var pd = Number(pr.periodDone) || 0;
       return { done: pd, target: pt, unit: unit, pending: pd < pt, weekly: true };
     }
+    if (pr && isFinite(pr.required) && Number(pr.required) === 0) {
+      return { done: sum, target: 0, unit: unit, pending: false, weekly: false };
+    }
     if (goalTarget > 0) {
       return { done: sum, target: goalTarget, unit: unit, pending: sum < goalTarget, weekly: false };
     }
@@ -164,7 +167,7 @@
     var list = [];
     try { list = AR.Store.taskList() || []; } catch (e) { list = []; }
     var out = [];
-    for (var i = 0; i < list.length && i < 300; i++) {
+    for (var i = 0; i < list.length && out.length < 300; i++) {
       var a = list[i];
       if (!a || a.deletedAt || a.done) { continue; }
       var dk = String(a.date || '');
@@ -207,7 +210,7 @@
     var tasks = [];
     try { tasks = AR.Store.todoList() || []; } catch (e) { tasks = []; }
     var pend = [], doneCount = 0, muted = 0, unplanned = 0;
-    for (var i = 0; i < tasks.length && i < 80; i++) {
+    for (var i = 0; i < tasks.length && (pend.length + doneCount) < 80; i++) {
       var t = tasks[i];
       if (!t || t.archived) { continue; }
       var nf = { times: [], mute: false, onlyWhenPending: true };
@@ -249,10 +252,11 @@
   /** 兼容旧接口：面板的「下次提醒」预览用 */
   function summary(day) {
     var snap = daySnapshot(day);
+    var shared = snap.tasks.filter(function (x) { return !x.hasOwnTimes; });
     var title, text;
-    if (snap.tasks.length) {
-      title = '今天还有 ' + snap.tasks.length + ' 项任务';
-      text = linesOf(snap.tasks, 3);
+    if (shared.length) {
+      title = '今天还有 ' + shared.length + ' 项任务';
+      text = linesOf(shared, 3);
     } else if (snap.assignments.length) {
       title = '今天 ' + snap.assignments.length + ' 项作业';
       text = snap.assignments.slice(0, 3).map(function (x) { return x.text; }).join(' · ');
@@ -347,6 +351,7 @@
           var dayKey = U.dateKey(dday);
           var snap = daySnapshot(dday);
           var pend = snap.tasks;
+          var sharedPend = pend.filter(function (x) { return !x.hasOwnTimes; });
           var hw = snap.assignments;
           /* 任务类要不要发：周末不发；全完成且 skipWhenDone 时不发（mode=always 除外） */
           var allDone = pend.length === 0 && snap.doneCount > 0;
@@ -362,9 +367,8 @@
               /* 每条单独：任务逐项（跳过有专属时间点的），作业在当天第一个时间点逐项 */
               if (!skipTasks) {
                 var shown = 0;
-                for (var q = 0; q < pend.length && shown < maxEach; q++) {
-                  var it = pend[q];
-                  if (it.hasOwnTimes) { continue; }
+                for (var q = 0; q < sharedPend.length && shown < maxEach; q++) {
+                  var it = sharedPend[q];
                   var uu = it.unit ? (' ' + it.unit) : '';
                   var left = it.target - it.done;
                   out.push({
@@ -376,7 +380,7 @@
                   });
                   shown++;
                 }
-                var rest = pend.length - shown;
+                var rest = sharedPend.length - shown;
                 if (rest > 0) {
                   out.push({ id: base + '-more', atMs: at2, title: '还有 ' + rest + ' 项任务', text: '打开 App 查看完整列表', channel: 'daily' });
                 }
@@ -387,8 +391,8 @@
                 }
               }
             } else if (form === 'byType') {
-              if (!skipTasks && pend.length) {
-                out.push({ id: base + '-t', atMs: at2, title: '今天还有 ' + pend.length + ' 项任务', text: linesOf(pend, maxLines), channel: 'daily' });
+              if (!skipTasks && sharedPend.length) {
+                out.push({ id: base + '-t', atMs: at2, title: '今天还有 ' + sharedPend.length + ' 项任务', text: linesOf(sharedPend, maxLines), channel: 'daily' });
               }
               if (hw.length) {
                 out.push({ id: base + '-a', atMs: at2, title: '今天 ' + hw.length + ' 项作业', text: hw.slice(0, maxLines).map(function (x) { return x.text; }).join(' · '), channel: 'daily' });
@@ -401,15 +405,16 @@
               }
             } else {
               /* 汇总一条 */
-              /* 什么都没有的一天（无待办/无作业/无课/无日程）就别发了 */
-              var nothingAtAll = !pend.length && !hw.length && !snap.classes.length && !snap.events.length && snap.doneCount === 0;
+              /* 什么都没有的一天（无共享待办/无作业/无课/无日程）就别发了 */
+              var nothingAtAll = !sharedPend.length && !hw.length && !snap.classes.length && !snap.events.length && snap.doneCount === 0;
               if (nothingAtAll) { continue; }
+              if (pend.length > 0 && !sharedPend.length && !hw.length && !(dl.includeEvents && (snap.classes.length || snap.events.length))) { continue; }
               if (skipTasks && !hw.length) { continue; }
               var title, text;
               if (!skipTasks) {
-                if (pend.length) {
-                  title = '今天还有 ' + pend.length + ' 项任务';
-                  text = linesOf(pend, maxLines);
+                if (sharedPend.length) {
+                  title = '今天还有 ' + sharedPend.length + ' 项任务';
+                  text = linesOf(sharedPend, maxLines);
                   if (hw.length) { text += ' · 作业 ' + hw.length + ' 项'; }
                 } else if (hw.length) {
                   title = '今天 ' + hw.length + ' 项作业';
@@ -450,7 +455,8 @@
       for (var dt = 0; dt < DAYS_AHEAD; dt++) {
         var dday2 = U.addDays(U.startOfDay(now), dt);
         var keyT = U.dateKey(dday2);
-        for (var tk = 0; tk < tasksOwn.length && tk < 40; tk++) {
+        var ownShown = 0;
+        for (var tk = 0; tk < tasksOwn.length && ownShown < 40; tk++) {
           var t2 = tasksOwn[tk];
           if (!t2 || t2.archived) { continue; }
           var nf2 = { times: [], mute: false, onlyWhenPending: true };
@@ -459,6 +465,7 @@
           if (!isPlannedTask(t2) && !dlw.includeUnplanned) { continue; }
           var tTimes = normTimes(nf2.times);
           if (!tTimes.length) { continue; }
+          ownShown++;
           var pr2 = taskProgress(t2, dday2);
           if (nf2.onlyWhenPending && !pr2.pending) { continue; }
           for (var tj = 0; tj < tTimes.length; tj++) {

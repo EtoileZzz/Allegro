@@ -1,9 +1,10 @@
 /* 用「线上实际部署的那份 Worker 源码」在本地复现 409，证明种子行就是症结 */
 const fs = require('fs');
+const path = require('path');
 const sqlite = require('node:sqlite');
-const ACCT = '2031b03dabe52e2dc3784cd248639518';
-const DB = '043e6fbb-8ea3-4cd0-8add-3c18e5cbb240';
-const TOKEN = process.env.CF_TOKEN || '';
+const ACCT = process.env.CF_ACCOUNT || '2031b03dabe52e2dc3784cd248639518';
+const DB = process.env.CF_DB || '043e6fbb-8ea3-4cd0-8add-3c18e5cbb240';
+const TOKEN = process.env.CF_TOKEN || process.env.CLOUDFLARE_API_TOKEN || '';
 
 async function d1(query, params = []) {
   const r = await fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCT}/d1/database/${DB}/query`, {
@@ -17,8 +18,18 @@ async function d1(query, params = []) {
 }
 
 (async () => {
+  if (!TOKEN) {
+    console.error('缺少 CF_TOKEN 环境变量');
+    process.exitCode = 1;
+    return;
+  }
   const live = await fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCT}/workers/scripts/abbeyroad-sync`,
     { headers: { Authorization: 'Bearer ' + TOKEN } });
+  if (!live.ok) {
+    console.error('拉取线上 Worker 失败:', live.status);
+    process.exitCode = 1;
+    return;
+  }
   const raw = await live.text();
   /* 接口回的是 multipart：取 worker.js 那一段 */
   let src = raw;
@@ -34,7 +45,7 @@ async function d1(query, params = []) {
 
   const mod = await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'));
   const db = new sqlite.DatabaseSync(':memory:');
-  db.exec(fs.readFileSync('tools/cloudflare/schema.sql', 'utf8'));
+  db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   db.exec("DELETE FROM blob_state");   // 换成线上修复前的状态：这张表是空的
 
   const env = {

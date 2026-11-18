@@ -7,9 +7,15 @@ const API = 'https://api.cloudflare.com/client/v4';
 const TOKEN = process.env.CF_TOKEN || '';
 const SCRIPT = 'abbeyroad-sync';
 const DB_NAME = 'abbeyroad-sync';
-const DIR = 'C:/Users/Etoile/Documents/ARProject/abbey-road/tools/cloudflare';
+const DIR = __dirname;
 
-if (!TOKEN) { console.error('no CF_TOKEN'); process.exit(1); }
+function splitSqlStatements(sql) {
+  const clean = String(sql || '')
+    .split(/\r?\n/)
+    .filter((l) => !/^\s*--/.test(l))
+    .join('\n');
+  return clean.split(';').map((s) => s.trim()).filter(Boolean);
+}
 
 function req(method, p, body, headers) {
   return new Promise((resolve, reject) => {
@@ -37,6 +43,7 @@ function req(method, p, body, headers) {
 }
 
 async function main() {
+  if (!TOKEN) { console.error('no CF_TOKEN'); process.exitCode = 1; return; }
   let aid = process.env.CF_ACCOUNT || '';
   if (aid) {
     console.log('account (from CF_ACCOUNT)', aid.slice(0, 6) + '…');
@@ -56,7 +63,7 @@ async function main() {
   console.log('db', db.name, db.uuid);
 
   const sql = fs.readFileSync(path.join(DIR, 'schema.sql'), 'utf8');
-  const statements = sql.split(';').map((s) => s.trim()).filter((s) => s && s.indexOf('--') !== 0);
+  const statements = splitSqlStatements(sql);
   for (const st of statements) {
     const r = await req('POST', '/accounts/' + aid + '/d1/database/' + db.uuid + '/query', { sql: st });
     if (r.status !== 200 || !r.body || r.body.success === false) {
@@ -69,6 +76,17 @@ async function main() {
     { sql: "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name" });
   const names = ((check.body && check.body.result && check.body.result[0] && check.body.result[0].results) || []).map((x) => x.name);
   console.log('tables:', names.join(','));
+  for (const reqTable of ['state', 'history', 'blob_state', 'blob_history', 'whisper_media']) {
+    if (names.indexOf(reqTable) < 0) {
+      throw new Error('missing required table after schema apply: ' + reqTable);
+    }
+  }
+  const seedCheck = await req('POST', '/accounts/' + aid + '/d1/database/' + db.uuid + '/query',
+    { sql: "SELECT rev FROM blob_state WHERE ns = 'whisper'" });
+  const seedRows = (seedCheck.body && seedCheck.body.result && seedCheck.body.result[0] && seedCheck.body.result[0].results) || [];
+  if (!seedRows.length) {
+    throw new Error("missing blob_state seed row for ns='whisper'");
+  }
 
   const worker = fs.readFileSync(path.join(DIR, 'worker.js'), 'utf8');
   const boundary = '----abbey' + Date.now();
@@ -102,4 +120,8 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error('ERR', e.message); process.exitCode = 1; });
+module.exports = { splitSqlStatements };
+
+if (require.main === module) {
+  main().catch((e) => { console.error('ERR', e.message); process.exitCode = 1; });
+}

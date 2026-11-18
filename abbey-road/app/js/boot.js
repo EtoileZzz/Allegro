@@ -13,6 +13,7 @@
   AR.onFileText = function (text, name) {
     var t = String(text == null ? '' : text);
     while (t.charCodeAt(0) === 0xFEFF) { t = t.slice(1); }     // 去掉 UTF-8 BOM
+    if (AR.Whisper && AR.Whisper.consumePendingImport && AR.Whisper.consumePendingImport(t, name)) { return; }
     var head = t.replace(/^\s+/, '').charAt(0);
     // 只有「以 { 开头的配置文件」走 JSON 流程；以 [ 开头的是 AI 常给的 JSON 数组，
     // 交给课表文本解析器更合适（它认 JSON 数组）。
@@ -53,6 +54,11 @@
 
   /* Android 返回键 / Windows Esc / 侧滑返回 */
   AR.onBack = function () {
+    /**
+     * 选色器（.cp-root）是独立全屏浮层（可从课程编辑器或 Whisper 内打开），
+     * 必须最先拦截返回键，否则会误关底层的 Whisper 或主弹窗。
+     */
+    if (AR.UI.closeColorPicker && AR.UI.closeColorPicker()) { return; }
     /**
      * 日记（Whisper）开着时先交给它逐级退：弹层 → 目录 → 上一屏 → 书架 → 关掉日记。
      * 以前这里直接按应用逻辑走，日记的 fixed 覆盖层不会被关掉，

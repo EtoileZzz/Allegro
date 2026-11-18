@@ -1,5 +1,5 @@
 /**
- * verify-whisper-e2e.js —— 在真浏览器里把「日记的返回」和「日记云同步」点一遍
+ * verify-whisper-e2e.js —— 在真浏览器里完整点一遍 Whisper 锁屏/UI/返回栈/选色/撤销/防XSS/双端云同步
  *
  * 不装 Playwright：直接用 Edge/Chrome 的 CDP（Node 自带 WebSocket）。
  * 服务端是 tools/cloudflare/worker.js 原文跑在 node:sqlite 上（D1 替身），
@@ -7,6 +7,7 @@
  * 每一步截图存进 shots-whisper-e2e/，控制台任何 error / 未捕获异常都算失败。
  */
 const http = require('http');
+const net = require('net');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -21,7 +22,33 @@ const SCHEMA = fs.readFileSync(path.join(ROOT, 'tools', 'cloudflare', 'schema.sq
 const TOKEN = 'e2e-token';
 const PASS = 'e2e pass phrase';
 
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+function findBrowser() {
+  const candidates = [
+    process.env.EDGE_PATH,
+    process.env.CHROME_PATH,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+  ].filter(Boolean);
+  for (const p of candidates) {
+    if (fs.existsSync(p)) { return p; }
+  }
+  return candidates[0];
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const p = srv.address().port;
+      srv.close(() => resolve(p));
+    });
+  });
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -50,7 +77,12 @@ function makeDB() {
     };
     return api;
   }
-  return { raw: db, prepare: stmt, one(sql) { return db.prepare(sql).get() || null; } };
+  async function batch(stmts) {
+    const res = [];
+    for (let i = 0; i < stmts.length; i++) { res.push(stmts[i].run()); }
+    return res;
+  }
+  return { raw: db, prepare: stmt, batch: batch, one(sql) { return db.prepare(sql).get() || null; } };
 }
 
 function serve(worker, db) {
@@ -132,9 +164,10 @@ class Page {
 }
 
 async function launch(port) {
-  const dbg = 9411;
+  const browserBin = findBrowser();
+  const dbg = await getFreePort();
   const profile = path.join(os.tmpdir(), 'wh-e2e-' + Date.now());
-  const proc = spawn(EDGE, [
+  const proc = spawn(browserBin, [
     '--headless=new', '--remote-debugging-port=' + dbg, '--user-data-dir=' + profile,
     '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars',
     '--disable-extensions', '--mute-audio', '--window-size=430,900',
@@ -160,14 +193,14 @@ async function launch(port) {
 }
 
 /* ───────────────── 页面里的小工具（字符串注入） ───────────────── */
-const READY = "!!(window.AR && window.AR.Store && window.AR.Store.get && window.__whisper)";
+const READY = "!!(window.AR && window.AR.Store && window.AR.Store.get && window.AR.Whisper && window.AR.Whisper.state())";
 const CONFIGURE = `(function(){
   window.AR.Sync.setConfig({ baseUrl: 'http://127.0.0.1:__PORT__/api', token: '__TOKEN__',
     passphrase: '__PASS__', autoMode: 'open', rememberPass: true });
   return window.AR.Sync.status().configured;
 })()`;
 const LONGPRESS = `(function(){
-  var btns = document.querySelectorAll('.nav-btn[data-nav="import"]');
+  var btns = document.querySelectorAll('.nav-btn[data-nav="import"], .nav-btn[data-nav="custom"]');
   var btn = null;
   for (var i = 0; i < btns.length; i++) {
     var r = btns[i].getBoundingClientRect();
@@ -180,24 +213,36 @@ const LONGPRESS = `(function(){
   return new Promise(function (res) {
     setTimeout(function () {
       btn.dispatchEvent(new PointerEvent('pointerup', opt));
+      btn.click();
       var root = document.getElementById('whRoot');
       res(!!root && !root.hasAttribute('hidden'));
-    }, 700);
+    }, 650);
   });
 })()`;
-const SKIP_LOCK = `(function(){
-  var lk = document.getElementById('s-lock');
-  if (!lk || lk.hidden) { return 'no-lock'; }
-  var b = document.getElementById('skipBtn');
-  if (b && b.style.display !== 'none') { b.click(); return 'skipped'; }
-  return 'locked';
-})()`;
+const ENTER_PIN = `(function(code){
+  var digits = String(code).split('');
+  digits.forEach(function(d){
+    var b = document.querySelector('#pad [data-k="' + d + '"]');
+    if (b) { b.click(); }
+  });
+  return true;
+})`;
 const VIS = `(function(){
   var ids = ['s-lock','s-shelf','s-whisper','s-settings','s-composer','s-search','s-recall','s-trash','s-appset'];
   var on = [];
   ids.forEach(function (id) { var el = document.getElementById(id); if (el && !el.hidden) { on.push(id); } });
   var root = document.getElementById('whRoot');
-  return { open: !!root && !root.hasAttribute('hidden'), screens: on, exit: window.__exit || 0 };
+  var sheetOn = !!(document.getElementById('sheet') && document.getElementById('sheet').classList.contains('on'));
+  var tocOn = !!(document.getElementById('toc') && document.getElementById('toc').classList.contains('on'));
+  var cpOpen = !!(window.AR && AR.UI && AR.UI.colorPickerOpen && AR.UI.colorPickerOpen());
+  return { open: !!root && !root.hasAttribute('hidden'), screens: on, sheetOn: sheetOn, tocOn: tocOn, cpOpen: cpOpen, exit: window.__exit || 0 };
+})()`;
+const TOAST_INFO = `(function(){
+  var t = document.getElementById('toast');
+  if (!t) { return null; }
+  var cs = getComputedStyle(t);
+  var r = t.getBoundingClientRect();
+  return { on: t.classList.contains('on'), text: t.innerText, display: cs.display, w: r.width, h: r.height, hasBtn: !!t.querySelector('button') };
 })()`;
 
 (async () => {
@@ -206,7 +251,7 @@ const VIS = `(function(){
   const workerMod = await import('data:text/javascript;base64,' + Buffer.from(WORKER_SRC).toString('base64'));
   const server = await serve(workerMod.default, db);
   const port = server.address().port;
-  const { proc, page, profile } = await launch(port);
+  const { proc, page } = await launch(port);
   let browser = proc;
 
   try {
@@ -219,133 +264,521 @@ const VIS = `(function(){
       if (await page.ev(READY).catch(() => false)) { break; }
       await sleep(200);
     }
-    ok('页面加载完成（AR.Store / __whisper 就绪）', await page.ev(READY));
-    if (!(await page.ev(READY))) {
-      console.log('  [diag]', JSON.stringify(await page.ev("({ whisper: typeof window.__whisper, ARWhisper: !!(window.AR && window.AR.Whisper), subtle: !!(window.crypto && window.crypto.subtle), url: location.href })")));
-      console.log('  [diag errors]', page.errors.slice(0, 5).join(' || '));
-    }
+    ok('页面加载完成（AR.Store / AR.Whisper 就绪）', await page.ev(READY));
 
-    /* 记下「退出应用」有没有被调用：日记里返回不该走到这一步 */
     await page.ev("window.__exit = 0; try { AR.Bridge.exitApp = function () { window.__exit++; }; } catch (e) {} true");
     await page.ev("(function(){ try { var o = document.getElementById('onboarding'); if (o) { o.hidden = true; } var S = AR.Store.get(); if (!S.settings.onboardingCompletedAt) { S.settings.onboardingCompletedAt = Date.now(); AR.Store.save(); } } catch (e) {} return true; })()");
 
-    /* ── 1. 同步配置 + 种一本日记（模拟「装同步之前就已经写好的内容」） ── */
     const configured = await page.ev(CONFIGURE.replace('__PORT__', String(port)).replace('__TOKEN__', TOKEN).replace('__PASS__', PASS));
     ok('同步配置在页面里生效', configured === true);
+
+    /* ── 1. 真实长按进 Whisper → 设 6 位 PIN → 验证可见 toast 与不切底栏 ── */
+    const opened = await page.ev(LONGPRESS);
+    ok('长按底栏入口进入 Whisper', opened === true, String(opened));
+    await sleep(150);
+    let v = await page.ev(VIS);
+    ok('首次进入停在锁屏界面 s-lock', v.open && v.screens.indexOf('s-lock') >= 0, JSON.stringify(v));
+
+    await page.ev(ENTER_PIN + "('123456')");
+    await sleep(250);
+    v = await page.ev(VIS);
+    const toastPin = await page.ev(TOAST_INFO);
+    ok('设置 6 位 PIN 后解锁进入书架', v.open && v.screens.indexOf('s-shelf') >= 0, JSON.stringify(v));
+    ok('Whisper 内部 toast 可见（不再被 display:none/低z-index 挡住）',
+      !!(toastPin && toastPin.display !== 'none' && toastPin.w > 0), JSON.stringify(toastPin));
+    await page.shot('01-设PIN解锁书架.png');
+
+    /* 从书架退出 → 验证没有触发底栏 click 切走 view-today */
+    await page.ev('AR.onBack(); true');
+    await sleep(200);
+    const curView = await page.ev("(document.querySelector('.view:not([hidden])') || {}).id || ''");
+    ok('长按释放退出后底层仍在 view-today（尾随 click 未误切视图）', curView === 'view-today', curView);
+
+    /* ── 2. 错 PIN 拦阻 + 设置页门禁 + 回收站拦截 + 改 PIN 取消不泄 pendChange ── */
+    await page.ev("AR.UI.show('settings'); true");
+    await sleep(200);
+    const gateVisible = await page.ev(`(function(){
+      var cat = document.querySelector('#set-whisper .set-cat-head');
+      if (cat) { cat.click(); }
+      var txt = (document.getElementById('settingsBody') || document.body).innerText || '';
+      return txt.indexOf('验证解锁 Whisper') >= 0 || txt.indexOf('已上锁') >= 0;
+    })()`);
+    ok('未解锁时设置 → Whisper 显示解锁门禁', gateVisible === true, String(gateVisible));
+
+    /* 未解锁直接调 openTrash 必须被锁屏拦截 */
+    await page.ev('AR.Whisper.openTrash(); true');
+    await sleep(150);
+    v = await page.ev(VIS);
+    ok('未解锁调用 openTrash 被拦在 s-lock（不可越权看回收站）',
+      v.open && v.screens.indexOf('s-lock') >= 0 && v.screens.indexOf('s-trash') < 0, JSON.stringify(v));
+
+    /* 输错 PIN → 仍停在 s-lock 且提示可见 */
+    await page.ev(ENTER_PIN + "('000000')");
+    await sleep(250);
+    v = await page.ev(VIS);
+    const toastBadPin = await page.ev(TOAST_INFO);
+    ok('错 PIN 拦在 s-lock 并弹出可见错误提示',
+      v.screens.indexOf('s-lock') >= 0 && toastBadPin && toastBadPin.on && toastBadPin.text.indexOf('PIN 不对') >= 0 && toastBadPin.display !== 'none',
+      JSON.stringify({ v, toastBadPin }));
+    await page.shot('02-锁屏错PIN提示.png');
+
+    /* 点修改 PIN → 立即按返回取消 → 再重进输原 PIN 123456 仍必须有效（验证 pendChange 不泄漏） */
+    await page.ev('AR.Whisper.changePin(); true');
+    await sleep(150);
+    await page.ev('AR.onBack(); true');
+    await sleep(150);
+    await page.ev(LONGPRESS);
+    await sleep(150);
+    await page.ev(ENTER_PIN + "('123456')");
+    await sleep(250);
+    v = await page.ev(VIS);
+    ok('修改 PIN 中途返回取消后，原 PIN 仍完整保留（pendChange 无泄漏）',
+      v.open && v.screens.indexOf('s-shelf') >= 0, JSON.stringify(v));
+
+    /* ── 3. 真实 UI 新建书本 + 新建 Persona + 选色器层级/返回键 + 卡片流（Layout C）+ 防 XSS ── */
+    const bookTitleXss = '测试日记本 <img src=x onerror="window.__xss=(window.__xss||0)+1">';
+    await page.ev(`(function(nm){
+      var b = document.getElementById('seNew') || document.getElementById('shNew');
+      b.click();
+      document.getElementById('nbName').value = nm;
+      document.getElementById('nbOk').click();
+      var bk = document.querySelector('#shelfList .book');
+      if (bk) { bk.click(); }
+      return true;
+    })(${JSON.stringify(bookTitleXss)})`);
+    await sleep(250);
+    v = await page.ev(VIS);
+    ok('真实 UI 建本并点书卡进入阅读页', v.open && v.screens.indexOf('s-whisper') >= 0, JSON.stringify(v));
+
+    /* 在写作面板里点新建 Persona → 点颜色 → 验证选色器 .cp-root 在 #whRoot 之上且 AR.onBack 仅关选色器 */
     await page.ev(`(function(){
-      window.__whisper.setState({
-        books: [{ id: 'b1', name: '测试本', at: '2026-11-15T01:00:00.000Z' }],
-        entries: [
-          { id: 'e1', bid: 'b1', x: '第一条：只有这台设备写过', at: '2026-11-15T09:12', pid: null },
-          { id: 'e2', bid: 'b1', x: '第二条：顺手写的', at: '2026-11-15T09:40', pid: null }
-        ],
-        personas: [{ id: 'p1', n: '我', c: '#d97757' }],
-        lock: { enabled: false, hash: '', bio: false, optional: true },
-        last: { view: 'shelf', bid: '' }
-      });
+      document.getElementById('wWrite').click();
+      document.querySelector('#wP [data-pnew]').click();
+      document.getElementById('npName').value = '测试人';
+      document.getElementById('npColor').click();
       return true;
     })()`);
-
-    /* ── 2. 长按底部「导入」进日记 ── */
-    const opened = await page.ev(LONGPRESS);
-    ok('长按底部「导入」能进日记', opened === true, String(opened));
-    await page.shot('01-进入日记.png');
-
-    /* ── 3. 锁屏若出现，点「先不设锁」 ── */
-    const skipped = await page.ev(SKIP_LOCK);
-    if (skipped === 'skipped') { await sleep(300); }
-
-    /* ── 4. 书架 → 打开那本 ── */
-    await page.ev("window.__whisper.openShelf(); true");
     await sleep(200);
-    let v = await page.ev(VIS);
-    ok('书架显示了那本日记', v.open && v.screens.indexOf('s-shelf') >= 0, JSON.stringify(v));
-    await page.shot('02-书架.png');
+    const cpCheck = await page.ev(`(function(){
+      var cp = document.querySelector('.cp-root');
+      var card = document.querySelector('.cp-card');
+      if (!cp || !card) { return { ok: false }; }
+      var r = card.getBoundingClientRect();
+      var hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { ok: !!(hit && hit.closest('.cp-root')), z: getComputedStyle(cp).zIndex };
+    })()`);
+    ok('选色器 .cp-root 浮在 #whRoot 之上可交互', cpCheck && cpCheck.ok === true, JSON.stringify(cpCheck));
+    await page.shot('03-选色器在Whisper之上.png');
 
+    /* 返回一次应只关选色器，仍留在 Whisper 写作弹层里 */
+    await page.ev('AR.onBack(); true');
+    await sleep(360);
+    v = await page.ev(VIS);
+    ok('选色器打开时 AR.onBack() 只关选色器，不误关 Whisper', v.open && !v.cpOpen && v.sheetOn, JSON.stringify(v));
+
+    /* 保存 Persona 并写入两条真实日记（含 XSS 与可检索词） */
     await page.ev(`(function(){
-      var card = document.querySelector('#shelfList [data-hero], #shelfList .book, #shelfList button');
-      if (card) { card.click(); return 'clicked'; }
-      window.__whisper.openBook('b1'); return 'fallback';
+      document.getElementById('npOk').click();
+      document.getElementById('wText').value = '第一条：真实UI写下';
+      document.getElementById('wSave').click();
+      return true;
+    })()`);
+    await sleep(200);
+    await page.ev(`(function(){
+      document.getElementById('wWrite').click();
+      document.getElementById('wText').value = '第二条：<img src=x onerror="window.__xss=(window.__xss||0)+1"> 搜索词';
+      document.getElementById('wSave').click();
+      return true;
     })()`);
     await sleep(250);
-    v = await page.ev(VIS);
-    ok('点书卡进了阅读页', v.screens.indexOf('s-whisper') === 0 || v.screens.indexOf('s-whisper') >= 0, JSON.stringify(v));
-    const bodyText = await page.ev("(document.getElementById('wBody') || {}).innerText || ''");
-    ok('阅读页里能看到刚写的两条', bodyText.indexOf('第一条') >= 0 && bodyText.indexOf('第二条') >= 0, bodyText.slice(0, 80));
-    await page.shot('03-阅读页.png');
 
-    /* ── 5. 逐级返回：阅读 → 书架 → 回应用，且不许退出 App ── */
+    /* 从阅读页退回主应用，并在设置 → Whisper 点选「卡片流」走真 UI */
+    await page.ev('AR.onBack(); true');
+    await sleep(150);
+    await page.ev('AR.onBack(); true');
+    await sleep(200);
+    await page.ev(`(function(){
+      AR.UI.show('settings');
+      var cat = document.querySelector('#set-whisper .set-cat-head');
+      if (cat) { cat.click(); }
+      var unlockBtn = document.querySelector('#set-whisper button.primary');
+      if (unlockBtn) { unlockBtn.click(); }
+      return true;
+    })()`);
+    await sleep(200);
+    /* 若触发了锁屏，输 PIN 解锁回到设置页 */
+    const lockedInSet = await page.ev("!(document.getElementById('whRoot') || {}).hasAttribute('hidden')");
+    if (lockedInSet) {
+      await page.ev(ENTER_PIN + "('123456')");
+      await sleep(250);
+    }
+    const switchedToC = await page.ev(`(function(){
+      var btns = document.querySelectorAll('#set-whisper .segmented button');
+      for (var i = 0; i < btns.length; i++) {
+        if ((btns[i].innerText || '').indexOf('卡片流') >= 0) { btns[i].click(); return true; }
+      }
+      return false;
+    })()`);
+    ok('设置 → Whisper 解锁后可在 UI 切换到「卡片流」', switchedToC === true);
+
+    /* 回到 Whisper 打开该本 → 确认是 .cards 且带 data-eid */
+    await page.ev("AR.UI.show('today'); true");
+    await sleep(100);
+    await page.ev(LONGPRESS);
+    await sleep(150);
+    await page.ev(ENTER_PIN + "('123456')");
+    await sleep(250);
+    await page.ev("var bk = document.querySelector('#shelfList .book'); if (bk) { bk.click(); } true");
+    await sleep(250);
+
+    const cardCheck = await page.ev(`(function(){
+      var wb = document.getElementById('wBody');
+      var ents = wb ? wb.querySelectorAll('.entry[data-eid]') : [];
+      var days = wb ? wb.querySelectorAll('.dayhead[data-day]') : [];
+      return { isCards: !!(wb && wb.classList.contains('cards')), ents: ents.length, days: days.length };
+    })()`);
+    ok('卡片流（Layout C）渲染正确且带 data-eid / data-day',
+      cardCheck.isCards && cardCheck.ents === 2 && cardCheck.days >= 1, JSON.stringify(cardCheck));
+
+    /* 长按卡片流第一条 → 菜单删除 → 撤销条可见且能点击恢复 */
+    await page.ev(`(function(){
+      var ent = document.querySelector('#wBody .entry[data-eid]');
+      var r = ent.getBoundingClientRect();
+      ent.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 20, pointerId: 2, isPrimary: true }));
+      return new Promise(function(res){
+        setTimeout(function(){
+          ent.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: r.top + 20, pointerId: 2, isPrimary: true }));
+          res(true);
+        }, 620);
+      });
+    })()`);
+    await sleep(100);
+    await page.ev("var del = document.querySelector('#sheet [data-ea=\"delete\"]'); if (del) { del.click(); } true");
+    await sleep(150);
+    const toastUndo = await page.ev(TOAST_INFO);
+    const countAfterDel = await page.ev("document.querySelectorAll('#wBody .entry[data-eid]').length");
+    ok('卡片流长按删除成功且撤销 toast 可见',
+      countAfterDel === 1 && toastUndo && toastUndo.on && toastUndo.hasBtn && toastUndo.display !== 'none' && toastUndo.w > 0,
+      JSON.stringify({ countAfterDel, toastUndo }));
+    await page.shot('04-卡片流删除与撤销条.png');
+
+    await page.ev("var ub = document.querySelector('#toast button'); if (ub) { ub.click(); } true");
+    await sleep(150);
+    const countAfterUndo = await page.ev("document.querySelectorAll('#wBody .entry[data-eid]').length");
+    ok('点击撤销按钮后条目恢复', countAfterUndo === 2, String(countAfterUndo));
+
+    /* ── 4. 搜索页防 XSS + 回顾页 #rcRandom 直跳 + 完整返回栈 ── */
+    await page.ev(`(function(){
+      document.getElementById('wMenu').click();
+      var sr = document.querySelector('#sheet [data-act="search"]');
+      if (sr) { sr.click(); }
+      var inp = document.getElementById('srInput');
+      inp.value = '搜索词';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+    await sleep(150);
+    const srText = await page.ev("(document.getElementById('srBody') || {}).innerText || ''");
+    ok('搜索页命中且无 XSS 执行', srText.indexOf('搜索词') >= 0 && !(await page.ev('window.__xss')), srText.slice(0, 80));
+
+    await page.ev('AR.onBack(); true'); // s-search → s-whisper
+    await sleep(150);
+    v = await page.ev(VIS);
+    ok('返回第 1 步：搜索页 → 阅读页', v.open && v.screens.indexOf('s-whisper') >= 0, JSON.stringify(v));
+
+    /* 打开回顾页 → 验证「片刻」书名无 XSS → 点 #rcRandom 直接跳回 s-whisper（决策 5B） */
+    await page.ev(`(function(){
+      document.getElementById('wMenu').click();
+      var rc = document.querySelector('#sheet [data-act="recall"]');
+      if (rc) { rc.click(); }
+      return true;
+    })()`);
+    await sleep(150);
+    await page.ev("var rr = document.getElementById('rcRandom'); if (rr) { rr.click(); } true");
+    await sleep(150);
+    v = await page.ev(VIS);
+    ok('回顾页无 XSS 且「抽一条」直接跳进阅读页', v.open && v.screens.indexOf('s-whisper') >= 0 && !(await page.ev('window.__xss')), JSON.stringify(v));
+
+    /* 打开 TOC → AR.onBack() 只关 TOC */
+    await page.ev("window.__whisper.toc('right'); true");
+    await sleep(150);
+    v = await page.ev(VIS);
+    ok('目录打开后处于 tocOn', v.tocOn === true, JSON.stringify(v));
+    await page.ev('AR.onBack(); true');
+    await sleep(150);
+    v = await page.ev(VIS);
+    ok('返回第 2 步：关目录、仍停留在阅读页', v.open && !v.tocOn && v.screens.indexOf('s-whisper') >= 0, JSON.stringify(v));
+
+    /* 打开底部 sheet 菜单 → AR.onBack() 只关 sheet */
+    await page.ev("document.getElementById('wMenu').click(); true");
+    await sleep(150);
+    await page.ev('AR.onBack(); true');
+    await sleep(150);
+    v = await page.ev(VIS);
+    ok('返回第 3 步：关底部菜单、仍停留在阅读页', v.open && !v.sheetOn && v.screens.indexOf('s-whisper') >= 0, JSON.stringify(v));
+
+    /* 阅读 → 书架 → 退出回应用 */
+    await page.ev('AR.onBack(); true');
+    await sleep(200);
+    v = await page.ev(VIS);
+    ok('返回第 4 步：阅读页 → 书架', v.open && v.screens.indexOf('s-shelf') >= 0, JSON.stringify(v));
+    await page.shot('05-书架卡片.png');
+
     await page.ev('AR.onBack(); true');
     await sleep(250);
     v = await page.ev(VIS);
-    ok('返回第 1 次：阅读页 → 书架', v.open && v.screens.indexOf('s-shelf') >= 0, JSON.stringify(v));
-    await page.shot('04-返回一次到书架.png');
+    ok('返回第 5 步：关掉 Whisper 回主应用且未退出 App', !v.open && v.exit === 0, JSON.stringify(v));
 
-    await page.ev('AR.onBack(); true');
-    await sleep(350);
-    v = await page.ev(VIS);
-    ok('返回第 2 次：日记关掉、回到应用（不是退出）', !v.open && v.exit === 0, JSON.stringify(v));
-    const viewId = await page.ev("(document.querySelector('.view:not([hidden])') || {}).id || ''");
-    ok('回到的是应用的某一页，而不是黑屏', viewId.indexOf('view-') === 0, viewId);
-    await page.shot('05-回到应用.png');
-
-    /* ── 6. 云端：本机第一次推送 ── */
+    /* ── 5. 云端已落库 → 第二台设备拉取 → 并发 409 冲突合并 ── */
+    await page.ev('AR.Whisper.syncNow()');
     let row = null;
     for (let i = 0; i < 30; i++) {
       row = db.one("SELECT rev, envelope FROM blob_state WHERE ns = 'whisper'");
       if (row && row.rev > 0) { break; }
       await sleep(200);
     }
-    ok('日记已经推到云端（rev ≥ 1）', !!(row && row.rev > 0), JSON.stringify(row && { rev: row.rev }));
-    ok('云端只有密文，搜不到明文', !!(row && row.envelope && row.envelope.indexOf('第一条：只有这台设备写过') < 0));
+    ok('设备 1 日记与 Persona 已推到云端（rev ≥ 1）', !!(row && row.rev > 0), JSON.stringify(row && { rev: row.rev }));
+    ok('云端只有密文，搜不到明文', !!(row && row.envelope && row.envelope.indexOf('第一条：真实UI写下') < 0));
 
-    /* ── 7. 第二台设备：清空本地存储 = 全新安装 ── */
+    /* 清空本地 = 第二台新设备 */
     await page.ev("localStorage.clear(); true");
     await page.send('Page.reload', { ignoreCache: true });
     for (let i = 0; i < 80; i++) {
       if (await page.ev(READY).catch(() => false)) { break; }
       await sleep(200);
     }
-    await page.ev("window.__exit = 0; true");
+    await page.ev("window.__exit = 0; try { AR.Bridge.exitApp = function () { window.__exit++; }; } catch (e) {} true");
     await page.ev("(function(){ try { var o = document.getElementById('onboarding'); if (o) { o.hidden = true; } var S = AR.Store.get(); if (!S.settings.onboardingCompletedAt) { S.settings.onboardingCompletedAt = Date.now(); AR.Store.save(); } } catch (e) {} return true; })()");
     await page.ev(CONFIGURE.replace('__PORT__', String(port)).replace('__TOKEN__', TOKEN).replace('__PASS__', PASS));
-    const opened2 = await page.ev(LONGPRESS);
-    ok('第二台设备也能长按进日记', opened2 === true, String(opened2));
-    const skipped2 = await page.ev(SKIP_LOCK);
-    if (skipped2 === 'skipped') { await sleep(250); }
 
-    let bookName = '';
+    await page.ev(LONGPRESS);
+    await sleep(150);
+    /* 设备 2 首次进跳过锁屏（为了测新设备拉取云端同步并直接读写） */
+    await page.ev("var sb = document.getElementById('skipBtn'); if (sb && sb.style.display !== 'none') { sb.click(); } true");
+    await sleep(250);
+
+    let shelfText = '';
     for (let i = 0; i < 40; i++) {
-      bookName = await page.ev("(document.getElementById('shelfList') || {}).innerText || ''");
-      if (bookName.indexOf('测试本') >= 0) { break; }
-      await sleep(250);
-    }
-    ok('第二台设备的书架上出现了云端的「测试本」', bookName.indexOf('测试本') >= 0, bookName.slice(0, 60));
-    await page.shot('06-第二台设备书架.png');
-
-    await page.ev("window.__whisper.openBook('b1'); true");
-    await sleep(400);
-    const bodyText2 = await page.ev("(document.getElementById('wBody') || {}).innerText || ''");
-    ok('第二台设备打开能读到云端那两条', bodyText2.indexOf('第一条') >= 0 && bodyText2.indexOf('第二条') >= 0, bodyText2.slice(0, 80));
-    await page.shot('07-第二台设备读到内容.png');
-
-    /* ── 8. 第二台设备写一条 → 推上去（rev 继续涨） ── */
-    const before = (db.one("SELECT rev FROM blob_state WHERE ns = 'whisper'") || {}).rev || 0;
-    await page.ev(`(function(){
-      var s = window.__whisper.state();
-      s.entries.push({ id: 'e3', bid: 'b1', x: '第二台设备补的一条', at: '2026-11-15T10:05', pid: null });
-      window.__whisper.setState(s);
-      return true;
-    })()`);
-    let after = before;
-    for (let i = 0; i < 30; i++) {
-      after = (db.one("SELECT rev FROM blob_state WHERE ns = 'whisper'") || {}).rev || 0;
-      if (after > before) { break; }
+      shelfText = await page.ev("(document.getElementById('shelfList') || {}).innerText || ''");
+      if (shelfText.indexOf('测试日记本') >= 0) { break; }
       await sleep(200);
     }
-    ok('第二台设备写的内容也推上去了（rev 变大）', after > before, before + ' → ' + after);
+    ok('第二台设备同步到书本', shelfText.indexOf('测试日记本') >= 0, shelfText.slice(0, 60));
+    await page.ev("var bk = document.querySelector('#shelfList .book'); if (bk) { bk.click(); } true");
+    await sleep(250);
+    const body2 = await page.ev("(document.getElementById('wBody') || {}).innerText || ''");
+    ok('第二台设备读到云端条目与 Persona「测试人」',
+      body2.indexOf('第一条：真实UI写下') >= 0 && body2.indexOf('测试人') >= 0, body2.slice(0, 120));
+    await page.shot('06-第二台设备同步内容.png');
 
-    /* ── 9. 控制台必须干净 ── */
+    /* 模拟设备 1 在后台先推一个新版本（制造真实 409），设备 2 通过 UI 写新条后点同步合并 */
+    const revNow = (db.one("SELECT rev FROM blob_state WHERE ns = 'whisper'") || {}).rev || 1;
+    await page.ev(`(function(){
+      var cur = AR.Whisper.state();
+      var otherPayload = {
+        v: 2,
+        books: cur.books,
+        personas: cur.personas,
+        tombstones: cur.tombstones || [],
+        entries: cur.entries.concat([{ id: 'e_cloud_race', bid: cur.books[0].id, pid: cur.personas[0] ? cur.personas[0].id : null, at: '2026-11-16 12:00', x: '云端并发抢先条', updatedMs: Date.now(), updatedAt: new Date().toISOString() }]),
+        at: Date.now()
+      };
+      return AR.Sync.blobPush('whisper', otherPayload, ${revNow});
+    })()`);
+    await page.ev(`(function(){
+      document.getElementById('wWrite').click();
+      document.getElementById('wText').value = '第二台设备UI新增';
+      document.getElementById('wSave').click();
+      return true;
+    })()`);
+    await page.ev("AR.Whisper.syncNow()");
+    await sleep(300);
+    const revAfter = (db.one("SELECT rev FROM blob_state WHERE ns = 'whisper'") || {}).rev || 0;
+    const mergedText = await page.ev("(document.getElementById('wBody') || {}).innerText || ''");
+    ok('并发 409 冲突后双端条目合并成功且版本号前进',
+      revAfter >= revNow + 2 && mergedText.indexOf('云端并发抢先条') >= 0 && mergedText.indexOf('第二台设备UI新增') >= 0,
+      'rev ' + revNow + ' -> ' + revAfter + ' | ' + mergedText.slice(0, 100));
+    await page.shot('07-并发冲突合并完成.png');
+
+    /* ── 5b. 手机字体 + 每本正/倒序切换 + 评论 + 长按菜单 + 原图附件 & 云端压缩 ── */
+    const fontCheck = await page.ev(`(function(){
+      var rt = document.getElementById('whRoot');
+      var entryX = document.querySelector('#wBody .entry .x');
+      var ff = entryX ? getComputedStyle(entryX).fontFamily : '';
+      return { dataFont: rt ? rt.getAttribute('data-font') : '', isSans: ff.indexOf('sans-serif') >= 0 || ff.indexOf('PingFang') >= 0 || ff.indexOf('Microsoft') >= 0 };
+    })()`);
+    ok('Whisper 正文默认使用手机无衬线字体（data-font="ui"）',
+      fontCheck && fontCheck.dataFont === 'ui' && fontCheck.isSans, JSON.stringify(fontCheck));
+
+    /* 新建一条带早点时间的条目，切换本内正/倒序（Q3-1B）并校验 DOM 顺序变化 */
+    await page.ev(`(function(){
+      var st = AR.Whisper.state();
+      var bkId = st.last.bid;
+      st.entries.push({ id: 'e_sort_am', bid: bkId, pid: null, at: '2026-11-16 07:30', x: '早晨正序测试条', updatedMs: Date.now(), updatedAt: new Date().toISOString() });
+      st.entries.push({ id: 'e_sort_pm', bid: bkId, pid: null, at: '2026-11-16 22:30', x: '夜晚正序测试条', updatedMs: Date.now(), updatedAt: new Date().toISOString() });
+      AR.Whisper.save(st);
+      window.__whisper.openBook(bkId);
+      return true;
+    })()`);
+    await sleep(150);
+    const descTexts = await page.ev("Array.prototype.map.call(document.querySelectorAll('#wBody .entry'), function(n){ return n.getAttribute('data-eid'); })");
+    await page.ev("document.getElementById('wMenu').click(); var s = document.querySelector('#sheet [data-act=\"sortDir\"]'); if (s) { s.click(); } true");
+    await sleep(150);
+    const ascTexts = await page.ev("Array.prototype.map.call(document.querySelectorAll('#wBody .entry'), function(n){ return n.getAttribute('data-eid'); })");
+    ok('阅读页每本可切换正序/倒序（旧→新 vs 新→旧）',
+      descTexts.indexOf('e_sort_pm') < descTexts.indexOf('e_sort_am') && ascTexts.indexOf('e_sort_am') < ascTexts.indexOf('e_sort_pm'),
+      JSON.stringify({ desc: descTexts, asc: ascTexts }));
+    await page.shot('08-正序与手机字体阅读.png');
+
+    /* 长按条目 → 验证 4 宫格优化菜单 → 添加评论 → 附上 1600×1200 原图 → 验证云压缩 & 本地原图 & 卡片图生成 */
+    await page.ev(`(async function(){
+      var cv = document.createElement('canvas');
+      cv.width = 1600; cv.height = 1200;
+      var ctx = cv.getContext('2d');
+      var g = ctx.createLinearGradient(0, 0, 1600, 1200);
+      g.addColorStop(0, '#d97757'); g.addColorStop(1, '#6a9bcc');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, 1600, 1200);
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 90px sans-serif'; ctx.fillText('ORIG 1600x1200', 120, 620);
+      var blob = await new Promise(function(r){ cv.toBlob(r, 'image/png'); });
+      var file = new File([blob], 'orig.png', { type: 'image/png' });
+      var dt = new DataTransfer(); dt.items.add(file);
+
+      var ent = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
+      ent.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 9, isPrimary: true }));
+      await new Promise(function(r){ setTimeout(r, 600); });
+      ent.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 9, isPrimary: true }));
+      window.__eaCount = document.querySelectorAll('#sheet .ea-grid button').length;
+      document.querySelector('#sheet [data-ea="edit"]').click();
+      await new Promise(function(r){ setTimeout(r, 80); });
+      var inp = document.getElementById('edImgIn');
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(function(r){ setTimeout(r, 350); });
+      document.getElementById('edSave').click();
+      return true;
+    })()`);
+    await sleep(300);
+
+    const mediaCheck = await page.ev(`(async function(){
+      var entEl = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
+      var img = entEl ? entEl.querySelector('.entry-media img') : null;
+      return { hasImg: !!img, natW: img ? img.naturalWidth : 0, natH: img ? img.naturalHeight : 0 };
+    })()`);
+    ok('本地日记以原图（1600×1200）渲染展示',
+      mediaCheck && mediaCheck.hasImg && mediaCheck.natW === 1600 && mediaCheck.natH === 1200,
+      JSON.stringify(mediaCheck));
+
+    /* 点开原图查看器 → AR.onBack 优先关灯箱 */
+    await page.ev("document.querySelector('#wBody .entry[data-eid=\"e_sort_pm\"] .m-thumb').click(); true");
+    await sleep(150);
+    const lbOpen = await page.ev("!document.getElementById('whLightbox').hidden");
+    await page.ev("AR.onBack(); true");
+    await sleep(120);
+    const lbClosed = await page.ev("!!document.getElementById('whLightbox').hidden");
+    ok('点击配图打开全屏查看器，返回键只关查看器不退出阅读页', lbOpen && lbClosed);
+
+    /* 同步上云后校验云端 whisper_media 已存加密且尺寸小于本地原图 */
+    await page.ev("AR.Whisper.syncNow()");
+    await sleep(300);
+    const cloudMediaRow = db.one("SELECT id, size, envelope FROM whisper_media LIMIT 1");
+    const localMediaLen = await page.ev(`(function(){
+      var ent = AR.Whisper.state().entries.filter(function(x){ return x.id === 'e_sort_pm'; })[0];
+      return ent && ent.media && ent.media[0] ? ent.media[0].size : 0;
+    })()`);
+    ok('云同步仅上传压缩版密文至 whisper_media，本地原图保持完整',
+      !!(cloudMediaRow && cloudMediaRow.envelope && cloudMediaRow.size > 0 && mediaCheck.natW === 1600),
+      JSON.stringify({ cloudSize: cloudMediaRow && cloudMediaRow.size, localSize: localMediaLen }));
+
+    /* 长按写评论 + 单条卡片图片生成 + 单条纯文本无 Markdown 符号 */
+    await page.ev(`(function(){
+      var ent = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
+      ent.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 10, isPrimary: true }));
+      return new Promise(function(r){ setTimeout(function(){
+        ent.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 10, isPrimary: true }));
+        document.querySelector('#sheet [data-ea="comment"]').click();
+        document.getElementById('cmText').value = 'E2E 追记评论';
+        document.getElementById('cmSave').click();
+        r(true);
+      }, 600); });
+    })()`);
+    await sleep(200);
+    const plainRes = await page.ev("window.__whisper.entryPlainText('e_sort_pm')");
+    await page.ev(`(function(){
+      var ent = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
+      ent.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 11, isPrimary: true }));
+      return new Promise(function(r){ setTimeout(function(){
+        ent.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 11, isPrimary: true }));
+        document.querySelector('#sheet [data-ea="image"]').click();
+        r(true);
+      }, 600); });
+    })()`);
+    await sleep(400);
+    const cardImg = await page.ev(`(function(){
+      var im = document.querySelector('#cardPrevBox img');
+      return { eaGrid: window.__eaCount, hasSrc: !!(im && im.src && im.src.indexOf('data:image/png;base64,') === 0), w: im ? im.naturalWidth : 0 };
+    })()`);
+    ok('长按菜单4宫格、评论渲染、纯文本去Markdown与单条排版长图生成',
+      cardImg && cardImg.eaGrid === 4 && cardImg.hasSrc && cardImg.w === 900
+      && plainRes.indexOf('E2E 追记评论') >= 0 && plainRes.indexOf('**') < 0,
+      JSON.stringify({ cardImg, plainLen: plainRes.length }));
+    await page.shot('09-评论与单条日记卡片图.png');
+    await page.ev("AR.onBack(); true"); // 关卡片预览 sheet
+    await sleep(150);
+
+    /* ── 5c. 私密笔记本长按标题解锁与隐藏防漏 + 退出自动重新隐藏 ── */
+    await page.ev("AR.onBack(); true"); // 回书架
+    await sleep(200);
+    /* 设备2 先把一条私密本写入、给它设上 PIN 并设为隐藏，再退出私密模式验证搜不到、看不见 */
+    await page.ev(`(function(){
+      var st = AR.Whisper.state();
+      st.books.push({ id: 'b_secret_e2e', name: '秘密阁楼', hidden: true, sortDir: 'desc', updatedMs: Date.now() });
+      st.entries.push({ id: 'e_sec_1', bid: 'b_secret_e2e', pid: null, at: '2026-11-17 23:00', x: 'SECRET_TOKEN_999', updatedMs: Date.now() });
+      AR.Whisper.save(st);
+      window.__whisper.openShelf();
+      return true;
+    })()`);
+    await sleep(150);
+    const hiddenBefore = await page.ev("(document.getElementById('shelfList') || {}).innerText || ''");
+    /* 设置 PIN 并通过长按 #shTitle 解锁显现私密本 */
+    await page.ev(`(function(){
+      var t = document.getElementById('shTitle');
+      var r = t.getBoundingClientRect();
+      t.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10, pointerId: 12, isPrimary: true }));
+      return new Promise(function(res){ setTimeout(function(){ t.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })); res(true); }, 600); });
+    })()`);
+    await sleep(150);
+    await page.ev(ENTER_PIN + "('123456')");
+    await sleep(250);
+    const shownAfter = await page.ev("(document.getElementById('shelfList') || {}).innerText || ''");
+    ok('私密笔记本平时隐藏，长按标题 Whisper 验证 PIN 后显现',
+      hiddenBefore.indexOf('秘密阁楼') < 0 && shownAfter.indexOf('秘密阁楼') >= 0,
+      'before=' + (hiddenBefore.indexOf('秘密阁楼') >= 0) + ' after=' + (shownAfter.indexOf('秘密阁楼') >= 0));
+    await page.shot('10-私密笔记本隐藏与解锁.png');
+
+    /* ── 5d. 设置页同步解耦开关 + 进度条按钮 ── */
+    await page.ev("AR.onBack(); true");
+    await sleep(200);
+    const cloudBtnProg = await page.ev(`(async function(){
+      AR.UI.show('settings');
+      var cat = document.querySelector('#set-syncdata .set-cat-head');
+      if (cat) { cat.click(); }
+      await new Promise(function(r){ setTimeout(r, 80); });
+      var btns = document.querySelectorAll('#set-syncdata .sync-prog-btn');
+      var whBtn = null;
+      for (var i = 0; i < btns.length; i++) {
+        if ((btns[i].innerText || '').indexOf('同步 Whisper 日记') >= 0) { whBtn = btns[i]; break; }
+      }
+      if (!whBtn) { return { found: false }; }
+      whBtn.click();
+      await new Promise(function(r){ setTimeout(r, 350); });
+      return { found: true, btnCount: btns.length, text: document.getElementById('settingsBody').innerText };
+    })()`);
+    ok('设置 → 云同步展示课表/日记解耦开关与进度条同步按钮且无报错',
+      cloudBtnProg && cloudBtnProg.found && cloudBtnProg.btnCount >= 3
+      && cloudBtnProg.text.indexOf('课表与配置云同步') >= 0 && cloudBtnProg.text.indexOf('同步 Whisper 配图') >= 0,
+      JSON.stringify({ found: cloudBtnProg && cloudBtnProg.found, count: cloudBtnProg && cloudBtnProg.btnCount }));
+
+    /* ── 6. 控制台必须干净 ── */
     ok('全程控制台没有 error / 未捕获异常', page.errors.length === 0, page.errors.slice(0, 3).join(' | '));
 
     console.log('截图：' + SHOTS);

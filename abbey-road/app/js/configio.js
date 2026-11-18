@@ -266,7 +266,10 @@ var AR = window.AR || (window.AR = {});
         + '</span><span class="msg">' + esc(det.table) + ' · ' + esc(det.label) + '</span></div>'));
       shown++;
     }
-    if (!report.added && !report.updated && !report.conflicts) {
+    if (report.removed) {
+      list.appendChild(el('<div class="issue info"><span class="msg">本次合并将按对方删除记录同步移除 ' + report.removed + ' 条本机记录。</span></div>'));
+    }
+    if (!report.added && !report.updated && !report.conflicts && !report.removed) {
       list.appendChild(el('<div class="issue info"><span class="msg">两边数据一致，不需要变更。点「合并导入」也不会重复添加。</span></div>'));
     }
     if (h.apply) { h.apply.disabled = false; }
@@ -309,11 +312,18 @@ var AR = window.AR || (window.AR = {});
      */
     try {
       if (AR.UI.applyTheme) { AR.UI.applyTheme(); }
+      if (AR.UI.applyBgStyle) { AR.UI.applyBgStyle(); }
+      if (AR.UI.applyOdStyle) { AR.UI.applyOdStyle(); }
+      if (AR.UI.applyHeatSize) { AR.UI.applyHeatSize(); }
       if (AR.UI.applyModalTuning) { AR.UI.applyModalTuning(); }
       if (AR.UI.applyPerf) { AR.UI.applyPerf(); }
       if (AR.UI.applyGlass) { AR.UI.applyGlass(); }
       if (AR.UI.applyMotion) { AR.UI.applyMotion(); }
     } catch (e) { /* 外观重套失败不该让导入整体失败 */ }
+
+    try {
+      if (AR.Reminders && AR.Reminders.sync) { AR.Reminders.sync(true); }
+    } catch (e2) { }
 
     var semAfter = AR.Store.currentSemester();
     var periodsAfter = AR.Store.periodsOf(semAfter ? semAfter.id : null).length;

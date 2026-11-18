@@ -49,3 +49,13 @@ CREATE TABLE IF NOT EXISTS blob_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_blob_history_ns_rev ON blob_history (ns, rev DESC);
+
+-- ── Whisper 图片附件增量表（v0.5.5：云端仅存压缩密文） ────────────
+CREATE TABLE IF NOT EXISTS whisper_media (
+  id          TEXT PRIMARY KEY,
+  envelope    TEXT NOT NULL,
+  size        INTEGER NOT NULL DEFAULT 0,
+  updated_at  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_whisper_media_updated ON whisper_media (updated_at DESC);

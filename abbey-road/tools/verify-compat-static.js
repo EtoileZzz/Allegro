@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 
 const appDir = path.join(__dirname, '..', 'app');
-const cssFiles = ['css/tokens.css', 'css/app.css'].map((f) => path.join(appDir, f));
+const cssFiles = ['css/tokens.css', 'css/app.css', 'css/whisper.css'].map((f) => path.join(appDir, f));
 let pass = 0, fail = 0;
 function ok(name, cond, detail) {
   if (cond) { pass++; console.log('[PASS] ' + name + (detail ? '  |  ' + detail : '')); }
@@ -111,6 +111,16 @@ ok('C13 AndroidManifest 的 versionName 与 APP_VERSION 一致', mName === ver, 
 const bp = fs.readFileSync(path.join(appDir, '..', 'android', 'build.ps1'), 'utf8');
 const bpCode = (/\$versionCode = (\d+)/.exec(bp) || [])[1];
 ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build=' + bpCode + ' manifest=' + mCode);
+const winAppPaths = fs.readFileSync(path.join(appDir, '..', 'windows', 'src', 'AppPaths.cs'), 'utf8');
+const winBuildPs1 = fs.readFileSync(path.join(appDir, '..', 'windows', 'build.ps1'), 'utf8');
+const winReadme = fs.readFileSync(path.join(appDir, '..', 'windows', 'README.txt'), 'utf8');
+const winInst = fs.readFileSync(path.join(appDir, '..', 'windows', 'installer', 'Installer.cs'), 'utf8');
+ok('C14b Windows 四处版本号与 APP_VERSION 一致',
+  (/FallbackVersion = "([^"]+)"/.exec(winAppPaths) || [])[1] === ver
+  && (/\$version\s*=\s*'([^']+)'/.exec(winBuildPs1) || [])[1] === ver
+  && (/v([\d.]+[a-z]*)/.exec(winReadme) || [])[1] === ver
+  && (/internal const string Version = "([^"]+)"/.exec(winInst) || [])[1] === ver,
+  'ver=' + ver);
 
 
 /* ═══════════ 13. 任务模块的样式与入口（v0.4.2 补） ═══════════ */
@@ -609,9 +619,8 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
   ok('C157 通知双渠道（课前 / 每日）',
     recvJava.indexOf('class_reminders') >= 0 && recvJava.indexOf('daily_reminders') >= 0
     && schedJava.indexOf('reminder_channel') >= 0);
-  ok('C158 每日提醒条目会带 channel 字段',
-    fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8').indexOf("channel: 'daily'") >= 0,
-    'reminders.js 未找到 channel: daily');
+  const remHasDaily = fs.readFileSync(path.join(appDir, 'js/reminders.js'), 'utf8').indexOf("channel: 'daily'") >= 0;
+  ok('C158 每日提醒条目会带 channel 字段', remHasDaily, remHasDaily ? '' : 'reminders.js 未找到 channel: daily');
   ok('C159 热力图按「量」上色（用 todoDaySum，不再按次数）',
     fs.readFileSync(path.join(appDir, 'js/ui.js'), 'utf8').indexOf('todoDaySum(t, k)') >= 0);
   ok('C160 设置面板有每日提醒 / 静默同步 / 仅数据三项',
@@ -859,6 +868,136 @@ ok('C14 build.ps1 的 versionCode 与 manifest 一致', bpCode === mCode, 'build
     ui5.indexOf('function hwStatBindLinks(scope, api)') >= 0
     && ui5.indexOf('hwStatBindLinks(pageBox, api);') >= 0
     && ui5.indexOf('hwStatBindLinks(b.nextElementSibling, api);') >= 0);
+
+  /* ── v0.5.3b / v0.5.4：Whisper 层级 / 导出 / 桥接 / ES5 全量门禁 ── */
+  const whJs = fs.readFileSync(path.join(appDir, 'js/whisper.js'), 'utf8');
+  const whCss = stripComments(fs.readFileSync(path.join(appDir, 'css/whisper.css'), 'utf8'));
+  const whEntry = fs.readFileSync(path.join(appDir, 'js/whisper-entry.js'), 'utf8');
+  const wbCs = fs.readFileSync(path.join(root5, 'windows/src/WebBridge.cs'), 'utf8');
+
+  const whToastRule = (/\.wh-root\s+\.toast\s*\{[^}]*\}/.exec(whCss) || [''])[0];
+  const cpZMatch = (/\.cp-root\s*\{[^}]*z-index\s*:\s*(\d+)/.exec(css5) || []);
+  const whZMatch = (/\.wh-root\s*\{[^}]*z-index\s*:\s*(\d+)/.exec(whCss) || []);
+  ok('C212 whisper.css 无 color-mix()、内部 toast 可见且选色器 .cp-root 在 #whRoot 之上',
+    whCss.indexOf('color-mix') < 0
+    && !!whToastRule && whToastRule.indexOf('display:none') < 0 && whToastRule.indexOf('display: none') < 0
+    && !!cpZMatch[1] && !!whZMatch[1] && Number(cpZMatch[1]) > Number(whZMatch[1]),
+    'cp=' + (cpZMatch[1] || '?') + ' wh=' + (whZMatch[1] || '?'));
+
+  const onBackAt = bootSync.indexOf('AR.onBack = function');
+  const onBackSeg = onBackAt >= 0 ? bootSync.slice(onBackAt, bootSync.indexOf('};', onBackAt) + 2) : '';
+  const iCp = onBackSeg.indexOf('closeColorPicker');
+  const iWh = onBackSeg.indexOf('AR.Whisper.handleBack');
+  const iMd = onBackSeg.indexOf('modalOpen');
+  ok('C213 boot.js AR.onBack 退栈顺序：选色器 → Whisper → 主弹窗',
+    iCp >= 0 && iWh > iCp && iMd > iWh,
+    'cp=' + iCp + ' wh=' + iWh + ' modal=' + iMd);
+
+  ok('C214 whisper.js 不再调用不存在的 AR.Bridge.shareText / saveTextFile',
+    whJs.indexOf('AR.Bridge.shareText') < 0
+    && whJs.indexOf('AR.Bridge.saveTextFile') < 0
+    && whJs.indexOf('AR.Bridge.shareFile') >= 0
+    && whJs.indexOf('AR.Bridge.exportText') >= 0);
+
+  const bioStartAt = mainJava.indexOf('void startBiometric(');
+  const bioSeg = bioStartAt >= 0 ? mainJava.slice(bioStartAt, mainJava.indexOf('prompt.authenticate', bioStartAt) + 40) : '';
+  ok('C215 三端生物识别桥接对称且无 API 29+ 互斥崩溃',
+    bridge5.indexOf('canBiometric: canBiometric') >= 0
+    && mainJava.indexOf('boolean canBiometric(') >= 0
+    && !(bioSeg.indexOf('setNegativeButton') >= 0 && bioSeg.indexOf('setDeviceCredentialAllowed(true)') >= 0)
+    && mainJava.indexOf('q(reqId)') >= 0
+    && mani.indexOf('android.permission.USE_BIOMETRIC') >= 0
+    && wbCs.indexOf('case "canbiometric":') >= 0
+    && wbCs.indexOf('case "biometricverify":') >= 0);
+
+  const whFnNames = (whJs.match(/^\s*function\s+([A-Za-z_$][\w$]*)\s*\(/gm) || [])
+    .map((s) => s.replace(/^\s*function\s+/, '').replace(/\s*\($/, ''));
+  const whDupFn = whFnNames.filter((n, i) => whFnNames.indexOf(n) !== i);
+  ok('C216 whisper-entry 覆盖 custom 标签、whisper.js 无重名函数且与全局 heatSize/Store.get 对齐',
+    whEntry.indexOf('data-nav="import"') >= 0
+    && whEntry.indexOf('data-nav="custom"') >= 0
+    && whEntry.indexOf('data-nav="mine"') >= 0
+    && whDupFn.length === 0
+    && whJs.indexOf('AR.Store.data') < 0
+    && whJs.indexOf('S.appHeat') < 0,
+    whDupFn.length ? ('重名: ' + whDupFn.join(',')) : 'ok');
+
+  const es6Hits = [];
+  for (const jf of fs.readdirSync(path.join(appDir, 'js'))) {
+    if (!/\.js$/.test(jf)) { continue; }
+    const jlines = fs.readFileSync(path.join(appDir, 'js', jf), 'utf8').split(/\r?\n/);
+    jlines.forEach((ln, idx) => {
+      const tr = ln.trim();
+      if (!tr || tr.indexOf('//') === 0 || tr.indexOf('/*') === 0 || tr.indexOf('*') === 0) { return; }
+      if (/(?:^|[;{\s])(?:let|const)\s+[A-Za-z_$]|(?:^|[^\w$])=>/.test(ln)) {
+        es6Hits.push(jf + ':' + (idx + 1));
+      }
+    });
+  }
+  ok('C217 app/js 全部发货脚本严格保持 ES5（无 let/const/箭头函数）', es6Hits.length === 0, es6Hits.slice(0, 5).join(', '));
+
+  /* ── Batch 2 (B2-T-01 / B2-T-04 / B2-T-05)：不可达清理 / 空参保护 / 原生签名 ── */
+  const amStart = core5.indexOf('function applyMerge(');
+  const amEnd = core5.indexOf('\n  function applyTombstone(', amStart);
+  const amSeg = (amStart >= 0 && amEnd > amStart) ? core5.slice(amStart, amEnd) : '';
+  const amRet = amSeg.indexOf('return state;');
+  const amRemap = amSeg.indexOf('remapCourseOverrides(');
+  const amPrune = amSeg.indexOf('pruneEmptySemesters();');
+  const amClean = amSeg.indexOf('cleanOrphanOverrides();');
+  ok('C218 core.js applyMerge 清理步骤全部位于 return state; 之前（无死代码）',
+    amRet >= 0 && amRemap >= 0 && amPrune > amRemap && amClean > amPrune && amRet > amClean,
+    'remap=' + amRemap + ' prune=' + amPrune + ' clean=' + amClean + ' ret=' + amRet);
+
+  const ltStart = panels5.indexOf('function renderLongTaskList(');
+  const ltEnd = panels5.indexOf('box.innerHTML', ltStart);
+  const ltHead = (ltStart >= 0 && ltEnd > ltStart) ? panels5.slice(ltStart, ltEnd + 16) : '';
+  ok('C219 panels.js renderLongTaskList 先取 box = host || ... 再操作 innerHTML',
+    ltStart >= 0 && ltEnd > ltStart && ltHead.indexOf('var box = host ||') >= 0 && ltHead.indexOf('host.innerHTML') < 0);
+
+  const bridgeBeepCall = /call\('beep'\s*,\s*\[[^\]]+\]\)/.test(bridge5);
+  const javaBeepStr = /@JavascriptInterface\s+public\s+void\s+beep\s*\(\s*(?:final\s+)?String\s+\w+\s*\)/.test(mainJava);
+  ok('C220 bridge.js beep(kind) 与 MainActivity.java beep(String kind) 参数签名对齐',
+    bridgeBeepCall && javaBeepStr,
+    'bridge=' + bridgeBeepCall + ' java=' + javaBeepStr);
+
+  /* ── v0.5.5：Whisper 新功能与解耦/媒体同步/原生图片桥静态契约 ── */
+  const schemaSql = fs.readFileSync(path.join(root5, 'tools/cloudflare/schema.sql'), 'utf8');
+  const updWorkerJs = fs.readFileSync(path.join(root5, 'tools/cloudflare/update-worker.js'), 'utf8');
+  ok('C221 云端 schema/worker/update-worker 均包含 whisper_media 表与增量路由',
+    schemaSql.indexOf('CREATE TABLE IF NOT EXISTS whisper_media') >= 0
+    && updWorkerJs.indexOf("'whisper_media'") >= 0
+    && workerSrc.indexOf('/blob/whisper/media') >= 0);
+
+  ok('C222 三端图片保存与分享桥接（saveImage / shareImage）对称对齐',
+    bridge5.indexOf('saveImage: saveImage') >= 0
+    && bridge5.indexOf('shareImage: shareImage') >= 0
+    && mainJava.indexOf('public void saveImage(') >= 0
+    && mainJava.indexOf('public void shareImage(') >= 0
+    && wbCs.indexOf('case "saveimage":') >= 0
+    && wbCs.indexOf('case "shareimage":') >= 0);
+
+  ok('C223 boot.js AR.onFileText 优先交由 Whisper consumePendingImport 处理日记导入',
+    bootSync.indexOf('AR.Whisper.consumePendingImport') >= 0);
+
+  ok('C224 sync.js 支持课表与日记同步解耦、配图开关与进度回调',
+    syncSrc.indexOf('syncConfigEnabled') >= 0
+    && syncSrc.indexOf('syncWhisperEnabled') >= 0
+    && syncSrc.indexOf('syncWhisperMedia') >= 0
+    && syncSrc.indexOf('blobMediaPush') >= 0
+    && syncSrc.indexOf('reportProgress(') >= 0);
+
+  ok('C225 whisper.js 默认手机字体、每本可调正倒序、导出走 nativeExport 并支持单条纯文本/图片与私密本',
+    whJs.indexOf("font: 'ui'") >= 0
+    && whJs.indexOf('sortDir') >= 0
+    && whJs.indexOf('nativeExport(') >= 0
+    && whJs.indexOf('buildEntryCardDataUrl') >= 0
+    && whJs.indexOf('visibleBooks()') >= 0
+    && whJs.indexOf('compressMediaForCloud') >= 0);
+
+  ok('C226 app.css 与 whisper.css 含进度条与卡片样式且未退回禁用 CSS',
+    css5.indexOf('.btn.sync-prog-btn') >= 0
+    && whCss.indexOf('.wh-sync-btn') >= 0
+    && whCss.indexOf('.ea-grid') >= 0);
 
 }
 

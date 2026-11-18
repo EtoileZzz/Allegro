@@ -481,6 +481,32 @@ public class MainActivity extends Activity {
             return (Build.MANUFACTURER + " " + Build.MODEL).trim();
         }
 
+        /** 生物识别是否可用：API 30+ 查 BIOMETRIC_WEAK，API 29 查 BiometricManager，26-28 查设备锁屏凭据。 */
+        @JavascriptInterface
+        public boolean canBiometric() {
+            try {
+                if (Build.VERSION.SDK_INT >= 30) {
+                    android.hardware.biometrics.BiometricManager bm =
+                            (android.hardware.biometrics.BiometricManager) getSystemService(Context.BIOMETRIC_SERVICE);
+                    return bm != null && bm.canAuthenticate(
+                            android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                            == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+                }
+                if (Build.VERSION.SDK_INT == 29) {
+                    android.hardware.biometrics.BiometricManager bm =
+                            (android.hardware.biometrics.BiometricManager) getSystemService(Context.BIOMETRIC_SERVICE);
+                    return bm != null && bm.canAuthenticate()
+                            == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+                }
+                android.app.KeyguardManager km =
+                        (android.app.KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+                return km != null && km.isDeviceSecure();
+            } catch (Throwable t) {
+                Log.w(TAG, "canBiometric failed", t);
+                return false;
+            }
+        }
+
         /** 生物识别：要求调用方传一个 id，结果通过 window.__whBioResult(id, ok) 回传。 */
         @JavascriptInterface
         public void biometricVerify(final String reqId) {
@@ -590,7 +616,7 @@ public class MainActivity extends Activity {
                         public void run() {
                             try {
                                 Intent i = new Intent(Intent.ACTION_SEND);
-                                i.putExtra(Intent.EXTRA_SUBJECT, title == null ? "Allegro 课表配置" : title);
+                                i.putExtra(Intent.EXTRA_SUBJECT, (title == null || title.length() == 0) ? "Allegro 分享" : title);
                                 if (uri != null) {
                                     i.setType("*/*");                          // 微信等 App 只认通用类型
                                     i.putExtra(Intent.EXTRA_STREAM, uri);
@@ -645,6 +671,95 @@ public class MainActivity extends Activity {
                     } catch (Exception ignored) { }
                 }
             }
+        }
+
+        private byte[] decodeDataUrlBytes(String dataUrl) {
+            if (dataUrl == null || dataUrl.length() == 0) { return null; }
+            int comma = dataUrl.indexOf(',');
+            String b64 = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+            try {
+                return android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        private Uri writeImageToPictures(String fileName, byte[] bytes, String mime) {
+            if (Build.VERSION.SDK_INT < 29 || bytes == null || bytes.length == 0) { return null; }
+            Uri uri = null;
+            OutputStream os = null;
+            boolean ok = false;
+            try {
+                String safeName = (fileName == null || fileName.length() == 0) ? "whisper-card.png" : fileName;
+                ContentValues cv = new ContentValues();
+                cv.put(MediaStore.MediaColumns.DISPLAY_NAME, safeName);
+                cv.put(MediaStore.MediaColumns.MIME_TYPE, (mime == null || mime.length() == 0) ? "image/png" : mime);
+                cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Allegro");
+                uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+                if (uri == null) { return null; }
+                os = getContentResolver().openOutputStream(uri);
+                if (os == null) { return null; }
+                os.write(bytes);
+                os.flush();
+                ok = true;
+                return uri;
+            } catch (Exception e) {
+                Log.w(TAG, "写入相册失败", e);
+                return null;
+            } finally {
+                if (os != null) {
+                    try { os.close(); } catch (Exception ignored) { }
+                }
+                if (!ok && uri != null) {
+                    try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) { }
+                }
+            }
+        }
+
+        @JavascriptInterface
+        public void saveImage(final String fileName, final String dataUrl) {
+            final byte[] bytes = decodeDataUrlBytes(dataUrl);
+            if (bytes == null || bytes.length == 0) { toast("图片数据无效"); return; }
+            new Thread(new Runnable() {
+                public void run() {
+                    final Uri uri = writeImageToPictures(fileName, bytes, "image/png");
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (uri != null) {
+                                toast("图片已保存到相册（Pictures/Allegro）");
+                            } else {
+                                toast("当前系统版本暂不支持直接存相册，请使用分享图片");
+                            }
+                        }
+                    });
+                }
+            }).start();
+        }
+
+        @JavascriptInterface
+        public void shareImage(final String fileName, final String dataUrl, final String title) {
+            final byte[] bytes = decodeDataUrlBytes(dataUrl);
+            if (bytes == null || bytes.length == 0) { toast("图片数据无效"); return; }
+            new Thread(new Runnable() {
+                public void run() {
+                    final Uri uri = writeImageToPictures(fileName, bytes, "image/png");
+                    runOnUiThread(new Runnable() {
+                        public void run() {
+                            if (uri == null) { toast("保存图片失败"); return; }
+                            try {
+                                Intent i = new Intent(Intent.ACTION_SEND);
+                                i.setType("image/png");
+                                i.putExtra(Intent.EXTRA_SUBJECT, (title == null || title.length() == 0) ? "Whisper 日记" : title);
+                                i.putExtra(Intent.EXTRA_STREAM, uri);
+                                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                startActivity(Intent.createChooser(i, "分享日记图片"));
+                            } catch (Exception e) {
+                                toast("没有可用的分享目标");
+                            }
+                        }
+                    });
+                }
+            }).start();
         }
 
         @JavascriptInterface
@@ -1257,6 +1372,12 @@ public class MainActivity extends Activity {
             // Android 端不额外发声，避免打扰；震动已经提供了触觉反馈。
         }
 
+        /** 兼容 bridge.js 传参 `call('beep', [kind])` 的 1 参重载。 */
+        @JavascriptInterface
+        public void beep(final String kind) {
+            beep();
+        }
+
         /** 由网页决定何时真正退出（例如不在任何弹窗中时按返回键）。 */
         @JavascriptInterface
         public void exitApp() {
@@ -1505,7 +1626,7 @@ public class MainActivity extends Activity {
                                 .setNegativeButton("用 PIN", ex, new android.content.DialogInterface.OnClickListener() {
                                     public void onClick(android.content.DialogInterface d, int w) { bioResult(reqId, false); }
                                 });
-                if (Build.VERSION.SDK_INT >= 29) { b.setDeviceCredentialAllowed(true); }
+                // 不能同时设置 setNegativeButton 和 setDeviceCredentialAllowed(true)（API 29+ 会抛 IllegalArgumentException）
                 b.build().authenticate(new android.os.CancellationSignal(), ex,
                         new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
                             @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult r) { bioResult(reqId, true); }
@@ -1533,7 +1654,7 @@ public class MainActivity extends Activity {
         web.post(new Runnable() {
             public void run() {
                 try {
-                    web.evaluateJavascript("window.__whBioResult && window.__whBioResult('" + reqId + "'," + (ok ? "true" : "false") + ")", null);
+                    web.evaluateJavascript("window.__whBioResult && window.__whBioResult(" + q(reqId) + "," + (ok ? "true" : "false") + ")", null);
                 } catch (Throwable t) { Log.w(TAG, "bio callback failed", t); }
             }
         });

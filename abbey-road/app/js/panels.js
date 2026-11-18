@@ -890,43 +890,6 @@ var AR = window.AR || (window.AR = {});
     return row;
   }
 
-  function quickNotify() {
-    var n = S.settings.notifications;
-    var row = el('<div class="q-row"></div>');
-    row.appendChild(qItem('课前提醒', qSwitch(n.enabled, function (v) {
-      n.enabled = v;
-      AR.Store.save(true);
-      /**
-       * v0.5：以前这里只存了个布尔 —— Android 侧没有任何通知代码，
-       * 开关打开也不会响（假功能）。现在真的排 / 取消系统闹钟，
-       * 打开时顺便（首次）请求通知权限。
-       */
-      try {
-        if (AR.Reminders) { v ? AR.Reminders.enable() : AR.Reminders.cancel(); }
-      } catch (e) { }
-    })));
-    var val = n.defaultOffset || 15;
-    var step = el('<div class="q-step"></div>');
-    var valEl = el('<b>' + val + '</b><span class="muted"> 分</span>');
-    var minus = el('<button class="chip-btn" type="button">−</button>');
-    var plus = el('<button class="chip-btn" type="button">＋</button>');
-    var bump = function (d) {
-      val = Math.max(5, Math.min(60, val + d));
-      valEl.querySelector('b').textContent = val;
-      n.defaultOffset = val;
-      AR.Store.save();
-      // 提前量变了要重排（reminders.js 内部有 600ms 去抖，连点只排一次）
-      try { if (AR.Reminders) { AR.Reminders.sync(); } } catch (e) { }
-    };
-    minus.addEventListener('click', function () { bump(-5); AR.Bridge.haptic('light', minus); });
-    plus.addEventListener('click', function () { bump(5); AR.Bridge.haptic('light', plus); });
-    step.appendChild(minus);
-    step.appendChild(valEl);
-    step.appendChild(plus);
-    row.appendChild(qItem('提前量', step));
-    return row;
-  }
-
   function quickData() {
     var row = el('<div class="q-row"></div>');
     var box = el('<div class="q-btns"></div>');
@@ -1131,7 +1094,9 @@ var AR = window.AR || (window.AR = {});
         hits.push({ cat: cat, item: cat.label + '（整类）', mode: 'cat' });
       }
       for (var p = 0; p < cat.panels.length && hits.length < 24; p++) {
-        var node = cat.panels[p]();
+        var node = null;
+        try { node = cat.panels[p](); } catch (e) { node = null; }
+        if (!node || !node.querySelectorAll) { continue; }
         var rows = node.querySelectorAll('.setting-row, .field, .slider-row, .widget-card, .lt-set-row, .row.gap');
         for (var r = 0; r < rows.length; r++) {
           var txt = (rows[r].textContent || '').replace(/\s+/g, ' ').trim();
@@ -1183,6 +1148,9 @@ var AR = window.AR || (window.AR = {});
   }
 
   function openSettingsCat(key) {
+    if (settingsCat === 'whisper' && key !== 'whisper' && AR.Whisper && AR.Whisper.relock) {
+      try { AR.Whisper.relock(); } catch (e) { }
+    }
     settingsCat = key;
     renderSettings();
     var b = $('settingsBody');
@@ -1192,6 +1160,9 @@ var AR = window.AR || (window.AR = {});
 
   /** 从二级页回设置首页（返回条 / 返回键 / 侧滑都用它） */
   function settingsGoHome() {
+    if (settingsCat === 'whisper' && AR.Whisper && AR.Whisper.relock) {
+      try { AR.Whisper.relock(); } catch (e) { }
+    }
     settingsCat = null;
     renderSettings();
     var b = $('settingsBody');
@@ -1211,6 +1182,9 @@ var AR = window.AR || (window.AR = {});
 
   /** 从别处进设置：回到分类首页（并清掉搜索框） */
   function resetSettingsHome() {
+    if (settingsCat === 'whisper' && AR.Whisper && AR.Whisper.relock) {
+      try { AR.Whisper.relock(); } catch (e) { }
+    }
     settingsCat = null;
     settingsSearchQ = '';
   }
@@ -1406,6 +1380,30 @@ var AR = window.AR || (window.AR = {});
     }
     var W = AR.Whisper;
     var WS = W.state();
+    if (!WS || !WS.theme) {
+      box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">正在加载 Whisper 设置…</p>'));
+      if (W.whenReady) {
+        W.whenReady(function () {
+          if (settingsCat === 'whisper' && AR.UI && AR.UI.currentView && AR.UI.currentView() === 'settings') {
+            renderSettings();
+          }
+        });
+      }
+      return panel('Whisper', box, 'whisper');
+    }
+    var ls = W.lockState ? W.lockState() : null;
+    if (ls && ls.enabled && !ls.unlocked && (ls.hasPin || ls.bio)) {
+      box.appendChild(el('<p class="muted" style="margin:4px 0 12px;font-size:12.5px">Whisper 已上锁，验证解锁后才能修改外观、安全或数据设置。</p>'));
+      var unlockBtn = el('<button class="btn primary" type="button" style="width:100%">验证解锁 Whisper</button>');
+      unlockBtn.addEventListener('click', function () {
+        AR.Bridge.haptic('light', unlockBtn);
+        if (W.openLock) {
+          W.openLock(function () { renderSettings(); });
+        }
+      });
+      box.appendChild(unlockBtn);
+      return panel('Whisper', box, 'whisper');
+    }
     function commit() { W.save(WS); W.apply(); }
     function addSeg(label, opts, current, onPick) {
       box.appendChild(el('<div class="field-label">' + esc(label) + '</div>'));
@@ -1448,48 +1446,157 @@ var AR = window.AR || (window.AR = {});
     box.appendChild(el('<div class="field-label">列表与阅读</div>'));
     addSeg('列表样式', [{ label: '书架', value: 'hero' }, { label: '双列', value: 'grid2' }, { label: '极简', value: 'min' }], WS.opts.shelf, function (v) { WS.opts.shelf = v; commit(); });
     addSeg('排版', [{ label: '纸感', value: 'A' }, { label: '卡片流', value: 'C' }], WS.opts.layout, function (v) { WS.opts.layout = v; commit(); });
+    addSeg('正文字体', [{ label: '手机字体', value: 'ui' }, { label: '衬线宋', value: 'serif' }], WS.opts.font === 'serif' ? 'serif' : 'ui', function (v) { WS.opts.font = v; commit(); });
     addSeg('按日期分组', [{ label: '开', value: 'on' }, { label: '关', value: 'off' }], WS.opts.grouped ? 'on' : 'off', function (v) { WS.opts.grouped = v === 'on'; commit(); });
     addSeg('菜单样式', [{ label: '列表', value: 'list' }, { label: '动作格', value: 'grid' }], WS.opts.menu, function (v) { WS.opts.menu = v; commit(); });
     addSeg('写作样式', [{ label: '底部', value: 'sheet' }, { label: '全屏', value: 'full' }], WS.opts.composer, function (v) { WS.opts.composer = v; commit(); });
     addSeg('进入动效', [{ label: '开', value: 'on' }, { label: '关', value: 'off' }], WS.opts.enterFx === false ? 'off' : 'on', function (v) { WS.opts.enterFx = v === 'on'; commit(); });
 
     box.appendChild(el('<div class="field-label">安全</div>'));
+    var canBio = !!(AR.Bridge && AR.Bridge.canBiometric && AR.Bridge.canBiometric());
     function lockRow(label, desc, get, set) {
       var r = el('<div class="setting-row"><div class="setting-text"><div class="t">' + esc(label) + '</div><div class="d">' + esc(desc) + '</div></div>'
         + '<label class="switch"><input type="checkbox"' + (get() ? ' checked' : '') + '><span class="track"></span><span class="knob"></span></label></div>');
       var inp = r.querySelector('input');
-      inp.addEventListener('click', function () { setTimeout(function () { set(inp.checked); }, 0); });
-      inp.addEventListener('change', function () { set(inp.checked); });
+      inp.addEventListener('change', function () {
+        AR.Bridge.haptic('light', r);
+        set(inp.checked, inp);
+      });
       box.appendChild(r);
     }
-    lockRow('锁屏', '进入 Whisper 需要 PIN 或生物识别', function () { return WS.lock.enabled; }, function (v) { WS.lock.enabled = v; commit(); });
-    lockRow('生物识别', '指纹 / 面容 / Windows Hello', function () { return WS.lock.bio; }, function (v) { WS.lock.bio = v; commit(); });
-    var pinBtn = el('<button class="btn" type="button" style="width:100%;margin-top:10px">' + (WS.lock.hash ? '修改 PIN' : '设置 PIN') + '</button>');
+    lockRow('锁屏', '进入 Whisper 需要 PIN' + (canBio ? ' 或生物识别' : ''), function () { return !!(WS.lock && WS.lock.enabled); }, function (v, inp) {
+      if (v && !WS.lock.hash && !(canBio && WS.lock.bio)) {
+        if (inp) { inp.checked = false; }
+        AR.UI.toast('请先设置 6 位 PIN');
+        if (W.openLock) {
+          W.openLock(function () {
+            var st2 = W.state ? W.state() : null;
+            if (st2 && st2.lock && (st2.lock.hash || (canBio && st2.lock.bio))) {
+              st2.lock.enabled = true;
+              W.save(st2);
+              W.apply();
+            }
+            renderSettings();
+          });
+        }
+        return;
+      }
+      WS.lock.enabled = v;
+      commit();
+    });
+    if (canBio) {
+      lockRow('生物识别', '使用指纹 / 面容解锁', function () { return !!(WS.lock && WS.lock.bio); }, function (v) { WS.lock.bio = v; commit(); });
+    } else {
+      box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">当前设备仅支持 PIN 锁屏。</p>'));
+    }
+    var pinBtn = el('<button class="btn" type="button" style="width:100%;margin-top:10px">' + (WS.lock && WS.lock.hash ? '修改 PIN' : '设置 PIN') + '</button>');
     pinBtn.addEventListener('click', function () {
       AR.Bridge.haptic('light', pinBtn);
-      if (W.changePin && WS.lock.hash) { W.changePin(); } else if (W.openLock) { W.openLock(); }
+      if (W.changePin && WS.lock && WS.lock.hash) { W.changePin(); }
+      else if (W.openLock) { W.openLock(function () { renderSettings(); }); }
     });
     box.appendChild(pinBtn);
 
-    box.appendChild(el('<div class="field-label">数据</div>'));
-    var row = el('<div style="display:flex;gap:8px;margin-top:6px"></div>');
+    box.appendChild(el('<div class="field-label">数据与同步</div>'));
+    if (AR.Sync && AR.Sync.config && AR.Sync.setConfig) {
+      var whSyncCfg = AR.Sync.config();
+      lockRow('日记云同步', '仅日记改动时同步日记（与课表/配置独立）', function () { return whSyncCfg.syncWhisperEnabled !== false; }, function (v) {
+        AR.Sync.setConfig({ syncWhisperEnabled: v });
+        whSyncCfg.syncWhisperEnabled = v;
+      });
+      lockRow('同步日记图片（云端压缩）', '设备内始终展示原图；关闭后云同步只传日记文字', function () { return whSyncCfg.syncWhisperMedia !== false; }, function (v) {
+        AR.Sync.setConfig({ syncWhisperMedia: v });
+        whSyncCfg.syncWhisperMedia = v;
+      });
+    }
+    var row = el('<div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap"></div>');
     var bTrash = el('<button class="btn" type="button" style="flex:1 1 0">回收站</button>');
-    bTrash.addEventListener('click', function () { W.openTrash(); });
-    var bExport = el('<button class="btn" type="button" style="flex:1 1 0">导出 md</button>');
-    var bSync = el('<button class="btn" type="button" style="flex:1 1 0">立即同步</button>');
-    bSync.addEventListener('click', function () { AR.Bridge.haptic('light', bSync); if (W.syncNow) { W.syncNow(); AR.UI.toast('正在同步…'); } });
+    bTrash.addEventListener('click', function () { AR.Bridge.haptic('light', bTrash); W.openTrash(); });
+    var bExport = el('<button class="btn" type="button" style="flex:1 1 0">导出日记</button>');
+    var bImport = el('<button class="btn" type="button" style="flex:1 1 0">导入日记</button>');
+    var bSync = el('<button class="btn sync-prog-btn" type="button" style="flex:1 1 100%;margin-top:2px"><span class="sync-prog-fill"></span><span class="sync-prog-label">立即同步 Whisper</span></button>');
+    function setWhBtnProg(pct, text) {
+      var f = bSync.querySelector('.sync-prog-fill');
+      var l = bSync.querySelector('.sync-prog-label');
+      if (f) { f.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%'; }
+      if (l && text != null) { l.textContent = text; }
+    }
+    bSync.addEventListener('click', function () {
+      AR.Bridge.haptic('light', bSync);
+      if (!AR.Sync || !AR.Sync.isConfigured || !AR.Sync.isConfigured()) {
+        AR.UI.toast('请先在「数据与同步」里配置云同步');
+        return;
+      }
+      if (!W.syncNow) { return; }
+      bSync.disabled = true;
+      setWhBtnProg(10, '准备同步…');
+      Promise.resolve(W.syncNow(function (pct, txt) {
+        setWhBtnProg(pct, txt || '同步中…');
+      })).then(function (res) {
+        if (res && res.skipped) {
+          bSync.disabled = false;
+          setWhBtnProg(0, '立即同步 Whisper');
+          AR.UI.toast('同步未就绪，请稍后再试');
+          return;
+        }
+        setWhBtnProg(100, '同步完成 ✓');
+        AR.UI.toast('Whisper 同步完成');
+        setTimeout(function () {
+          bSync.disabled = false;
+          setWhBtnProg(0, '立即同步 Whisper');
+          if (settingsCat === 'whisper' && AR.UI && AR.UI.currentView && AR.UI.currentView() === 'settings') {
+            renderSettings();
+          }
+        }, 500);
+      }, function (err) {
+        bSync.disabled = false;
+        setWhBtnProg(0, '立即同步 Whisper');
+        AR.UI.toast((err && err.message) ? ('同步失败：' + err.message) : '同步失败');
+      });
+    });
     bExport.addEventListener('click', function () {
       AR.Bridge.haptic('light', bExport);
-      if (W.exportCurrent) { W.exportCurrent(); } else if (W.openExport) { W.openExport(); }
+      if (W.openExport) { W.openExport(); } else if (W.exportCurrent) { W.exportCurrent(); }
     });
-    row.appendChild(bTrash); row.appendChild(bExport); row.appendChild(bSync);
+    bImport.addEventListener('click', function () {
+      AR.Bridge.haptic('light', bImport);
+      if (W.openImport) { W.openImport(); }
+    });
+    row.appendChild(bTrash); row.appendChild(bExport); row.appendChild(bImport); row.appendChild(bSync);
     box.appendChild(row);
     var bReset = el('<button class="btn" type="button" style="width:100%;margin-top:8px;color:var(--danger,#e5484d)">清空 Whisper 数据</button>');
     bReset.addEventListener('click', function () {
-      if (window.confirm('清空所有日记？不可恢复')) { W.reset(); AR.UI.toast('已清空'); }
+      AR.Bridge.haptic('warn', bReset);
+      var hasCloud = !!(AR.Sync && AR.Sync.isConfigured && AR.Sync.isConfigured());
+      function runReset(clearCloud) {
+        Promise.resolve(W.reset ? W.reset({ clearCloud: !!clearCloud }) : null).then(function () {
+          AR.UI.toast(clearCloud ? '已清空本机与云端 Whisper 数据' : '已清空本机 Whisper 数据');
+          renderSettings();
+        }, function (err) {
+          AR.UI.toast('清空失败：' + ((err && err.message) || '请稍后再试'));
+        });
+      }
+      if (!hasCloud) {
+        AR.UI.confirmDanger({
+          title: '清空 Whisper 数据？',
+          text: '将永久删除本机所有日记本、条目和署名，不可恢复。',
+          okLabel: '仅清空本机',
+          onOk: function () { runReset(false); }
+        });
+        return;
+      }
+      AR.UI.openModal({
+        title: '清空 Whisper 数据？',
+        sub: '已配置云同步，请选择清理范围',
+        body: '<p class="muted">「清空本机 + 云端」会写入墓碑并覆盖云端日记，其他设备同步后也会清空；「仅清空本机」只清除当前设备，下次同步仍会从云端拉回。</p>',
+        actions: [
+          { label: '仅清空本机', onClick: function (close) { close(); runReset(false); } },
+          { label: '清空本机 + 云端', kind: 'danger', onClick: function (close) { close(); runReset(true); } }
+        ]
+      });
     });
     box.appendChild(bReset);
-    box.appendChild(el('<p class="muted" style="margin:10px 0 0;font-size:12px">热力图大小跟随「外观 → 热力图大小」的全局设置；Whisper 数据不进学期、不进同步。</p>'));
+    box.appendChild(el('<p class="muted" style="margin:10px 0 0;font-size:12px">热力图大小跟随「外观 → 热力图大小」的全局设置；日记数据独立加密存储，与主课表同步及「清空所有数据」完全隔离。</p>'));
     return panel('Whisper', box, 'whisper');
   }
 
@@ -2551,7 +2658,7 @@ var AR = window.AR || (window.AR = {});
         hw.on = v;
         AR.Store.save(true);
         AR.Bridge.haptic('light', $('settingsGrid'));
-        refreshAll();
+        refreshContentViews();
       }));
     var modeSeg = el('<div class="segmented" id="hwMode" style="margin-top:6px"></div>');
     var modes = [
@@ -2566,8 +2673,12 @@ var AR = window.AR || (window.AR = {});
           hw.mode = mo.k;
           AR.Store.save(true);
           AR.Bridge.haptic('light', b);
-          renderSettings();
-          refreshAll();
+          var segs = modeSeg.querySelectorAll('.seg');
+          for (var si = 0; si < segs.length; si++) {
+            segs[si].classList.toggle('active', segs[si] === b);
+          }
+          if (AR.UI.syncSegPill) { AR.UI.syncSegPill(modeSeg, true); }
+          refreshContentViews();
           AR.UI.toast(mo.k === 'smart' ? '作业识别：只收列表符号 / 关键词行' : '作业识别：一行算一条');
         });
         modeSeg.appendChild(b);
@@ -2577,7 +2688,6 @@ var AR = window.AR || (window.AR = {});
     box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
       + '「一行算一条」= 备注里每个非空行都是一条作业；'
       + '「智能识别」= 只收「- 、1. 、[ ] 、①」这类列表行，或含"作业 / 练习 / 报告 / 复习 / 提交"等关键词的行。</p>'));
-    if (AR.UI.syncSegPill) { AR.UI.syncSegPill(modeSeg, true); }
     box.appendChild(rowSwitch('作业按课程分组',
       '今日页的未完成作业按课程归类，每组显示课程色点和条数；关掉就是一条条平铺',
       hw.groupByCourse !== false, function (v) {
@@ -2606,7 +2716,11 @@ var AR = window.AR || (window.AR = {});
           hw.dueLeadDays = o.v;
           AR.Store.save(true);
           AR.Bridge.haptic('light', b);
-          renderSettings();
+          var segs = dueSeg.querySelectorAll('.seg');
+          for (var si = 0; si < segs.length; si++) {
+            segs[si].classList.toggle('active', segs[si] === b);
+          }
+          if (AR.UI.syncSegPill) { AR.UI.syncSegPill(dueSeg, true); }
           AR.UI.toast(o.v < 0 ? '不再自动填截止日' : ('新作业截止日 = 下次上课日 - ' + o.v + ' 天'));
         });
         dueSeg.appendChild(b);
@@ -2616,7 +2730,6 @@ var AR = window.AR || (window.AR = {});
     box.appendChild(el('<p class="muted" style="margin:6px 0 0">'
       + '只作用于从「本次备注」识别出来的新作业：按这门课的下一次上课日往前推（周次 / 调课都会算进去）；'
       + '算不出来就留空。手动添加的作业仍由你自己填，长按任意一条也能随时改。</p>'));
-    if (AR.UI.syncSegPill) { AR.UI.syncSegPill(dueSeg, true); }
 
     // 作业概况 + 作业记录（跟着作业走）
     (function () {
@@ -3066,14 +3179,14 @@ function panelLongTasks() {
   }
 
 function renderLongTaskList(host) {
+  var box = host || document.getElementById('hwLongTasks');
+  if (!box) { return; }
   /* 老「长期任务」已并入「任务」：没有未归档的老记录时说明一下，别给空列表 */
   if (!list0HasLiveLongTasks()) {
-    host.innerHTML = '<p class="muted" style="padding:8px 2px;font-size:12.5px">' +
+    box.innerHTML = '<p class="muted" style="padding:8px 2px;font-size:12.5px">' +
       '长期任务已并入「任务」，在这里统一管理。</p>';
     return;
   }
-    var box = host || document.getElementById('hwLongTasks');
-    if (!box) { return; }
     var list = AR.Store.longTaskList ? AR.Store.longTaskList() : [];
     var todayK = AR.Util.dateKey(new Date());
     box.innerHTML = '';
@@ -3147,11 +3260,26 @@ function renderLongTaskList(host) {
     }
 
     box.appendChild(rowSwitch('课前提醒', '在每节课开始前提醒（需要系统通知权限）', n.enabled, function (v) {
-      n.enabled = v; AR.Store.save(true);
+      n.enabled = v;
+      AR.Store.save(true);
+      try {
+        if (AR.Reminders) {
+          if (v) {
+            if (AR.Reminders.enable) { AR.Reminders.enable(); }
+            if (!(AR.Bridge && AR.Bridge.hasAndroid) && AR.Reminders.sync) { AR.Reminders.sync(true); }
+          } else if (!(n.daily && n.daily.enabled)) {
+            if (AR.Reminders.cancel) { AR.Reminders.cancel(); }
+          } else if (AR.Reminders.sync) {
+            AR.Reminders.sync(true);
+          }
+        }
+      } catch (e) { }
     }));
     box.appendChild(el('<div class="field-label" style="margin-top:12px">提前量</div>'));
     box.appendChild(slider('提前分钟', 5, 60, n.defaultOffset || 15, ' 分', function (v) {
-      n.defaultOffset = v; AR.Store.save();
+      n.defaultOffset = v;
+      AR.Store.save();
+      try { if (AR.Reminders && AR.Reminders.sync) { AR.Reminders.sync(); } } catch (e) { }
     }));
     box.appendChild(el('<p class="muted">提醒依赖系统日历 / 通知；在 OPPO 等机型上需要在系统设置里允许后台运行。</p>'));
 
@@ -3162,10 +3290,20 @@ function renderLongTaskList(host) {
     box.appendChild(rowSwitch('每日提醒', '每天在固定时间点提醒今天还差什么', dl.enabled, function (v) {
       if (!n.daily || typeof n.daily !== 'object') { n.daily = {}; }
       n.daily.enabled = v;
-      /* 打开时先要通知权限（enable 会顺带排一次），再手动排一次，最后落盘 */
-      if (v && reminders && reminders.enable) { reminders.enable(); }
-      if (reminders && reminders.sync) { reminders.sync(); }
       AR.Store.save(true);
+      /* 先落盘，再按平台请求通知权限并重排（全关时 cancel，仅关一项或非 Android 走 sync(true)） */
+      try {
+        if (AR.Reminders) {
+          if (v) {
+            if (AR.Reminders.enable) { AR.Reminders.enable(); }
+            if (!(AR.Bridge && AR.Bridge.hasAndroid) && AR.Reminders.sync) { AR.Reminders.sync(true); }
+          } else if (!n.enabled) {
+            if (AR.Reminders.cancel) { AR.Reminders.cancel(); }
+          } else if (AR.Reminders.sync) {
+            AR.Reminders.sync(true);
+          }
+        }
+      } catch (e) { }
       AR.Bridge.haptic('medium', box);
       renderSettings();
     }));
@@ -3333,12 +3471,27 @@ function renderLongTaskList(host) {
     box.appendChild(el('<p class="muted">下次提醒：今天 ' + esc(times[0] || '—')
       + ' · ' + esc((sum && sum.title) || '今天没有待办') + '</p>'));
 
+    var diagJump = el('<button class="btn" type="button" id="notifDiagJump" style="margin-top:8px">通知不响？去自检 ›</button>');
+    diagJump.addEventListener('click', function () {
+      AR.Bridge.haptic('light', diagJump);
+      openSettingsCat('about');
+      var anchor = document.getElementById('notifDiagAnchor');
+      if (anchor) {
+        try { anchor.scrollIntoView({ block: 'start' }); } catch (e) {
+          try { anchor.scrollIntoView(true); } catch (e2) { }
+        }
+        anchor.classList.add('set-hit-flash');
+      }
+    });
+    box.appendChild(diagJump);
+
     return panel('提醒与通知', box, 'notify');
   }
 
   /* ── v0.5.2：通知自检 / 后台保护 ─────────────────────────── */
   function notifDiagBlock(host) {
     var box = host;
+    if (box && !box.id) { box.id = 'notifDiagAnchor'; }
     var platform = 'web';
     try { platform = AR.Bridge.platform() || 'web'; } catch (e) { platform = 'web'; }
 
@@ -3446,6 +3599,8 @@ function renderLongTaskList(host) {
     } else {
       var summaryEl = el('<p class="muted">已排 … 条提醒 · 下次 读取中…</p>');
       box.appendChild(summaryEl);
+      var pipeEl = el('<p class="muted" id="notifPipe"></p>');
+      box.appendChild(pipeEl);
 
       var notifRow = diagRow('通知权限', '读取中…');
       var exactRow = diagRow('精确闹钟', '读取中…');
@@ -3492,8 +3647,7 @@ function renderLongTaskList(host) {
         try {
           var pcRaw = Number(d.pendingCount);
           var lr = (AR.Reminders && AR.Reminders.lastResult) ? AR.Reminders.lastResult() : null;
-          var pipe = box.querySelector('#notifPipe');
-          if (!pipe) { pipe = el('<p class="muted" id="notifPipe"></p>'); box.appendChild(pipe); }
+          var pipe = box.querySelector('#notifPipe') || pipeEl;
           var txt = 'AlarmManager 实际待触发 ' + (isFinite(pcRaw) ? pcRaw : '?') + ' 条';
           if (lr && lr.size >= 0) { txt += ' · 按当前设置算出 ' + lr.size + ' 条'; }
           if (lr && lr.result) { txt += ' · 上次排程：' + lr.result; }
@@ -3596,12 +3750,6 @@ function renderLongTaskList(host) {
       jumpRow.appendChild(actionBtn('精确闹钟', function () {
         openSystem(function () { return AR.Bridge.openExactAlarmSettings(); }, '精确闹钟设置');
       }));
-      jumpRow.appendChild(actionBtn('电池优化', function () {
-        openSystem(function () { return AR.Bridge.openBatterySettings(); }, '电池优化设置');
-      }));
-      jumpRow.appendChild(actionBtn('应用详情', function () {
-        openSystem(function () { return AR.Bridge.openAppDetails(); }, '应用详情');
-      }));
       box.appendChild(jumpRow);
 
       runBridge(function () { return AR.Bridge.reminderDiagnostics(); }, applyDiagnostics, function () {
@@ -3614,9 +3762,7 @@ function renderLongTaskList(host) {
     }
 
     box.appendChild(el('<div class="field-label" style="margin-top:18px">后台保护</div>'));
-    if (platform !== 'android' && platform !== 'windows') {
-      box.appendChild(el('<p class="muted">仅原生端可用</p>'));
-    } else {
+    if (platform === 'android') {
       box.appendChild(el('<p class="muted">国产 ROM 常会清理后台，导致闹钟不响。建议：允许自启动 / 允许后台运行 / 关闭电池优化。</p>'));
       var protectRow = el('<div class="row gap wrap"></div>');
       protectRow.appendChild(actionBtn('加入电池优化白名单', function () {
@@ -3626,33 +3772,34 @@ function renderLongTaskList(host) {
         openSystem(function () { return AR.Bridge.openAppDetails(); }, '应用详情');
       }));
       box.appendChild(protectRow);
-
-      if (platform === 'windows') {
-        var autoTouched = false;
-        var autoSwitch = rowSwitch('开机时自动启动',
-          '登录 Windows 后自动打开 Allegro，让提醒服务尽早恢复', false, function (v) {
-            autoTouched = true;
-            runBridge(function () { return AR.Bridge.setAutostart(v); }, function (r) {
-              if (r === false) {
-                if (autoInput.checked === v) { autoInput.checked = !v; }
-                toastSafe('设置失败（可能被系统策略拦截）');
-                return;
-              }
-              toastSafe('已设置');
-            }, function () {
+    } else if (platform === 'windows') {
+      box.appendChild(el('<p class="muted">桌面端提醒依赖托盘常驻保活（关闭窗口默认最小化到系统托盘）。建议开启下方开机自启动，登录后尽早恢复提醒。</p>'));
+      var autoTouched = false;
+      var autoSwitch = rowSwitch('开机时自动启动',
+        '登录 Windows 后自动打开 Allegro，让提醒服务尽早恢复', false, function (v) {
+          autoTouched = true;
+          runBridge(function () { return AR.Bridge.setAutostart(v); }, function (r) {
+            if (r === false) {
               if (autoInput.checked === v) { autoInput.checked = !v; }
               toastSafe('设置失败（可能被系统策略拦截）');
-            });
+              return;
+            }
+            toastSafe('已设置');
+          }, function () {
+            if (autoInput.checked === v) { autoInput.checked = !v; }
+            toastSafe('设置失败（可能被系统策略拦截）');
           });
-        var autoInput = autoSwitch.querySelector('input');
-        box.appendChild(autoSwitch);
-        runBridge(function () { return AR.Bridge.getAutostart(); }, function (v) {
-          if (autoTouched) { return; }
-          autoInput.checked = (v === true || v === 1 || v === 'true');
-        }, function () {
-          if (!autoTouched) { autoInput.checked = false; }
         });
-      }
+      var autoInput = autoSwitch.querySelector('input');
+      box.appendChild(autoSwitch);
+      runBridge(function () { return AR.Bridge.getAutostart(); }, function (v) {
+        if (autoTouched) { return; }
+        autoInput.checked = (v === true || v === 1 || v === 'true');
+      }, function () {
+        if (!autoTouched) { autoInput.checked = false; }
+      });
+    } else {
+      box.appendChild(el('<p class="muted">仅原生端可用</p>'));
     }
     return host;
   }
@@ -3708,17 +3855,30 @@ function renderLongTaskList(host) {
       if (!n) { return '0 B'; }
       return n > 1024 ? (Math.round(n / 1024) + ' KB') : (n + ' B');
     }
+    function makeProgBtn(cls, label) {
+      return el('<button class="btn ' + (cls || '') + ' sync-prog-btn" type="button">'
+        + '<span class="sync-prog-fill"></span>'
+        + '<span class="sync-prog-label">' + esc(label) + '</span></button>');
+    }
+    function setBtnProg(btn, pct, text) {
+      if (!btn) { return; }
+      var f = btn.querySelector('.sync-prog-fill');
+      var l = btn.querySelector('.sync-prog-label');
+      if (f) { f.style.width = Math.max(0, Math.min(100, Number(pct) || 0)) + '%'; }
+      if (l && text != null) { l.textContent = text; }
+    }
     /** 统一处理一次同步的返回/异常 */
     function runSync(btn, kind) {
       if (!AR.Sync) { AR.UI.toast('同步模块没加载'); return; }
-      var label = btn ? btn.textContent : '';
-      if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
-      var p = kind === 'pull' ? AR.Sync.pullOnly() : (kind === 'force' ? AR.Sync.overwriteCloud() : AR.Sync.syncNow());
+      var origLabel = (btn && btn.querySelector('.sync-prog-label')) ? btn.querySelector('.sync-prog-label').textContent : (btn ? btn.textContent : '');
+      if (btn) { btn.disabled = true; setBtnProg(btn, 10, '准备同步…'); }
+      var onProg = function (pct, txt) { setBtnProg(btn, pct, txt || '同步中…'); };
+      var p = kind === 'pull' ? AR.Sync.pullOnly(onProg) : (kind === 'force' ? AR.Sync.overwriteCloud(onProg) : AR.Sync.syncNow(onProg));
       p.then(function (r) {
-        // 提示统一在 AR.Sync 内部（自动/手动都只弹一次），这里只刷新界面
-        renderSettings();
+        setBtnProg(btn, 100, '同步完成 ✓');
+        setTimeout(function () { renderSettings(); }, 450);
       }).catch(function (e) {
-        if (btn) { btn.disabled = false; btn.textContent = label; }
+        if (btn) { btn.disabled = false; setBtnProg(btn, 0, origLabel); }
         var code = e && e.code;
         if (code === 'BAD_PASSPHRASE') {
           AR.UI.confirmDanger({
@@ -3753,20 +3913,10 @@ function renderLongTaskList(host) {
       ];
       var cur = cfg.autoMode || 'open';
       var modeRow = el('<div class="row gap wrap"></div>');
-      for (var mi = 0; mi < MODES.length; mi++) {
-        (function (m) {
-          var b = el('<button class="chip-btn' + (cur === m.v ? ' active' : '') + '" type="button">' + esc(m.t) + '</button>');
-          b.addEventListener('click', function () {
-            AR.Sync.setConfig({ autoMode: m.v });
-            AR.UI.toast('自动同步：' + m.t);
-            renderSettings();
-          });
-          modeRow.appendChild(b);
-        })(MODES[mi]);
-      }
-      box.appendChild(modeRow);
-
-    if (cur === 'min') {
+      var minHost = el('<div id="syMinHost"></div>');
+      function renderMinHost() {
+        minHost.innerHTML = '';
+        if (cur !== 'min') { return; }
         var minRow = el('<div class="row gap wrap"></div>');
         var mins = [5, 10, 15, 30];
         for (var mi2 = 0; mi2 < mins.length; mi2++) {
@@ -3774,13 +3924,37 @@ function renderLongTaskList(host) {
             var mb = el('<button class="chip-btn' + (Number(cfg.autoMin) === mm ? ' active' : '') + '" type="button">每 ' + mm + ' 分钟</button>');
             mb.addEventListener('click', function () {
               AR.Sync.setConfig({ autoMin: mm });
-              renderSettings();
+              cfg.autoMin = mm;
+              var btns = minRow.querySelectorAll('.chip-btn');
+              for (var bi = 0; bi < btns.length; bi++) {
+                btns[bi].classList.toggle('active', btns[bi] === mb);
+              }
             });
             minRow.appendChild(mb);
           })(mins[mi2]);
         }
-        box.appendChild(minRow);
+        minHost.appendChild(minRow);
       }
+      for (var mi = 0; mi < MODES.length; mi++) {
+        (function (m) {
+          var b = el('<button class="chip-btn' + (cur === m.v ? ' active' : '') + '" type="button">' + esc(m.t) + '</button>');
+          b.addEventListener('click', function () {
+            AR.Sync.setConfig({ autoMode: m.v });
+            cfg.autoMode = m.v;
+            cur = m.v;
+            var btns = modeRow.querySelectorAll('.chip-btn');
+            for (var bi = 0; bi < btns.length; bi++) {
+              btns[bi].classList.toggle('active', btns[bi] === b);
+            }
+            renderMinHost();
+            AR.UI.toast('自动同步：' + m.t);
+          });
+          modeRow.appendChild(b);
+        })(MODES[mi]);
+      }
+      box.appendChild(modeRow);
+      box.appendChild(minHost);
+      renderMinHost();
     }
 
     /**
@@ -3791,7 +3965,7 @@ function renderLongTaskList(host) {
       box.appendChild(rowSwitch('静默同步', '开启后同步成功不弹提示（失败仍会提示）',
         cfg.silent === true, function (v) {
           AR.Sync.setConfig({ silent: v });
-          renderSettings();
+          cfg.silent = v;
         }));
       box.appendChild(el('<div class="field-label" style="margin-top:12px">同步范围</div>'));
       var SCOPES = [
@@ -3806,7 +3980,12 @@ function renderLongTaskList(host) {
             + esc(m.t) + '</button>');
           b.addEventListener('click', function () {
             AR.Sync.setConfig({ scope: m.v });
-            renderSettings();
+            cfg.scope = m.v;
+            curScope = m.v;
+            var btns = scopeRow.querySelectorAll('.chip-btn');
+            for (var bi = 0; bi < btns.length; bi++) {
+              btns[bi].classList.toggle('active', btns[bi] === b);
+            }
           });
           scopeRow.appendChild(b);
         })(SCOPES[si]);
@@ -3814,6 +3993,23 @@ function renderLongTaskList(host) {
       box.appendChild(scopeRow);
       box.appendChild(el('<p class="muted">仅数据：课表 / 任务 / 作业 / 日程会同步；主题、提醒等设置只留在本机'
         + '（不上传也不下载），改设置不会触发同步。云端已有的那份设置原样保留，不会被本机覆盖。</p>'));
+
+      box.appendChild(el('<div class="field-label" style="margin-top:12px">同步解耦开关</div>'));
+      box.appendChild(rowSwitch('课表与配置云同步', '开启后课表/任务/设置改动仅同步配置文件',
+        cfg.syncConfigEnabled !== false, function (v) {
+          AR.Sync.setConfig({ syncConfigEnabled: v });
+          cfg.syncConfigEnabled = v;
+        }));
+      box.appendChild(rowSwitch('Whisper 日记云同步', '开启后日记/评论改动仅同步日记（不触发配置同步）',
+        cfg.syncWhisperEnabled !== false, function (v) {
+          AR.Sync.setConfig({ syncWhisperEnabled: v });
+          cfg.syncWhisperEnabled = v;
+        }));
+      box.appendChild(rowSwitch('同步 Whisper 配图（云端压缩）', '设备内始终展示原图；关闭后云同步只传日记文字',
+        cfg.syncWhisperMedia !== false, function (v) {
+          AR.Sync.setConfig({ syncWhisperMedia: v });
+          cfg.syncWhisperMedia = v;
+        }));
     }
     if (!synced) {
       /* ── 未配置：引导表单 ── */
@@ -3842,14 +4038,31 @@ function renderLongTaskList(host) {
         if (!url || !tok || !pass) { AR.UI.toast('三项都要填'); return; }
         connectBtn.disabled = true;
         connectBtn.textContent = '连接中…';
-        AR.Sync.setConfig({ baseUrl: url, token: tok, passphrase: pass });
+        var prevCfg = (AR.Sync && AR.Sync.config) ? AR.Sync.config() : null;
+        var wroteConfig = false;
         AR.Sync.ping(url).then(function () {
+          AR.Sync.setConfig({ baseUrl: url, token: tok, passphrase: pass });
+          wroteConfig = true;
           connectBtn.textContent = '同步中…';
           return AR.Sync.syncNow();
         }).then(function (r) {
           AR.UI.toast('已连接 · 云端 rev ' + (r && r.rev ? r.rev : '?'));
           renderSettings();
         }).catch(function (e) {
+          if (wroteConfig) {
+            AR.Sync.clearConfig(false);
+            if (prevCfg && prevCfg.baseUrl) {
+              AR.Sync.setConfig({
+                baseUrl: prevCfg.baseUrl || '',
+                token: prevCfg.token || '',
+                autoMode: prevCfg.autoMode,
+                autoMin: prevCfg.autoMin,
+                rememberPass: prevCfg.rememberPass,
+                silent: prevCfg.silent,
+                scope: prevCfg.scope
+              });
+            }
+          }
           connectBtn.disabled = false;
           connectBtn.textContent = '连接并同步';
           AR.UI.toast((e && e.message) ? e.message : '连接失败');
@@ -3878,15 +4091,35 @@ function renderLongTaskList(host) {
     appendAutoSync();
     appendSyncPrefs();
 
-    /* 动作按钮 */
-    var row = el('<div class="row gap"></div>');
-    var bNow = el('<button class="btn primary" type="button">立即同步</button>');
-    var bPull = el('<button class="btn" type="button">从云端拉取并合并</button>');
+    /* 动作按钮（内置进度条 + 配置/日记解耦同步） */
+    var row = el('<div class="row gap wrap"></div>');
+    var bNow = makeProgBtn('primary', '同步课表配置');
+    var bWhNow = makeProgBtn('', '同步 Whisper 日记');
+    var bPull = makeProgBtn('', '从云端拉取配置');
     var bHis = el('<button class="btn" type="button">回滚…</button>');
-    row.appendChild(bNow); row.appendChild(bPull); row.appendChild(bHis);
+    row.appendChild(bNow); row.appendChild(bWhNow); row.appendChild(bPull); row.appendChild(bHis);
     box.appendChild(row);
     bNow.addEventListener('click', function () { runSync(bNow, 'up'); });
     bPull.addEventListener('click', function () { runSync(bPull, 'pull'); });
+    bWhNow.addEventListener('click', function () {
+      if (!(AR.Whisper && AR.Whisper.syncNow)) { AR.UI.toast('Whisper 模块未就绪'); return; }
+      bWhNow.disabled = true;
+      setBtnProg(bWhNow, 10, '准备同步…');
+      Promise.resolve(AR.Whisper.syncNow(function (pct, txt) {
+        setBtnProg(bWhNow, pct, txt || '同步中…');
+      })).then(function (res) {
+        if (res && res.skipped) {
+          bWhNow.disabled = false; setBtnProg(bWhNow, 0, '同步 Whisper 日记');
+          AR.UI.toast('同步未就绪'); return;
+        }
+        setBtnProg(bWhNow, 100, '同步完成 ✓');
+        AR.UI.toast('Whisper 日记同步完成');
+        setTimeout(function () { bWhNow.disabled = false; setBtnProg(bWhNow, 0, '同步 Whisper 日记'); }, 600);
+      }, function (err) {
+        bWhNow.disabled = false; setBtnProg(bWhNow, 0, '同步 Whisper 日记');
+        AR.UI.toast((err && err.message) || 'Whisper 同步失败');
+      });
+    });
 
     /* 回滚：就地列出最近版本 */
     var hisBox = el('<div></div>');
@@ -4543,14 +4776,19 @@ function renderLongTaskList(host) {
 
   /* ── 通用刷新 ─────────────────────────────────────────────── */
 
-  function refreshAll() {
+  function refreshContentViews() {
     ensure();
     if (AR.UI.syncCustomTabNav) { AR.UI.syncCustomTabNav(); }
     AR.UI.renderToday();
     AR.UI.renderWeek();
-    if (AR.UI.currentView() === 'settings') { renderSettings(); }
+    if (AR.UI.refreshHomeworkPanels) { AR.UI.refreshHomeworkPanels(); }
     if (AR.UI.currentView() === 'import') { renderEventList(); }
     if (AR.UI.currentView() === 'custom' && AR.UI.renderCustom) { AR.UI.renderCustom(); }
+  }
+
+  function refreshAll() {
+    refreshContentViews();
+    if (AR.UI.currentView() === 'settings') { renderSettings(); }
   }
 
   AR.Panels = {

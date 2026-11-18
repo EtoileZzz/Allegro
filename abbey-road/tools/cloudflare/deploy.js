@@ -146,6 +146,7 @@ async function main() {
   const metadata = {
     main_module: 'worker.js',
     compatibility_date: '2024-11-01',
+    keep_bindings: ['secret_text'],
     bindings: [{ type: 'd1', name: 'DB', id: dbId }]
   };
   const mp = multipart([
@@ -155,11 +156,12 @@ async function main() {
   await api('PUT', '/accounts/' + AID + '/workers/scripts/' + SCRIPT_NAME, mp.body, {
     contentType: 'multipart/form-data; boundary=' + mp.boundary
   });
-  log('4) Worker 已上传（含 D1 绑定 metadata）');
+  log('4) Worker 已上传（含 D1 绑定 metadata，保留 secret_text）');
 
   /* ── 5. 绑定时再确认一次（metadata 里已带，这里兜底 /settings） ── */
   try {
     await api('PUT', '/accounts/' + AID + '/workers/scripts/' + SCRIPT_NAME + '/settings', {
+      keep_bindings: ['secret_text'],
       bindings: [{ type: 'd1', name: 'DB', id: dbId }],
       compatibility_date: '2024-11-01'
     });
@@ -169,11 +171,27 @@ async function main() {
   }
 
   /* ── 6. Secret ── */
-  if (!SYNC_TOKEN) { SYNC_TOKEN = crypto.randomBytes(32).toString('hex'); }
-  await api('PUT', '/accounts/' + AID + '/workers/scripts/' + SCRIPT_NAME + '/secrets', {
-    name: 'SYNC_TOKEN', text: SYNC_TOKEN, type: 'secret_text'
-  });
-  log('6) Secret SYNC_TOKEN 已写入');
+  let hasRemoteSecret = false;
+  if (!DRY && GENERATED_TOKEN) {
+    try {
+      const curSettings = await api('GET', '/accounts/' + AID + '/workers/scripts/' + SCRIPT_NAME + '/settings');
+      const curBindings = (curSettings.result && curSettings.result.bindings) || [];
+      hasRemoteSecret = curBindings.some((b) => b && b.name === 'SYNC_TOKEN' && b.type === 'secret_text');
+    } catch (e) {
+      hasRemoteSecret = false;
+    }
+  }
+  let tokenAction = 'skipped';
+  if (!GENERATED_TOKEN || !hasRemoteSecret) {
+    if (!SYNC_TOKEN) { SYNC_TOKEN = crypto.randomBytes(32).toString('hex'); }
+    await api('PUT', '/accounts/' + AID + '/workers/scripts/' + SCRIPT_NAME + '/secrets', {
+      name: 'SYNC_TOKEN', text: SYNC_TOKEN, type: 'secret_text'
+    });
+    tokenAction = GENERATED_TOKEN ? 'generated' : 'provided';
+    log('6) Secret SYNC_TOKEN 已写入');
+  } else {
+    log('6) Secret SYNC_TOKEN 已存在且未传环境变量，保留现有 secret');
+  }
 
   /* ── 7. workers.dev 子域 ── */
   let sub = null;
@@ -234,7 +252,9 @@ async function main() {
   log('服务地址   : ' + url);
   log('/health    : ' + JSON.stringify(health));
   log('/state 无token: HTTP ' + authCheck + '（应为 401）');
-  log('SYNC_TOKEN : ' + SYNC_TOKEN + (GENERATED_TOKEN ? '   ← 新生成，请抄进密码管理器' : '   ← 你指定的'));
+  log('SYNC_TOKEN : ' + (tokenAction === 'skipped'
+    ? '（沿用远端已有 secret，未改动）'
+    : (SYNC_TOKEN + (GENERATED_TOKEN ? '   ← 新生成，请抄进密码管理器' : '   ← 你指定的'))));
   log('==========================================');
   if (!health || !health.ok || health.db !== true) {
     log('\n⚠ /health 没通过。最常见原因：D1 绑定变量名不是 DB，或部署还在传播。');

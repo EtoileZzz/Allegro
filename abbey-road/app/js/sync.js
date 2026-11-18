@@ -148,13 +148,17 @@
   var cfg = readJSON(CFG_KEY, {
     baseUrl: '', token: '', autoMode: 'open', autoMin: 0, rememberPass: true,
     silent: false,      // v0.5.1：静默同步（成功不提示，失败仍提示）
-    scope: 'all'        // v0.5.1：'all' 全部 | 'data' 只同步数据（不含设置）
+    scope: 'all',       // v0.5.1：'all' 全部 | 'data' 只同步数据（不含设置）
+    syncConfigEnabled: true,   // v0.5.5：课表与配置同步开关
+    syncWhisperEnabled: true,  // v0.5.5：Whisper 日记同步开关
+    syncWhisperMedia: true     // v0.5.5：Whisper 图片附件同步开关
   });
   var run = readJSON(RUN_KEY, { lastRev: 0, lastSyncAt: 0, lastConflicts: 0, dirty: false });
   var memPass = '';          // rememberPass=false 时只在内存里
   var keyCache = null;       // { pass, salt, iter, key }
   var state = { salt: '' };  // 当前 salt（加密时写进信封）
   var busy = null;           // 正在跑的那次同步（Promise）
+  var progressCb = null;     // 当前同步进度回调
   var debounceTimer = null;
   var debounceOverride = 0;   // 测试用：把去抖时长压短（正常情况保持 0）
   var applying = false;   // 正在把远端内容合进本机（此时 save() 不该再触发推送）
@@ -163,6 +167,12 @@
   function emit(kind, payload) {
     for (var i = 0; i < listeners.length; i++) {
       try { listeners[i](kind, payload || {}); } catch (e) { }
+    }
+  }
+  function reportProgress(pct, text) {
+    emit('progress', { target: 'config', pct: pct, text: text });
+    if (typeof progressCb === 'function') {
+      try { progressCb(pct, text); } catch (e) { }
     }
   }
   function onChange(fn) { if (typeof fn === 'function') { listeners.push(fn); } }
@@ -174,9 +184,16 @@
       rememberPass: cfg.rememberPass !== false,
       silent: cfg.silent === true,
       scope: cfg.scope === 'data' ? 'data' : 'all',
+      syncConfigEnabled: cfg.syncConfigEnabled !== false,
+      syncWhisperEnabled: cfg.syncWhisperEnabled !== false,
+      syncWhisperMedia: cfg.syncWhisperMedia !== false,
       hasPass: !!getPass()
     };
   }
+
+  function isConfigSyncEnabled() { return isConfigured() && cfg.syncConfigEnabled !== false; }
+  function isWhisperSyncEnabled() { return isConfigured() && cfg.syncWhisperEnabled !== false; }
+  function isWhisperMediaSyncEnabled() { return isWhisperSyncEnabled() && cfg.syncWhisperMedia !== false; }
 
   function getPass() {
     if (cfg.rememberPass === false) { return memPass || ''; }
@@ -218,6 +235,9 @@
     if (next.rememberPass !== undefined) { cfg.rememberPass = next.rememberPass !== false; }
     if (next.silent !== undefined) { cfg.silent = next.silent === true; }
     if (next.scope !== undefined) { cfg.scope = next.scope === 'data' ? 'data' : 'all'; }
+    if (next.syncConfigEnabled !== undefined) { cfg.syncConfigEnabled = next.syncConfigEnabled !== false; }
+    if (next.syncWhisperEnabled !== undefined) { cfg.syncWhisperEnabled = next.syncWhisperEnabled !== false; }
+    if (next.syncWhisperMedia !== undefined) { cfg.syncWhisperMedia = next.syncWhisperMedia !== false; }
     if (next.passphrase !== undefined) { setPass(String(next.passphrase || '')); keyCache = null; }
     writeJSON(CFG_KEY, cfg);
     emit('config', config());
@@ -227,7 +247,10 @@
   function clearConfig(keepPass) {
     cfg = {
       baseUrl: '', token: '', autoMode: 'open', autoMin: 0, rememberPass: cfg.rememberPass,
-      silent: cfg.silent === true, scope: cfg.scope === 'data' ? 'data' : 'all'
+      silent: cfg.silent === true, scope: cfg.scope === 'data' ? 'data' : 'all',
+      syncConfigEnabled: cfg.syncConfigEnabled !== false,
+      syncWhisperEnabled: cfg.syncWhisperEnabled !== false,
+      syncWhisperMedia: cfg.syncWhisperMedia !== false
     };
     writeJSON(CFG_KEY, cfg);
     if (!keepPass) { setPass(''); }
@@ -307,11 +330,12 @@
 
   /* ─────────────── 同步主体 ─────────────── */
 
-  function begin(kind) {
+  function begin(kind, onProgress) {
+    if (typeof onProgress === 'function') { progressCb = onProgress; }
     if (busy) { return busy; }
     var chain = doSync(kind);
-    busy = chain.finally ? chain.finally(function () { busy = null; })
-      : chain.then(function (v) { busy = null; return v; }, function (e) { busy = null; throw e; });
+    busy = chain.then(function (v) { busy = null; progressCb = null; return v; },
+      function (e) { reportProgress(0, ''); busy = null; progressCb = null; throw e; });
     return busy;
   }
 
@@ -326,6 +350,7 @@
       return Promise.reject(e0);
     }
     emit('start', { kind: kind });
+    reportProgress(15, '拉取云端…');
     return apiCall('GET', '/state').then(function (res) {
       if (res.status !== 200) { throw classify(res); }
       var remote = res.json || {};
@@ -349,6 +374,7 @@
         // 云端是空的：直接把本机推上去
         return pushOnce(rev, rev, null);
       }
+      reportProgress(45, '解密合并…');
       var remoteEnv = parseEnv(remote.envelope);
       return ensureKey(remoteEnv)
         .then(function (key) { return decryptEnvelope(key, remoteEnv).then(function (remoteState) {
@@ -387,6 +413,7 @@
     var keepSettings = remoteSettings || null;
     function step(matchRev) {
       attempt++;
+      reportProgress(75, '加密上传…');
       return ensureKey(null).then(function (key) {
         var payload = AR.Store.exportPayload();
         delete payload.device;          // 设备名是本机属性，不该互相覆盖（合并时本来也会忽略）
@@ -448,6 +475,7 @@
     if (info.bytes) { run.lastBytes = info.bytes; }
     run.dataSig = localDataSig();     // v0.5.2：记下「已对齐的数据指纹」
     writeJSON(RUN_KEY, run);
+    reportProgress(100, '同步完成');
     emit('done', info);
     /**
      * v0.4.7：每次同步（含自动同步）都提示一次。
@@ -466,13 +494,16 @@
 
   /* ─────────────── 对外动作 ─────────────── */
 
-  function syncNow() { return begin('up'); }
-  function pullOnly() { return begin('pull'); }
-  function overwriteCloud() { return begin('force'); }
+  function syncNow(onProgress) { return begin('up', onProgress); }
+  function pullOnly(onProgress) { return begin('pull', onProgress); }
+  function overwriteCloud(onProgress) { return begin('force', onProgress); }
 
   function status() {
     return {
       configured: isConfigured(),
+      syncConfigEnabled: cfg.syncConfigEnabled !== false,
+      syncWhisperEnabled: cfg.syncWhisperEnabled !== false,
+      syncWhisperMedia: cfg.syncWhisperMedia !== false,
       baseUrl: cfg.baseUrl || '', autoMode: cfg.autoMode || 'open', autoMin: cfg.autoMin || 0,
       rememberPass: cfg.rememberPass !== false,
       lastRev: Number(run.lastRev) || 0, lastSyncAt: Number(run.lastSyncAt) || 0,
@@ -487,7 +518,7 @@
   /** 本地存过盘 → 标记待推送，起一个去抖计时器 */
   function onLocalSave() {
     if (applying) { return; }          // 合并远端内容引起的保存，不算本地改动
-    if (!isConfigured()) { return; }
+    if (!isConfigured() || cfg.syncConfigEnabled === false) { return; }
     var mode = cfg.autoMode || 'open';
     if (mode === 'off') { return; }
     /**
@@ -511,7 +542,7 @@
 
   /** 打开 App / 回到前台：按频率决定要不要拉一次 */
   function maybeAuto() {
-    if (!isConfigured()) { return Promise.resolve(null); }
+    if (!isConfigured() || cfg.syncConfigEnabled === false) { return Promise.resolve(null); }
     var mode = cfg.autoMode || 'open';
     if (mode === 'off') { return Promise.resolve(null); }
     var freqMs = mode === 'min' ? Math.max(1, Number(cfg.autoMin) || 5) * 60000 : OPEN_GAP_MS;
@@ -613,9 +644,19 @@
   }
 
   function blobDecrypt(ns, env) {
+    if (!env || typeof env !== 'object' || !env.salt || !env.iv || !env.ct) {
+      var bad = new Error('云端的加密信封损坏');
+      bad.code = 'BAD_ENVELOPE';
+      return Promise.reject(bad);
+    }
     return blobDeriveKey(ns, env.salt).then(function (key) {
       return subtle().decrypt({ name: 'AES-GCM', iv: b64ToBytes(env.iv), additionalData: blobAad(ns, env.rev) }, key, b64ToBytes(env.ct))
-        .then(function (buf) { return JSON.parse(dec(buf)); });
+        .then(function (buf) { return JSON.parse(dec(buf)); })
+        .catch(function () {
+          var e = new Error('口令不对，或云端数据不是用这个口令加密的');
+          e.code = 'BAD_PASSPHRASE';
+          throw e;
+        });
     });
   }
 
@@ -627,7 +668,7 @@
       if (res.status !== 200) { throw classify(res); }
       var env = res.json && res.json.envelope;
       if (!env) { return { rev: Number(res.json && res.json.rev) || 0, data: null }; }
-      var parsed = typeof env === 'string' ? JSON.parse(env) : env;
+      var parsed = parseEnv(env);
       return blobDecrypt(ns, parsed).then(function (data) {
         return { rev: Number(parsed.rev) || 0, data: data };
       });
@@ -658,10 +699,90 @@
     });
   }
 
+  /* ── Whisper 图片附件增量同步（/blob/whisper/media） ── */
+  var MEDIA_AAD_PREFIX = 'ARS1WM|';
+  var MEDIA_MAX_ENVELOPE = 1024 * 1024;
+  function mediaAad(id) { return enc(MEDIA_AAD_PREFIX + String(id || '')); }
+
+  function blobMediaList() {
+    if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
+    return apiCall('GET', '/blob/whisper/media').then(function (res) {
+      if (res.status === 404) { return { ids: [], items: [] }; }
+      if (res.status !== 200) { throw classify(res); }
+      var j = res.json || {};
+      return { ids: Array.isArray(j.ids) ? j.ids : [], items: Array.isArray(j.items) ? j.items : [] };
+    });
+  }
+
+  function blobMediaPull(id) {
+    if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
+    return apiCall('GET', '/blob/whisper/media/' + encodeURIComponent(id)).then(function (res) {
+      if (res.status === 404) { return null; }
+      if (res.status !== 200) { throw classify(res); }
+      var env = res.json && res.json.envelope;
+      if (!env) { return null; }
+      var parsed = parseEnv(env);
+      if (!parsed || !parsed.salt || !parsed.iv || !parsed.ct) {
+        var bad = new Error('云端的图片信封损坏');
+        bad.code = 'BAD_ENVELOPE';
+        throw bad;
+      }
+      return blobDeriveKey('whisper-media', parsed.salt).then(function (key) {
+        return subtle().decrypt({ name: 'AES-GCM', iv: b64ToBytes(parsed.iv), additionalData: mediaAad(id) }, key, b64ToBytes(parsed.ct))
+          .then(function (buf) { return JSON.parse(dec(buf)); })
+          .catch(function () {
+            var e = new Error('口令不对，或云端图片不是用这个口令加密的');
+            e.code = 'BAD_PASSPHRASE';
+            throw e;
+          });
+      });
+    });
+  }
+
+  function blobMediaPush(id, payloadObj) {
+    if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
+    var salt = blobSalt();
+    return blobDeriveKey('whisper-media', salt).then(function (key) {
+      var iv = randBytes(12);
+      return subtle().encrypt({ name: 'AES-GCM', iv: iv, additionalData: mediaAad(id) }, key, enc(JSON.stringify(payloadObj)))
+        .then(function (ctBuf) {
+          var env = {
+            v: 1,
+            ns: 'whisper-media',
+            id: id,
+            salt: salt,
+            iv: bytesToB64(iv),
+            ct: bytesToB64(new Uint8Array(ctBuf))
+          };
+          var envelope = JSON.stringify(env);
+          if (envelope.length > MEDIA_MAX_ENVELOPE) {
+            var eToo = new Error('压缩后图片仍过大，无法上传');
+            eToo.code = 'TOO_LARGE';
+            throw eToo;
+          }
+          return apiCall('PUT', '/blob/whisper/media/' + encodeURIComponent(id), { envelope: envelope });
+        });
+    }).then(function (res) {
+      if (res.status === 200) { return res.json || { id: id }; }
+      throw classify(res);
+    });
+  }
+
+  function blobMediaDelete(id) {
+    if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
+    var path = (id === '*') ? '/blob/whisper/media' : ('/blob/whisper/media/' + encodeURIComponent(id));
+    return apiCall('DELETE', path).then(function (res) {
+      if (res.status === 200 || res.status === 404) { return res.json || { deleted: true }; }
+      throw classify(res);
+    });
+  }
+
   AR.Sync = {
     blobPull: blobPull, blobPush: blobPush,
+    blobMediaList: blobMediaList, blobMediaPull: blobMediaPull, blobMediaPush: blobMediaPush, blobMediaDelete: blobMediaDelete,
     /* 配置 */
     config: config, setConfig: setConfig, clearConfig: clearConfig, isConfigured: isConfigured,
+    isConfigSyncEnabled: isConfigSyncEnabled, isWhisperSyncEnabled: isWhisperSyncEnabled, isWhisperMediaSyncEnabled: isWhisperMediaSyncEnabled,
     /* 动作 */
     syncNow: syncNow, pullOnly: pullOnly, overwriteCloud: overwriteCloud,
     listHistory: listHistory, restoreRev: restoreRev, ping: ping,

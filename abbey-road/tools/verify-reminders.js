@@ -257,6 +257,78 @@ function newTask(env, text, goalTarget, unit) {
   ok('N32 preview 条目形状正确', pv[0] && pv[0].title && typeof pv[0].atMs === 'number' && pv[0].text !== undefined);
 }
 
+/* ══ 12. Batch 2 (B2-T-05): everyN 休息日不误报 ══ */
+{
+  const env = makeEnv({ noCourses: true });
+  setDaily(env, { times: ['21:00'], form: 'summary' });
+  const twoDaysAgo = addDays(BASE_T, -2);
+  const tEveryN = env.S.todoUpsert({
+    text: '三天一练',
+    cadence: { type: 'everyN', intervalDays: 3, times: 1 },
+    goal: { target: 20, unit: '分' }
+  });
+  tEveryN.createdAt = new Date(twoDaysAgo.getFullYear(), twoDaysAgo.getMonth(), twoDaysAgo.getDate(), 9, 0, 0).toISOString();
+  env.S.save(true);
+  ok('N33 everyN 非间隔日（休息日）不产生虚构 pending 提醒', todayOnly(env).length === 0,
+    JSON.stringify(todayOnly(env)));
+}
+
+/* ══ 13. Batch 2 (B2-T-05): hasOwnTimes 在 each/summary 中不污染剩余计数与空汇总 ══ */
+{
+  const env = makeEnv({ noCourses: true });
+  setDaily(env, { times: ['21:00'], form: 'each', maxEachItems: 1 });
+  const shared1 = newTask(env, '公共任务1', 0);
+  const own1 = newTask(env, '专属任务1', 0);
+  const own2 = newTask(env, '专属任务2', 0);
+  env.S.notifOverrides().tasks[own1] = { times: ['09:00'], mute: false, onlyWhenPending: true };
+  env.S.notifOverrides().tasks[own2] = { times: ['10:00'], mute: false, onlyWhenPending: true };
+  env.S.save(true);
+  const eachList = todayOnly(env);
+  ok('N34 each 模式有剩余提示时，rest 不把 hasOwnTimes 任务算进去',
+    eachList.some((x) => x.id.indexOf('task-' + shared1 + '-') === 0)
+    && !eachList.some((x) => /-more$/.test(String(x.id)) || String(x.title).indexOf('还有') >= 0),
+    JSON.stringify(eachList));
+
+  /* 全是 hasOwnTimes 且没有公共待办 → summary 不应发空正文汇总 */
+  const env2 = makeEnv({ noCourses: true });
+  setDaily(env2, { times: ['21:00'], form: 'summary' });
+  const o1 = newTask(env2, '仅专属A', 0);
+  const o2 = newTask(env2, '仅专属B', 0);
+  env2.S.notifOverrides().tasks[o1] = { times: ['09:00'], mute: false, onlyWhenPending: true };
+  env2.S.notifOverrides().tasks[o2] = { times: ['10:00'], mute: false, onlyWhenPending: true };
+  env2.S.save(true);
+  const dailySummary = todayOnly(env2).filter((x) => String(x.id).indexOf('daily-') === 0);
+  ok('N35 summary 模式当所有未完成任务都有专属时间时，不发空正文汇总通知',
+    dailySummary.length === 0, JSON.stringify(dailySummary));
+}
+
+/* ══ 14. Batch 2 (B2-T-05): >300 作业与 >40 任务专属提醒不被原始索引截断 ══ */
+{
+  const env = makeEnv({ noCourses: true });
+  setDaily(env, { times: ['21:00'], form: 'summary' });
+  const st = env.S.get();
+  const todayK = dateKey(BASE_T);
+  for (let i = 0; i < 310; i++) {
+    st.tasks.push({ id: 'done_hw_' + i, text: '已完成' + i, date: todayK, done: true });
+  }
+  st.tasks.push({ id: 'tail_hw', text: '尾部未做作业', date: todayK, done: false });
+
+  for (let j = 0; j < 90; j++) {
+    env.S.todoUpsert({ text: '已归档' + j, archived: true, cadence: { type: 'daily', times: 1 } });
+  }
+  const activeTailId = env.S.todoUpsert({ text: '第91条活跃任务', cadence: { type: 'daily', times: 1 } }).id;
+  env.S.notifOverrides().tasks[activeTailId] = { times: ['11:00'], mute: false, onlyWhenPending: true };
+  env.S.save(true);
+
+  const builtToday = todayOnly(env);
+  ok('N36 assignmentsFor 在 310 条已完成作业之后仍能检出尾部未完成作业',
+    builtToday.some((x) => String(x.id) === 'hw-tail_hw' || String(x.text).indexOf('尾部未做作业') >= 0),
+    JSON.stringify(builtToday.map((x) => x.id + ':' + x.text)));
+  ok('N37 build 在 90 条已归档任务之后仍能为第 91 条活跃任务排专属提醒',
+    builtToday.some((x) => String(x.id).indexOf('task-' + activeTailId + '-') === 0),
+    JSON.stringify(builtToday.map((x) => x.id)));
+}
+
 console.log('');
 console.log('合计：' + pass + ' 通过 / ' + fail + ' 失败');
 bad.forEach((b) => console.log('  ✗ ' + b));

@@ -440,6 +440,99 @@ function configure(dev, opts) {
       JSON.stringify(store3.meta.lastOpts));
   }
 
+  /* ── 14. Batch 2 (B2-T-01)：接真实 core.js 的端到端同步合并 ── */
+  {
+    const CORE_SRC = fs.readFileSync(path.join(APP, 'core.js'), 'utf8');
+    function makeRealCoreDevice(name, server) {
+      const lsData = {};
+      const localStorage = {
+        getItem: k => (Object.prototype.hasOwnProperty.call(lsData, k) ? lsData[k] : null),
+        setItem: (k, v) => { lsData[k] = String(v); },
+        removeItem: k => { delete lsData[k]; }
+      };
+      const sandbox = {
+        console, Date, JSON, Math, Number, String, Object, Array, Promise, Error, isFinite, parseInt, parseFloat, RegExp, encodeURIComponent,
+        setTimeout, clearTimeout, btoa, atob,
+        TextEncoder, TextDecoder, Uint8Array, AbortController,
+        crypto: globalThis.crypto,
+        fetch: server.fetch,
+        localStorage,
+        window: {}
+      };
+      sandbox.window = sandbox;
+      sandbox.globalThis = sandbox;
+      vm.createContext(sandbox);
+      vm.runInContext(CORE_SRC, sandbox, { filename: 'core.js' });
+      sandbox.AR.Store.load();
+      sandbox.AR.UI = { toast: () => {} };
+      vm.runInContext(SRC, sandbox, { filename: 'sync.js' });
+      return { name, AR: sandbox.AR, Store: sandbox.AR.Store, Sync: sandbox.AR.Sync };
+    }
+
+    const srvR = makeServer();
+    const devA = makeRealCoreDevice('REAL-A', srvR);
+    configure(devA);
+    const semLive = devA.Store.addSemester({ name: '2026 春实测', startDate: '2026-03-02', weekCount: 16 }).semester;
+    devA.Store.get().courses.push({ id: 'C_REAL_A', semesterId: semLive.id, name: '软件工程', teacherIds: [], updatedAt: new Date().toISOString() });
+    devA.Store.get().settings.schedule.currentSemesterId = semLive.id;
+    devA.Store.get().semesters.push({
+      id: 'SEM_EMPTY_SYNC', name: '默认学期', startDate: '2026-01-01', weekCount: 20, updatedAt: new Date().toISOString()
+    });
+    devA.Store.get().semesters.push({
+      id: 'SEM_DEL_SYNC', name: '已删学期', startDate: '2025-09-01', weekCount: 16,
+      deletedAt: '2026-01-02T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z'
+    });
+    devA.Store.save(true);
+    await devA.Sync.syncNow();
+
+    const devB = makeRealCoreDevice('REAL-B', srvR);
+    configure(devB);
+    const localB = devB.Store.addSemester({ name: '2026 春实测', startDate: '2026-03-02', weekCount: 16 }).semester;
+    devB.Store.get().courses.push({ id: 'C_REAL_B', semesterId: localB.id, name: '软件工程', teacherIds: [], updatedAt: new Date().toISOString() });
+    devB.Store.get().settings.schedule.currentSemesterId = localB.id;
+    devB.Store.save(true);
+    await devB.Sync.pullOnly();
+
+    ok('S41 真 core.js 同步拉取后空默认学期被自动清理',
+      !devB.Store.semesterList().some(s => s.id === 'SEM_EMPTY_SYNC'));
+    ok('S42 真 core.js 同步拉取后软删学期不进入 semesterList',
+      !devB.Store.semesterList().some(s => s.id === 'SEM_DEL_SYNC'));
+    ok('S43 真 core.js 同名课程按自然键合并（不翻倍）',
+      devB.Store.courseList(localB.id).filter(c => c.name === '软件工程').length === 1);
+
+    /* A 端用 removeSemester 软删另一个多余学期，推上云后再从 B 端验证 */
+    const semExtra = devA.Store.addSemester({ name: '2026 暑期', startDate: '2026-07-06', weekCount: 4 }).semester;
+    devA.Store.save(true);
+    const rmRes = devA.Store.removeSemester(semExtra.id);
+    await devA.Sync.syncNow();
+    await devB.Sync.pullOnly();
+    ok('S44 真 core.js removeSemester 软删随云同步传递到 B 端且保持隐藏',
+      rmRes && rmRes.ok && !devB.Store.semesterList().some(s => s.id === semExtra.id));
+  }
+
+  /* ── 15. v0.5.5：配置/日记同步解耦 & 进度阶段回调 ── */
+  {
+    const srvD = makeServer();
+    const storeD = makeStore({ courses: [{ id: 'c1', name: '高数', updatedAt: '2026-01-01T00:00:00Z' }] });
+    const devD = makeDevice('DEC', storeD, srvD);
+    configure(devD);
+    devD.Sync._internal.setDebounce(15);
+    devD.Sync.setConfig({ syncConfigEnabled: false, autoMode: 'every', silent: true });
+    devD.Sync.onLocalSave();
+    await devD.Sync.maybeAuto();
+    await new Promise(r => setTimeout(r, 40));
+    ok('S45 关闭 syncConfigEnabled 后，onLocalSave 与 maybeAuto 不触发任何 /state 请求',
+      srvD.getCount === 0 && srvD.putCount === 0,
+      'get=' + srvD.getCount + ' put=' + srvD.putCount);
+
+    devD.Sync.setConfig({ syncConfigEnabled: true });
+    const stages = [];
+    await devD.Sync.syncNow((pct, msg) => stages.push({ pct, msg }));
+    ok('S46 syncNow(onProgress) 按阶段回调进度（起于拉取，终于 100%）',
+      stages.length >= 3 && stages[0].pct > 0 && stages[stages.length - 1].pct === 100,
+      JSON.stringify(stages));
+  }
+
   console.log('');
   console.log('合计：' + pass + ' 通过 / ' + fail + ' 失败');
   bad.forEach(b => console.log('  ✗ ' + b));

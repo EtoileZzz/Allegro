@@ -104,13 +104,17 @@ namespace Allegro
                 case "exporttext": return ExportText(Str(a, 0), Str(a, 1), Str(a, 2));
                 case "importtext": return ImportText();
                 case "sharefile": return ShareFile(Str(a, 0), Str(a, 1), Str(a, 3));
+                case "saveimage": return SaveImage(Str(a, 0), Str(a, 1));
+                case "shareimage": return ShareImage(Str(a, 0), Str(a, 1));
                 case "listexports": return ListExports();
                 case "readtexturi": return ReadTextUri(Str(a, 0));
                 case "setsystembars": SetBars(Str(a, 0), Bool(a, 1)); return "ok";
                 case "setbackdrop": _form.SetBackdropEnabled(Bool(a, 0)); return "ok";
                 case "notify": _form.ShowNotification(Str(a, 0), Str(a, 1)); return "ok";
                 case "setautostart": return SetAutostart(Bool(a, 0));
-            case "getautostart": return IsAutostartOn() ? "true" : "false";
+                case "getautostart": return IsAutostartOn() ? "true" : "false";
+                case "canbiometric": return false;
+                case "biometricverify": return false;
                 case "exitapp": BeginInvoke(delegate { Application.Exit(); }); return "ok";
                 default: return null;
             }
@@ -278,9 +282,67 @@ namespace Allegro
             try { Clipboard.SetText(content); } catch (Exception) { }
             if (savedPath == null)
             {
-                return "已复制配置内容，粘贴到微信发送即可";
+                return "已复制内容，粘贴到微信发送即可";
             }
             return "已存到「下载」目录并复制了内容，可拖进微信发送：" + name;
+        }
+
+        private static byte[] DecodeDataUrlBytes(string dataUrl)
+        {
+            if (string.IsNullOrEmpty(dataUrl)) { return null; }
+            int comma = dataUrl.IndexOf(',');
+            string b64 = comma >= 0 ? dataUrl.Substring(comma + 1) : dataUrl;
+            try { return Convert.FromBase64String(b64); }
+            catch (Exception) { return null; }
+        }
+
+        private string SaveImage(string fileName, string dataUrl)
+        {
+            byte[] bytes = DecodeDataUrlBytes(dataUrl);
+            if (bytes == null || bytes.Length == 0) { return "图片数据无效"; }
+            using (SaveFileDialog dlg = new SaveFileDialog())
+            {
+                dlg.Title = "保存日记图片";
+                dlg.FileName = SafeFileName(string.IsNullOrEmpty(fileName) ? "whisper-card.png" : fileName);
+                dlg.Filter = "PNG 图片 (*.png)|*.png|所有文件 (*.*)|*.*";
+                if (dlg.ShowDialog(_form) != DialogResult.OK) { return "cancelled"; }
+                File.WriteAllBytes(dlg.FileName, bytes);
+                return "图片已保存：" + Path.GetFileName(dlg.FileName);
+            }
+        }
+
+        private string ShareImage(string fileName, string dataUrl)
+        {
+            byte[] bytes = DecodeDataUrlBytes(dataUrl);
+            if (bytes == null || bytes.Length == 0) { return "图片数据无效"; }
+            string name = SafeFileName(string.IsNullOrEmpty(fileName) ? "whisper-card.png" : fileName);
+            string savedPath = null;
+            try
+            {
+                string dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                Directory.CreateDirectory(dir);
+                string dirFull = Path.GetFullPath(dir);
+                string full = Path.GetFullPath(Path.Combine(dirFull, name));
+                if (!full.StartsWith(dirFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    name = "whisper-card.png";
+                    full = Path.Combine(dirFull, name);
+                }
+                File.WriteAllBytes(full, bytes);
+                savedPath = full;
+            }
+            catch (Exception) { savedPath = null; }
+            try
+            {
+                using (MemoryStream ms = new MemoryStream(bytes))
+                using (System.Drawing.Image img = System.Drawing.Image.FromStream(ms))
+                {
+                    Clipboard.SetImage(img);
+                }
+            }
+            catch (Exception) { }
+            return savedPath == null ? "已复制图片到剪贴板，可直接 Ctrl+V 发送" : ("已存到「下载」并复制图片到剪贴板：" + name);
         }
 
         /// <summary>

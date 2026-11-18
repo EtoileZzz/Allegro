@@ -120,7 +120,7 @@
     /* 今日清单（卡片最多画 4 条）；_endMin 供「只显示没上完的」预设过滤 */
     var todayMode = pre('today', 'A');
     var nowMin = now.getHours() * 60 + now.getMinutes();
-    for (var i = 0; i < items.length && i < 4; i++) {
+    for (var i = 0; i < items.length && payload.today.length < 4; i++) {
       var it = items[i];
       if (todayMode === 'B' && typeof it.endMin === 'number' && it.endMin <= nowMin) { continue; }
       payload.today.push({

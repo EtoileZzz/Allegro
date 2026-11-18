@@ -689,6 +689,183 @@ eq('节次认领：当前学期名下有 14 节（不会只剩新补的）',
 eq('节次认领：第 1 节还是 08:00',
   AR.Store.periodsOf(AR.Store.currentSemester().id)[0].start, '08:00');
 
+/* ── 16. Batch 2 (B2-T-01): 空默认学期清理 / 软删学期过滤 / applyMerge 清理 ── */
+
+AR.Store.reset(true);
+const semState0 = AR.Store.get();
+const defSemId = semState0.semesters[0].id;
+const liveSemRes = AR.Store.addSemester({ name: '2026 春', startDate: '2026-03-02', weekCount: 16 });
+const liveSem = liveSemRes.semester;
+semState0.settings.schedule.currentSemesterId = liveSem.id;
+semState0.courses.push({ id: 'C_TL_1', semesterId: liveSem.id, name: '编译原理', teacherIds: [], updatedAt: new Date().toISOString() });
+semState0.semesters.push({
+  id: 'SEM_SOFT_DEL', name: '2025 秋（已删）', startDate: '2025-09-01', weekCount: 16,
+  deletedAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z'
+});
+AR.Store.save(true);
+AR.Store.load();
+
+check('学期清理：load() 自动清理空默认学期',
+  !AR.Store.semesterList().some((s) => s.id === defSemId));
+check('软删过滤：semesterList 不返回已软删学期',
+  !AR.Store.semesterList().some((s) => s.id === 'SEM_SOFT_DEL'));
+eq('软删过滤：semesterById 不命中已软删学期', AR.Store.semesterById('SEM_SOFT_DEL'), null);
+check('软删过滤：currentSemester 不命中已软删学期',
+  AR.Store.currentSemester() && AR.Store.currentSemester().id === liveSem.id);
+
+const denyLast = AR.Store.removeSemester(liveSem.id);
+eq('学期删除：只剩最后一个活学期时拒绝删除', denyLast && denyLast.ok, false);
+
+const liveSem2 = AR.Store.addSemester({ name: '2026 秋', startDate: '2026-09-07', weekCount: 18 }).semester;
+const stSem2 = AR.Store.get();
+stSem2.courses.push({ id: 'C_TL_2', semesterId: liveSem2.id, name: '操作系统', teacherIds: [], updatedAt: new Date().toISOString() });
+stSem2.blocks.push({ id: 'B_TL_2', courseId: 'C_TL_2', semesterId: liveSem2.id, weekday: 2, periodStart: 1, periodEnd: 2, weekMode: 'all', weeks: [], updatedAt: new Date().toISOString() });
+const evInRange = AR.Store.saveEvent({ date: '2026-09-08', title: '开学典礼' });
+const evOutRange = AR.Store.saveEvent({ date: '2027-03-01', title: '下学期事件' });
+stSem2.settings.schedule.currentSemesterId = liveSem2.id;
+AR.Store.save(true);
+
+const delOk = AR.Store.removeSemester(liveSem2.id);
+eq('学期删除：removeSemester 成功返回 ok=true', delOk && delOk.ok, true);
+check('学期删除：删掉当前学期后切到剩余活学期',
+  AR.Store.currentSemester() && AR.Store.currentSemester().id === liveSem.id);
+check('学期删除：semesterList 不再包含被删学期',
+  !AR.Store.semesterList().some((s) => s.id === liveSem2.id));
+check('学期删除：区间内事件一起软删且区间外事件保留',
+  AR.Store.get().events.some((e) => e.id === evInRange.id && !!e.deletedAt)
+  && AR.Store.get().events.some((e) => e.id === evOutRange.id && !e.deletedAt));
+
+/* applyMerge 死代码回归：remapCourseOverrides + pruneEmptySemesters + cleanOrphanOverrides 必须执行 */
+AR.Store.reset(true);
+const mergeHost = AR.Store.get();
+const hostSem = mergeHost.semesters[0];
+hostSem.name = '2026 春';
+const localCourse = { id: 'C_LOCAL_DM', semesterId: hostSem.id, name: '离散数学', teacherIds: [], updatedAt: new Date().toISOString() };
+mergeHost.courses.push(localCourse);
+AR.Store.notifOverrides().courses['C_ORPHAN_OLD'] = { leadMin: 25 };
+AR.Store.save(true);
+
+const incomingMerge = {
+  kind: 'abbeyroad.sync',
+  schemaVersion: 1,
+  semesters: [
+    { id: hostSem.id, name: '2026 春', startDate: hostSem.startDate, weekCount: hostSem.weekCount, updatedAt: new Date().toISOString() },
+    { id: 'SEM_EMPTY_INC', name: '默认学期', startDate: '2026-09-01', weekCount: 20, updatedAt: new Date().toISOString() }
+  ],
+  periods: [], teachers: [], locations: [],
+  courses: [{
+    id: 'C_REMOTE_DUP', semesterId: hostSem.id, name: '离散数学', teacherIds: [],
+    defaultLocationId: null, colorKey: 'blue', tags: [], note: '', updatedAt: new Date().toISOString()
+  }],
+  blocks: [], overrides: [], events: [], reminders: [], tombstones: [],
+  settings: {
+    notifications: { overrides: { courses: { 'C_REMOTE_DUP': { leadMin: 40 }, 'C_ORPHAN_OLD': { leadMin: 25 } } } }
+  }
+};
+AR.Store.applyMerge(incomingMerge, {});
+const finalOverrides = AR.Store.notifOverrides().courses || {};
+eq('applyMerge 清理：按自然键并课后 courseOverrides 重映射到本地课程 id',
+  finalOverrides[localCourse.id] && finalOverrides[localCourse.id].leadMin, 40);
+check('applyMerge 清理：旧远程 key 与孤儿 override 已清除',
+  !finalOverrides['C_REMOTE_DUP'] && !finalOverrides['C_ORPHAN_OLD']);
+check('applyMerge 清理：带入的空默认学期已被 pruneEmptySemesters 软删',
+  !AR.Store.semesterList().some((s) => s.id === 'SEM_EMPTY_INC'));
+
+/* ── 17. Batch 2 (B2-T-05): widgetdata 模式 B 与 configio 合并钩子 ── */
+{
+  const wStore = {};
+  const wSb = {
+    console, Date, JSON, Math, Number, String, Object, Array, RegExp, Error, isFinite,
+    localStorage: {
+      getItem: (k) => (Object.prototype.hasOwnProperty.call(wStore, k) ? wStore[k] : null),
+      setItem: (k, v) => { wStore[k] = String(v); },
+      removeItem: (k) => { delete wStore[k]; }
+    }
+  };
+  wSb.window = wSb; wSb.globalThis = wSb;
+  vm.createContext(wSb);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app', 'js', 'core.js'), 'utf8'), wSb, { filename: 'core.js' });
+  wSb.AR.Store.load();
+  wSb.AR.Store.get().settings.widgets = { presets: { today: 'B' } };
+  wSb.AR.Store.save(true);
+  wSb.AR.Schedule.dayItems = () => [
+    { startMin: -120, endMin: -60, start: '00:01', end: '00:02', periodLabel: '1-2节', course: { name: '早1' }, location: { raw: 'A1' }, color: '#111' },
+    { startMin: -50, endMin: -30, start: '00:03', end: '00:04', periodLabel: '3-4节', course: { name: '早2' }, location: { raw: 'A2' }, color: '#222' },
+    { startMin: -20, endMin: -10, start: '00:05', end: '00:06', periodLabel: '5-6节', course: { name: '早3' }, location: { raw: 'A3' }, color: '#333' },
+    { startMin: -5, endMin: -1, start: '00:07', end: '00:08', periodLabel: '7-8节', course: { name: '早4' }, location: { raw: 'A4' }, color: '#444' },
+    { startMin: 1441, endMin: 1442, start: '23:55', end: '23:58', periodLabel: '9-10节', course: { name: '晚课1' }, location: { raw: 'B1' }, color: '#555' },
+    { startMin: 1443, endMin: 1444, start: '23:59', end: '24:00', periodLabel: '11-12节', course: { name: '晚课2' }, location: { raw: 'B2' }, color: '#666' }
+  ];
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app', 'js', 'widgetdata.js'), 'utf8'), wSb, { filename: 'widgetdata.js' });
+  const wp = wSb.AR.WidgetData.build();
+  eq('widgetdata 模式 B：前 4 节已下课仍保留第 5-6 节（不被 i < 4 截断）', wp.today.length, 2);
+  eq('widgetdata 模式 B：首条为第 5 节课程名', wp.today[0] && wp.today[0].name, '晚课1');
+}
+
+{
+  const cStore = {};
+  const uiCalls = [];
+  let remSyncArgs = null;
+  const fakeNodes = {};
+  const mkNode = (id) => ({
+    id, innerHTML: '', textContent: '', disabled: false, value: '',
+    appendChild(c) { this.innerHTML += (c && c.innerHTML) || String(c || ''); }
+  });
+  fakeNodes.jsonSummary = mkNode('jsonSummary');
+  fakeNodes.jsonIssues = mkNode('jsonIssues');
+  fakeNodes.btnApplyJson = mkNode('btnApplyJson');
+  const cDoc = {
+    getElementById: (id) => fakeNodes[id] || null,
+    createElement: () => {
+      const n = mkNode('');
+      Object.defineProperty(n, 'firstChild', { get() { return { innerHTML: n.innerHTML }; } });
+      return n;
+    },
+    querySelector: () => null
+  };
+  const cSb = {
+    console, Date, JSON, Math, Number, String, Object, Array, RegExp, Error, isFinite,
+    document: cDoc,
+    localStorage: {
+      getItem: (k) => (Object.prototype.hasOwnProperty.call(cStore, k) ? cStore[k] : null),
+      setItem: (k, v) => { cStore[k] = String(v); },
+      removeItem: (k) => { delete cStore[k]; }
+    }
+  };
+  cSb.window = cSb; cSb.globalThis = cSb;
+  vm.createContext(cSb);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app', 'js', 'core.js'), 'utf8'), cSb, { filename: 'core.js' });
+  cSb.AR.Store.load();
+  cSb.AR.UI = {
+    toast: () => {},
+    applyTheme: () => uiCalls.push('applyTheme'),
+    applyBgStyle: () => uiCalls.push('applyBgStyle'),
+    applyOdStyle: () => uiCalls.push('applyOdStyle'),
+    applyHeatSize: () => uiCalls.push('applyHeatSize'),
+    applyModalTuning: () => uiCalls.push('applyModalTuning'),
+    applyPerf: () => uiCalls.push('applyPerf'),
+    applyGlass: () => uiCalls.push('applyGlass'),
+    applyMotion: () => uiCalls.push('applyMotion'),
+    renderToday: () => {},
+    show: () => {}
+  };
+  cSb.AR.Reminders = { sync: (force) => { remSyncArgs = force; } };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app', 'js', 'configio.js'), 'utf8'), cSb, { filename: 'configio.js' });
+
+  const localEv = cSb.AR.Store.saveEvent({ date: '2026-10-10', title: '待墓碑删除事件' });
+  const rmPayload = cSb.AR.Store.exportPayload();
+  rmPayload.tombstones = [{ entity: 'events', id: localEv.id, deletedAt: '2099-01-01T00:00:00.000Z' }];
+  cSb.AR.ConfigIO.previewText(JSON.stringify(rmPayload), 'remote.json');
+  check('configio previewText：仅有 report.removed 时提示同步移除且不误报「两边数据一致」',
+    fakeNodes.jsonIssues.innerHTML.indexOf('同步移除') >= 0
+    && fakeNodes.jsonIssues.innerHTML.indexOf('两边数据一致') < 0);
+
+  cSb.AR.ConfigIO.mergePayload(cSb.AR.Store.exportPayload());
+  check('configio mergePayload：重套 applyBgStyle / applyOdStyle / applyHeatSize',
+    uiCalls.indexOf('applyBgStyle') >= 0 && uiCalls.indexOf('applyOdStyle') >= 0 && uiCalls.indexOf('applyHeatSize') >= 0);
+  eq('configio mergePayload：合并后调用 AR.Reminders.sync(true)', remSyncArgs, true);
+}
+
 console.log('');
 console.log('通过 ' + pass + ' 项，失败 ' + fail + ' 项');
 if (fail) {

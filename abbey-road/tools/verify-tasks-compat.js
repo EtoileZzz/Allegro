@@ -163,5 +163,64 @@ function ok(name, cond, detail) {
   ok('C21 列表与收起判定都不抛错', !err2, err2);
 }
 
+/* ═══════ 6. Batch 2 (B2-T-03): 清空回收站后导入旧备份不复活 + 过期墓碑清理 ═══════ */
+{
+  const AR = freshHost();
+  const S = AR.Store;
+  const oldT = '2026-02-01T08:00:00.000Z';
+  const newT = new Date(Date.now() + 86400000).toISOString();
+  const semId = S.currentSemester().id;
+
+  const td = S.todoUpsert({ text: '被清空的旧任务', cadence: { type: 'daily', times: 1 }, createdAt: oldT });
+  td.updatedAt = oldT;
+  const ev = S.saveEvent({ id: 'ev_trash_1', date: '2026-02-05', title: '被清空的旧日程' });
+  ev.updatedAt = oldT;
+  const co = { id: 'co_trash_1', semesterId: semId, name: '被清空的旧课程', teacherIds: [], updatedAt: oldT };
+  S.get().courses.push(co);
+  const lt = S.longTaskUpsert({ id: 'lt_trash_1', name: '被清空的老长期任务', target: 10, unit: '次' });
+  lt.updatedAt = oldT;
+  S.save(true);
+
+  const oldBackup = JSON.parse(JSON.stringify(S.exportPayload()));
+  oldBackup.tombstones = [];
+
+  /* 先全部进回收站，再清空回收站 */
+  S.softDelete('tasks2', td);
+  S.softDelete('events', ev);
+  S.softDelete('courses', co);
+  S.softDelete('longTasks', lt);
+  S.emptyTrash();
+  S.save(true);
+
+  const pv = S.previewMerge(oldBackup, {});
+  ok('C22 清空回收站后预览旧备份：added 为 0（不提示会复活）', pv.added === 0, 'added=' + pv.added);
+
+  S.applyMerge(oldBackup, {});
+  const after = S.get();
+  ok('C23 清空回收站后导入旧备份：tasks2 不复活', !after.tasks2.some((x) => x.id === td.id));
+  ok('C24 清空回收站后导入旧备份：events/courses/longTasks 均不复活',
+    !after.events.some((x) => x.id === ev.id)
+    && !after.courses.some((x) => x.id === co.id)
+    && !after.longTasks.some((x) => x.id === lt.id));
+  ok('C25 本机墓碑依然保留，防下一次旧备份复活',
+    (after.tombstones || []).some((tb) => tb.entity === 'tasks2' && tb.id === td.id)
+    && (after.tombstones || []).some((tb) => tb.entity === 'events' && tb.id === ev.id));
+
+  /* 若远端是一条比墓碑更晚重新编辑/新建的同 id 活记录，应接纳并清掉本地过期墓碑 */
+  const newerPayload = {
+    kind: 'abbeyroad.sync', schemaVersion: 1,
+    semesters: oldBackup.semesters, periods: oldBackup.periods, teachers: [], locations: [],
+    courses: [], blocks: [], overrides: [], tasks: [], longTasks: [], quickTodos: [], reminders: [], tombstones: [],
+    events: [{ id: 'ev_trash_1', date: '2026-02-05', title: '重新改过的日程', updatedAt: newT }],
+    tasks2: []
+  };
+  S.applyMerge(newerPayload, {});
+  const afterNew = S.get();
+  ok('C26 更新时间戳晚于墓碑的同 id 记录可正常恢复',
+    afterNew.events.some((x) => x.id === 'ev_trash_1' && !x.deletedAt));
+  ok('C27 恢复较新记录后已从 state.tombstones 清除该过期墓碑',
+    !(afterNew.tombstones || []).some((tb) => tb.entity === 'events' && tb.id === 'ev_trash_1'));
+}
+
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exitCode = fail ? 1 : 0;

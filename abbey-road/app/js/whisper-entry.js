@@ -26,48 +26,86 @@
   function bind(btn) {
     if (!btn || btn.__whisperBound) { return; }
     btn.__whisperBound = true;
-    var timer = null;
-    function cancel() { if (timer) { clearTimeout(timer); timer = null; } }
-    btn.addEventListener('pointerdown', function (ev) {
-      cancel();
-      var x0 = ev.clientX, y0 = ev.clientY;
-      timer = setTimeout(function () { timer = null; openWhisper(); }, 520);
-      var move = function (e2) {
-        if (Math.abs(e2.clientX - x0) > 10 || Math.abs(e2.clientY - y0) > 10) { cancel(); }
-      };
-      var up = function () {
+    var timer = null, fired = false, x0 = 0, y0 = 0, pid = null;
+    function cancel() { if (timer) { clearTimeout(timer); timer = null; } pid = null; }
+    function trigger() { timer = null; fired = true; openWhisper(); }
+
+    btn.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
+    /* 长按成功触发后吞掉松手时紧随的 click，避免底层导航跟着切到「导入/我的」页 */
+    btn.addEventListener('click', function (ev) {
+      if (fired) {
+        fired = false;
+        if (ev.preventDefault) { ev.preventDefault(); }
+        if (ev.stopPropagation) { ev.stopPropagation(); }
+        if (ev.stopImmediatePropagation) { ev.stopImmediatePropagation(); }
+      }
+    }, true);
+
+    if (window.PointerEvent) {
+      btn.addEventListener('pointerdown', function (ev) {
+        if (ev.button != null && ev.button !== 0) { return; }
         cancel();
-        btn.removeEventListener('pointermove', move);
-        btn.removeEventListener('pointerup', up);
-        btn.removeEventListener('pointercancel', up);
-      };
-      btn.addEventListener('pointermove', move);
-      btn.addEventListener('pointerup', up);
-      btn.addEventListener('pointercancel', up);
-    });
-    btn.addEventListener('pointerleave', cancel);
-    /* 触摸兜底：部分机型不派发 pointerdown */
-    btn.addEventListener('touchstart', function (ev) {
+        fired = false;
+        x0 = ev.clientX; y0 = ev.clientY;
+        pid = ev.pointerId;
+        timer = setTimeout(trigger, 520);
+      });
+      btn.addEventListener('pointermove', function (ev) {
+        if (!timer || (pid != null && ev.pointerId !== pid)) { return; }
+        if (Math.abs(ev.clientX - x0) > 10 || Math.abs(ev.clientY - y0) > 10) { cancel(); }
+      });
+      btn.addEventListener('pointerup', cancel);
+      btn.addEventListener('pointercancel', cancel);
+      btn.addEventListener('pointerleave', cancel);
+    } else {
+      /* 触摸兜底：仅在不支持 PointerEvent 的老内核使用 */
+      btn.addEventListener('touchstart', function (ev) {
+        var t0 = ev.touches && ev.touches[0];
+        if (!t0) { return; }
+        cancel();
+        fired = false;
+        x0 = t0.clientX; y0 = t0.clientY;
+        timer = setTimeout(trigger, 520);
+      }, { passive: true });
+      btn.addEventListener('touchmove', function (ev) {
+        var t1 = ev.touches && ev.touches[0];
+        if (!timer || !t1) { return; }
+        if (Math.abs(t1.clientX - x0) > 10 || Math.abs(t1.clientY - y0) > 10) { cancel(); }
+      }, { passive: true });
+      btn.addEventListener('touchend', cancel, { passive: true });
+      btn.addEventListener('touchcancel', cancel, { passive: true });
+    }
+
+    btn.addEventListener('dblclick', function (ev) {
+      if (ev.preventDefault) { ev.preventDefault(); }
       cancel();
-      var t0 = ev.touches && ev.touches[0];
-      if (!t0) { return; }
-      timer = setTimeout(function () { timer = null; openWhisper(); }, 520);
-    }, { passive: true });
-    btn.addEventListener('touchend', cancel, { passive: true });
-    btn.addEventListener('touchmove', cancel, { passive: true });
-    btn.addEventListener('touchcancel', cancel, { passive: true });
-    btn.addEventListener('dblclick', function () { openWhisper(); });
+      openWhisper();
+    });
   }
 
+  var NAV_SEL = '.nav-btn[data-nav="import"], .nav-btn[data-nav="custom"], .nav-btn[data-nav="mine"]';
+  var mo = null;
+  function watchRoots() {
+    if (typeof MutationObserver !== 'function') { return; }
+    if (!mo) {
+      mo = new MutationObserver(function () { scan(); });
+    }
+    var roots = [document.getElementById('railNav'), document.getElementById('tabbar')];
+    for (var i = 0; i < roots.length; i++) {
+      var r = roots[i];
+      if (!r || r.__whisperObserved) { continue; }
+      r.__whisperObserved = true;
+      try {
+        mo.observe(r, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-nav'] });
+      } catch (e) { }
+    }
+  }
   function scan() {
-    var btns = document.querySelectorAll('.nav-btn[data-nav="import"], .nav-btn[data-nav="mine"]');
+    var btns = document.querySelectorAll(NAV_SEL);
     for (var i = 0; i < btns.length; i++) { bind(btns[i]); }
+    watchRoots();
   }
   scan();
   document.addEventListener('DOMContentLoaded', scan);
   window.addEventListener('load', scan);
-  try {
-    var mo = new MutationObserver(function () { scan(); });
-    mo.observe(document.body, { childList: true, subtree: true });
-  } catch (e) { }
 })();

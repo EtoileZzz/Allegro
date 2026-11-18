@@ -29,6 +29,46 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const HISTORY_KEEP = 20;
 const BLOB_NS = ['whisper'];      // 只允许这两种命名空间（以后要加就写在这里）
 const BLOB_MAX_BYTES = 5 * 1024 * 1024;
+const MEDIA_MAX_BYTES = 1024 * 1024;
+const TEXT_ENC = new TextEncoder();
+
+function utf8Bytes(str) {
+  return TEXT_ENC.encode(String(str || '')).length;
+}
+
+function parseIfMatch(request) {
+  const raw = request.headers.get('If-Match');
+  if (raw == null) { return { error: 'missing If-Match (expected current rev)', status: 428 }; }
+  const cleaned = String(raw).trim().replace(/^"+|"+$/g, '').trim();
+  if (!/^\d+$/.test(cleaned)) { return { error: 'bad If-Match', status: 400 }; }
+  const n = Number(cleaned);
+  if (!Number.isSafeInteger(n) || n < 0) { return { error: 'bad If-Match', status: 400 }; }
+  return { rev: n };
+}
+
+async function readCheckedBody(request, maxBytes) {
+  const len = Number(request.headers.get('Content-Length') || 0);
+  if (len > maxBytes) { return { error: 'payload too large', status: 413 }; }
+  const rawText = await request.text();
+  if (utf8Bytes(rawText) > maxBytes) { return { error: 'payload too large', status: 413 }; }
+  let body;
+  try { body = JSON.parse(rawText); } catch (e) { return { error: 'invalid json', status: 400 }; }
+  const envelope = body && body.envelope;
+  if (typeof envelope !== 'string' || envelope.length === 0) {
+    return { error: 'missing envelope', status: 400 };
+  }
+  if (utf8Bytes(envelope) > maxBytes) { return { error: 'envelope too large', status: 413 }; }
+  let parsed;
+  try { parsed = JSON.parse(envelope); } catch (e) { return { error: 'envelope is not json', status: 400 }; }
+  return { envelope, parsed };
+}
+
+async function runStatements(env, stmts) {
+  if (typeof env.DB.batch === 'function') {
+    return env.DB.batch(stmts);
+  }
+  for (const s of stmts) { await s.run(); }
+}
 
 function allowedNs(ns) {
   return BLOB_NS.indexOf(ns) >= 0;
@@ -43,7 +83,7 @@ function corsHeaders(request) {
   const origin = request.headers.get('Origin') || '';
   const allow = origin === ALLOWED_ORIGIN ? origin : '';
   const h = {
-    'Access-Control-Allow-Methods': 'GET, PUT, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Authorization, If-Match, Content-Type',
     'Access-Control-Max-Age': '86400',
     'Vary': 'Origin'
@@ -110,27 +150,14 @@ export default {
       }
 
       if (path === '/state' && request.method === 'PUT') {
-        const ifMatchRaw = request.headers.get('If-Match');
-        if (ifMatchRaw == null) {
-          return json({ error: 'missing If-Match (expected current rev)' }, 428, cors);
-        }
-        const ifMatch = Number(String(ifMatchRaw).replace(/"/g, ''));
-        if (!Number.isFinite(ifMatch) || ifMatch < 0) {
-          return json({ error: 'bad If-Match' }, 400, cors);
-        }
-        const len = Number(request.headers.get('Content-Length') || 0);
-        if (len > MAX_BODY_BYTES) { return json({ error: 'payload too large' }, 413, cors); }
+        const im = parseIfMatch(request);
+        if (im.error) { return json({ error: im.error }, im.status, cors); }
+        const ifMatch = im.rev;
 
-        let body;
-        try { body = await request.json(); } catch (e) { return json({ error: 'invalid json' }, 400, cors); }
-        const envelope = body && body.envelope;
-        if (typeof envelope !== 'string' || envelope.length === 0) {
-          return json({ error: 'missing envelope' }, 400, cors);
-        }
-        if (envelope.length > MAX_BODY_BYTES) { return json({ error: 'envelope too large' }, 413, cors); }
+        const checked = await readCheckedBody(request, MAX_BODY_BYTES);
+        if (checked.error) { return json({ error: checked.error }, checked.status, cors); }
+        const { envelope, parsed } = checked;
         // 只做粗校验：必须是「本 App 加密出来的信封」，别把库里塞进任意垃圾
-        let parsed;
-        try { parsed = JSON.parse(envelope); } catch (e) { return json({ error: 'envelope is not json' }, 400, cors); }
         if (!parsed || parsed.v !== 1 || !parsed.ct) {
           return json({ error: 'unsupported envelope' }, 400, cors);
         }
@@ -154,15 +181,65 @@ export default {
           return json({ error: 'conflict', rev: cur.rev, updatedAt: cur.updated_at, envelope: cur.envelope }, 409, cors);
         }
 
-        await env.DB.prepare(
-          'INSERT OR REPLACE INTO history (rev, envelope, updated_at) VALUES (?, ?, ?)'
-        ).bind(next, envelope, now).run();
-        // 只留最近 HISTORY_KEEP 版
-        await env.DB.prepare(
-          'DELETE FROM history WHERE rev NOT IN (SELECT rev FROM history ORDER BY rev DESC LIMIT ?)'
-        ).bind(HISTORY_KEEP).run();
+        await runStatements(env, [
+          env.DB.prepare(
+            'INSERT OR REPLACE INTO history (rev, envelope, updated_at) VALUES (?, ?, ?)'
+          ).bind(next, envelope, now),
+          // 只留最近 HISTORY_KEEP 版
+          env.DB.prepare(
+            'DELETE FROM history WHERE rev NOT IN (SELECT rev FROM history ORDER BY rev DESC LIMIT ?)'
+          ).bind(HISTORY_KEEP)
+        ]);
 
         return json({ rev: next }, 200, cors);
+      }
+
+      if (path === '/blob/whisper/media') {
+        await env.DB.prepare(
+          'CREATE TABLE IF NOT EXISTS whisper_media (id TEXT PRIMARY KEY, envelope TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0)'
+        ).run();
+        if (request.method === 'GET') {
+          const rows = await env.DB.prepare('SELECT id, size, updated_at FROM whisper_media ORDER BY updated_at DESC').all();
+          const items = (rows && rows.results) ? rows.results : [];
+          return json({ ids: items.map((r) => r.id), items: items }, 200, cors);
+        }
+        if (request.method === 'DELETE') {
+          await env.DB.prepare('DELETE FROM whisper_media').run();
+          return json({ cleared: true }, 200, cors);
+        }
+        return json({ error: 'method not allowed' }, 405, cors);
+      }
+
+      const mMedia = /^\/blob\/whisper\/media\/([A-Za-z0-9_-]{4,64})$/.exec(path);
+      if (mMedia) {
+        const mid = mMedia[1];
+        await env.DB.prepare(
+          'CREATE TABLE IF NOT EXISTS whisper_media (id TEXT PRIMARY KEY, envelope TEXT NOT NULL, size INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL DEFAULT 0)'
+        ).run();
+        if (request.method === 'GET') {
+          const row = await env.DB.prepare('SELECT id, envelope, size, updated_at FROM whisper_media WHERE id = ?').bind(mid).first();
+          if (!row) { return json({ error: 'media not found' }, 404, cors); }
+          return json({ id: row.id, envelope: row.envelope, size: row.size, updatedAt: row.updated_at }, 200, cors);
+        }
+        if (request.method === 'PUT') {
+          const checked = await readCheckedBody(request, MEDIA_MAX_BYTES);
+          if (checked.error) { return json({ error: checked.error }, checked.status, cors); }
+          const { envelope, parsed } = checked;
+          if (!parsed || parsed.v !== 1 || parsed.ns !== 'whisper-media' || parsed.id !== mid || !parsed.ct || !parsed.iv || !parsed.salt) {
+            return json({ error: 'unsupported media envelope' }, 400, cors);
+          }
+          const now = Date.now();
+          const size = utf8Bytes(envelope);
+          await env.DB.prepare(
+            'INSERT OR REPLACE INTO whisper_media (id, envelope, size, updated_at) VALUES (?, ?, ?, ?)'
+          ).bind(mid, envelope, size, now).run();
+          return json({ id: mid, size: size, updatedAt: now }, 200, cors);
+        }
+        if (request.method === 'DELETE') {
+          await env.DB.prepare('DELETE FROM whisper_media WHERE id = ?').bind(mid).run();
+          return json({ id: mid, deleted: true }, 200, cors);
+        }
+        return json({ error: 'method not allowed' }, 405, cors);
       }
 
       const mBlob = /^\/blob\/([a-z0-9_-]{1,24})$/.exec(path);
@@ -176,28 +253,14 @@ export default {
         }
 
         if (request.method === 'PUT') {
-          const ifMatchRaw = request.headers.get('If-Match');
-          if (ifMatchRaw == null) {
-            return json({ error: 'missing If-Match (expected current rev)' }, 428, cors);
-          }
-          const ifMatch = Number(String(ifMatchRaw).replace(/"/g, ''));
-          if (!Number.isFinite(ifMatch) || ifMatch < 0) {
-            return json({ error: 'bad If-Match' }, 400, cors);
-          }
-          const len = Number(request.headers.get('Content-Length') || 0);
-          if (len > BLOB_MAX_BYTES) { return json({ error: 'payload too large' }, 413, cors); }
+          const im = parseIfMatch(request);
+          if (im.error) { return json({ error: im.error }, im.status, cors); }
+          const ifMatch = im.rev;
 
-          let body;
-          try { body = await request.json(); } catch (e) { return json({ error: 'invalid json' }, 400, cors); }
-          const envelope = body && body.envelope;
-          if (typeof envelope !== 'string' || envelope.length === 0) {
-            return json({ error: 'missing envelope' }, 400, cors);
-          }
-          if (envelope.length > BLOB_MAX_BYTES) { return json({ error: 'envelope too large' }, 413, cors); }
-
-          let parsed;
-          try { parsed = JSON.parse(envelope); } catch (e) { return json({ error: 'envelope is not json' }, 400, cors); }
-          if (!parsed || !parsed.ct || !parsed.ns || parsed.ns !== ns) {
+          const checked = await readCheckedBody(request, BLOB_MAX_BYTES);
+          if (checked.error) { return json({ error: checked.error }, checked.status, cors); }
+          const { envelope, parsed } = checked;
+          if (!parsed || parsed.v !== 1 || !parsed.ct || !parsed.iv || !parsed.salt || !parsed.ns || parsed.ns !== ns) {
             return json({ error: 'unsupported envelope' }, 400, cors);
           }
 
@@ -217,12 +280,14 @@ export default {
             return json({ error: 'conflict', ns: ns, rev: cur.rev, updatedAt: cur.updated_at, envelope: cur.envelope }, 409, cors);
           }
 
-          await env.DB.prepare(
-            'INSERT OR REPLACE INTO blob_history (ns, rev, envelope, updated_at) VALUES (?, ?, ?, ?)'
-          ).bind(ns, next, envelope, now).run();
-          await env.DB.prepare(
-            'DELETE FROM blob_history WHERE ns = ? AND rev NOT IN (SELECT rev FROM blob_history WHERE ns = ? ORDER BY rev DESC LIMIT ?)'
-          ).bind(ns, ns, HISTORY_KEEP).run();
+          await runStatements(env, [
+            env.DB.prepare(
+              'INSERT OR REPLACE INTO blob_history (ns, rev, envelope, updated_at) VALUES (?, ?, ?, ?)'
+            ).bind(ns, next, envelope, now),
+            env.DB.prepare(
+              'DELETE FROM blob_history WHERE ns = ? AND rev NOT IN (SELECT rev FROM blob_history WHERE ns = ? ORDER BY rev DESC LIMIT ?)'
+            ).bind(ns, ns, HISTORY_KEEP)
+          ]);
 
           return json({ ns: ns, rev: next }, 200, cors);
         }
@@ -239,7 +304,9 @@ export default {
       }
 
       if (path === '/history' && request.method === 'GET') {
-        const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit') || 20)));
+        const rawLimParam = url.searchParams.get('limit');
+        const rawLim = (rawLimParam == null || rawLimParam === '') ? 20 : Number(rawLimParam);
+        const limit = Math.min(50, Math.max(1, Number.isFinite(rawLim) ? Math.floor(rawLim) : 20));
         const rows = await env.DB.prepare(
           'SELECT rev, updated_at, LENGTH(envelope) AS size FROM history ORDER BY rev DESC LIMIT ?'
         ).bind(limit).all();

@@ -954,6 +954,9 @@ var AR = window.AR || (window.AR = {});
     if (view === 'settings' && prevView !== 'settings' && AR.Panels && AR.Panels.resetSettingsHome) {
       AR.Panels.resetSettingsHome();
     }
+    if (prevView === 'settings' && view !== 'settings' && AR.Whisper && AR.Whisper.relock) {
+      try { AR.Whisper.relock(); } catch (e) { }
+    }
     if (view === 'settings' && AR.Panels) { AR.Panels.renderSettings(); }
     if (view === 'import' && AR.Panels) { AR.Panels.renderImport(); }
     if (view === 'custom') { renderCustom(); }
@@ -3536,9 +3539,11 @@ var AR = window.AR || (window.AR = {});
 
   /** 改名：只动名字（课表、周次都不受影响） */
   function renameSemesterDeep(sem, name) {
-    var S = AR.Store.get();
-    for (var i = 0; i < S.semesters.length; i++) {
-      if (S.semesters[i].id !== sem.id && S.semesters[i].name === name) {
+    var list = AR.Store.semesterList
+      ? AR.Store.semesterList()
+      : ((AR.Store.get().semesters || []).filter(function (x) { return !x.deletedAt; }));
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id !== sem.id && list[i].name === name) {
         return { ok: false, message: '已经有同名学期了' };
       }
     }
@@ -3548,38 +3553,11 @@ var AR = window.AR || (window.AR = {});
     return { ok: true };
   }
 
-  /** 删除：学期 + 它的课程 / 课块 / 调课记录 / 作息 / 这段时间的事件 */
+  /** 删除：委托 Store 走软删 + 墓碑并同步切到剩余学期 */
   function deleteSemesterDeep(sem) {
-    var S = AR.Store.get();
-    if ((S.semesters || []).length <= 1) { return { ok: false, message: '至少要留一个学期' }; }
-    var courseIds = {};
-    var i;
-    for (i = 0; i < S.courses.length; i++) {
-      if (S.courses[i].semesterId === sem.id) { courseIds[S.courses[i].id] = 1; }
-    }
-    var blockIds = {};
-    for (i = 0; i < S.blocks.length; i++) {
-      if (courseIds[S.blocks[i].courseId]) { blockIds[S.blocks[i].id] = 1; }
-    }
-    var from = U.parseDateKey(sem.startDate);
-    var to = from ? U.addDays(from, Math.max(1, sem.weekCount) * 7 - 1) : null;
-    S.blocks = S.blocks.filter(function (b) { return !blockIds[b.id]; });
-    S.overrides = (S.overrides || []).filter(function (o) { return !blockIds[o.blockId]; });
-    S.courses = S.courses.filter(function (c) { return c.semesterId !== sem.id; });
-    S.periods = (S.periods || []).filter(function (p) { return p.semesterId !== sem.id; });
-    S.events = (S.events || []).filter(function (ev) {
-      if (!from || !to) { return true; }
-      var d = U.parseDateKey(ev.date);
-      return !(d && d >= from && d <= to);
-    });
-    S.semesters = S.semesters.filter(function (x) { return x.id !== sem.id; });
-    if (S.settings.schedule.currentSemesterId === sem.id) {
-      S.settings.schedule.currentSemesterId = S.semesters[0].id;
-      AR.Store.claimPeriodsFor(S.semesters[0].id);
-    }
-    AR.Store.save(true);
-    cursorDate = new Date();
-    return { ok: true };
+    var res = AR.Store.removeSemester(sem && sem.id);
+    if (res && res.ok) { cursorDate = new Date(); }
+    return res;
   }
 
   /** 新建一个学期（名字 + 开学第一周周一 + 总周数），建完自动切过去 */
@@ -9445,6 +9423,7 @@ var AR = window.AR || (window.AR = {});
     document.addEventListener('pointerdown', function (ev) {
       var t = ev.target;
       if (!t || !t.closest) { return; }
+      if (t.closest('#whRoot')) { return; }
       // 滑块（.seg）按规格书明确不做点击高光
       var el = t.closest('.btn, .chip-btn, .module, .preset-card, .icon-btn, .week-chip, .zone-toggle');
       if (el) { flashButton(el); }
@@ -10059,6 +10038,12 @@ var AR = window.AR || (window.AR = {});
 
     document.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') {
+        if (closeColorPicker()) { return; }
+        var wh = $('whRoot');
+        if (wh && !wh.hasAttribute('hidden')) {
+          if (AR.Whisper && AR.Whisper.handleBack) { AR.Whisper.handleBack(); }
+          return;
+        }
         if (!closeModal()) { if (Layout.expanded) { setExpanded(null); } }
       }
     });
@@ -10162,11 +10147,25 @@ var AR = window.AR || (window.AR = {});
 
   /* ── 主题 / 动效 / 毛玻璃 ─────────────────────────────────── */
 
+  /** 实时取 Store 最新状态，同步刷新模块闭包 S，避免导入/重置后陈旧 */
+  function liveState() {
+    if (AR.Store && AR.Store.get) {
+      var st = AR.Store.get();
+      if (st) { S = st; return st; }
+    }
+    return S || {};
+  }
+
+  function appearanceCfg() {
+    var st = liveState();
+    return (st && st.settings && st.settings.appearance) || {};
+  }
+
   function effectiveDark() {
-    var mode = S.settings.appearance.theme;
+    var mode = appearanceCfg().theme;
     if (mode === 'dark') { return true; }
     if (mode === 'light') { return false; }
-    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    return !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 
   /**
@@ -10174,7 +10173,8 @@ var AR = window.AR || (window.AR = {});
    * 默认：内容层 90% / 覆盖层 20% / 覆盖层模糊 11px。写在 body 行内变量上，CSS 直接吃。
    */
   function applyModalTuning() {
-    var ap = (S.settings && S.settings.appearance) || {};
+    if (typeof document === 'undefined' || !document.body) { return; }
+    var ap = appearanceCfg();
     var bs = document.body.style;
     bs.setProperty('--modal-card-a', String(ap.modalCardA == null ? 0.9 : ap.modalCardA));
     bs.setProperty('--modal-bar-a', String(ap.modalBarA == null ? 0.2 : ap.modalBarA));
@@ -10182,11 +10182,14 @@ var AR = window.AR || (window.AR = {});
   }
 
   function applyTheme() {
+    if (typeof document === 'undefined' || !document.body) { return; }
     var dark = effectiveDark();
     document.body.setAttribute('data-theme', dark ? 'dark' : 'light');
     applyAccentInline(dark);
     applyModalTuning();
-    AR.Bridge.setSystemBars(dark ? '#0E1116' : '#FFFFFF', !dark);
+    if (AR.Bridge && AR.Bridge.setSystemBars) {
+      AR.Bridge.setSystemBars(dark ? '#0E1116' : '#FFFFFF', !dark);
+    }
   }
 
   /**
@@ -10195,8 +10198,9 @@ var AR = window.AR || (window.AR = {});
    * —— 这就是之前"暗色模式下换主题色没反应"的原因。行内样式优先级更高，浅色/深色都生效。
    */
   function applyAccentInline(dark) {
+    if (typeof document === 'undefined' || !document.body) { return; }
     if (dark == null) { dark = document.body.getAttribute('data-theme') === 'dark'; }
-    var accent = S.settings.appearance.accent || '#5B8DEF';
+    var accent = appearanceCfg().accent || '#5B8DEF';
     var perf = (AR.Motion && AR.Motion.perfLevel) ? AR.Motion.perfLevel() : 'full';
     var bs = document.body.style;
     bs.setProperty('--accent', accent);
@@ -10692,6 +10696,25 @@ var AR = window.AR || (window.AR = {});
     return { r: (r + m) * 255, g: (g + m) * 255, b: (b + m) * 255 };
   }
 
+  var activeColorPickerClose = null;
+
+  function colorPickerOpen() {
+    return !!document.querySelector('.cp-root');
+  }
+
+  function closeColorPicker() {
+    if (typeof activeColorPickerClose === 'function') {
+      activeColorPickerClose();
+      return true;
+    }
+    var olds = document.querySelectorAll('.cp-root');
+    if (!olds.length) { return false; }
+    for (var i = 0; i < olds.length; i++) {
+      if (olds[i].parentNode) { olds[i].parentNode.removeChild(olds[i]); }
+    }
+    return true;
+  }
+
   /**
    * 打开取色器。onPick(hex) 在用户点「用这个颜色」时回调一次。
    * opts.title / opts.recommend（推荐色数组，比如课表里白字可读的一组）
@@ -10700,6 +10723,7 @@ var AR = window.AR || (window.AR = {});
     opts = opts || {};
     // 只允许存在一个取色浮层：重复打开时先把旧的收掉
     // （否则 document.querySelector('.cp-*') 会命中旧实例，取色行为看起来"没反应"）
+    activeColorPickerClose = null;
     var olds = document.querySelectorAll('.cp-root');
     for (var oi = 0; oi < olds.length; oi++) {
       if (olds[oi].parentNode) { olds[oi].parentNode.removeChild(olds[oi]); }
@@ -10826,16 +10850,22 @@ var AR = window.AR || (window.AR = {});
     root.appendChild(card);
     document.body.appendChild(root);
 
+    var closed = false;
     function closePicker() {
+      if (closed) { return; }
+      closed = true;
+      if (activeColorPickerClose === closePicker) { activeColorPickerClose = null; }
       root.classList.remove('open');
       popIn(card, 'out');
       setTimeout(function () {
         if (root.parentNode) { root.parentNode.removeChild(root); }
       }, Math.round(260 / motionSpeed()));
     }
+    activeColorPickerClose = closePicker;
     head.querySelector('.modal-close').addEventListener('click', closePicker);
     cancelBtn.addEventListener('click', closePicker);
     scrim.addEventListener('click', closePicker);
+    card.addEventListener('click', function (ev) { ev.stopPropagation(); });
     useBtn.addEventListener('click', function () {
       var c = hsvToRgb(hsv.h, hsv.s, hsv.v);
       var out = rgbToHex(c.r, c.g, c.b);
@@ -10846,7 +10876,7 @@ var AR = window.AR || (window.AR = {});
     });
     // 进场：和主弹窗同一套曲线（这里单独播，不动主弹窗的栈）
     popIn(card, 'in');
-    setTimeout(function () { root.classList.add('open'); }, 10);
+    setTimeout(function () { if (!closed) { root.classList.add('open'); } }, 10);
   }
 
   /* ══════════════════════════════════════════════════════════════
@@ -11046,35 +11076,41 @@ var AR = window.AR || (window.AR = {});
    * 这样切主题色 / 深浅色时不用重跑（渐变用的是 --accent-* 变量）。
    */
   function applyBgStyle() {
-    var v = S.settings.appearance.bgStyle;
+    if (typeof document === 'undefined' || !document.body) { return; }
+    var v = appearanceCfg().bgStyle;
     if (v !== 'plain' && v !== 'gradient') { document.body.removeAttribute('data-bg'); return; }
     document.body.setAttribute('data-bg', v);
   }
 
   /**
-   * 作业逾期强调（v0.5.2）：both（默认）/ solid（红底白字）/ bar（行左侧竖条）/ bold（加粗）。
+   * 作业逾期强调（v0.5.2）：both（默认）/ solid（红底白字）/ glow（左光条提示）/ bold（加粗）。
    * 同样只挂一个 body 属性，具体样式在 app.css 里一条一条写清楚。
    */
   function applyOdStyle() {
-    var v = S.settings.appearance.overdueStyle;
+    if (typeof document === 'undefined' || !document.body) { return; }
+    var v = appearanceCfg().overdueStyle;
     if (v !== 'solid' && v !== 'glow' && v !== 'bold') { document.body.removeAttribute('data-od'); return; }
     document.body.setAttribute('data-od', v);
   }
 
   /** 热力图大小（设置 → 外观）：sm = 12px 方格靠左；lg = 铺满宽度、格子 24px */
   function applyHeatSize() {
-    var v = S.settings.appearance && S.settings.appearance.heatSize;
+    if (typeof document === 'undefined' || !document.body) { return; }
+    var v = appearanceCfg().heatSize;
     if (v === 'lg') { document.body.setAttribute('data-heat', 'lg'); return; }
     document.body.removeAttribute('data-heat');
   }
 
   function applyGlass() {
-    var lvl = S.settings.appearance.glassLevel || 'medium';
-    var degraded = AR.Bridge.sdkInt && AR.Bridge.sdkInt() > 0 && AR.Bridge.sdkInt() < 31;
+    if (typeof document === 'undefined' || !document.body) { return; }
+    var lvl = appearanceCfg().glassLevel || 'medium';
+    var degraded = AR.Bridge && AR.Bridge.sdkInt && AR.Bridge.sdkInt() > 0 && AR.Bridge.sdkInt() < 31;
     var perf = (AR.Motion && AR.Motion.perfLevel) ? AR.Motion.perfLevel() : 'full';
     document.body.setAttribute('data-degraded', degraded && lvl !== 'off' ? 'on' : 'off');
     document.body.setAttribute('data-glass', perf !== 'full' ? 'off' : lvl);
-    AR.Bridge.setBackdrop(lvl !== 'off' && perf === 'full');
+    if (AR.Bridge && AR.Bridge.setBackdrop) {
+      AR.Bridge.setBackdrop(lvl !== 'off' && perf === 'full');
+    }
   }
 
   /**
@@ -11083,6 +11119,8 @@ var AR = window.AR || (window.AR = {});
    * 切换后立刻重挂，并顺手把当前正在补间的主题令牌收掉，避免残留行内样式。
    */
   function applyPerf() {
+    if (typeof document === 'undefined' || !document.body) { return; }
+    liveState();
     var perf = (AR.Motion && AR.Motion.perfLevel) ? AR.Motion.perfLevel() : 'full';
     if (perf === 'full') { document.body.removeAttribute('data-perf'); }
     else { document.body.setAttribute('data-perf', perf); }
@@ -11093,10 +11131,12 @@ var AR = window.AR || (window.AR = {});
   }
 
   function applyMotion() {
-    var ap = S.settings.appearance;
+    if (typeof document === 'undefined' || !document.body) { return; }
+    var ap = appearanceCfg();
     var speed = Number(ap.animationSpeed) || 1;
     var root = document.documentElement;
     document.body.removeAttribute('data-motion');
+    if (!root || !root.style) { return; }
     // 规格书里的时长令牌全是 calc(... * var(--motion-scale))，所以「动画速度」必须改
     // --motion-scale 才会真的生效；之前只改了旧的 --dur-* 变量，等于没生效。
     root.style.setProperty('--motion-scale', String(Math.round((1 / speed) * 1000) / 1000));
@@ -11176,6 +11216,7 @@ var AR = window.AR || (window.AR = {});
 
   /** 折线：0–100 的比率 / 任意值都行，外部先归一 */
   function yrLineHTML(vals, tail) {
+    if (!vals || !vals.length) { return ''; }
     var W = 300, H = 66, pad = 6, mx = 1, i;
     for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
     var pts = [];
@@ -11190,14 +11231,52 @@ var AR = window.AR || (window.AR = {});
       + '<div class="tk-yr-axis"><span>起点</span><span>' + U.escapeHtml(tail || '') + '</span><span>现在</span></div></div>';
   }
 
-  function yrBarsHTML(vals, labels, unit) {
+  function yrMonthBarVal(m0, domain) {
+    if (!m0) { return 0; }
+    if (domain === 'hw') { return m0.d || 0; }
+    if (domain === 'todo') { return m0.count || 0; }
+    return (m0.cls || 0) + (m0.ev || 0) + (m0.d || 0);
+  }
+
+  function yrExpandMonths(firstYm, lastYm) {
+    var a = String(firstYm || '').split('-');
+    var b = String(lastYm || '').split('-');
+    if (a.length < 2 || b.length < 2) { return []; }
+    var y = Number(a[0]), m = Number(a[1]);
+    var ey = Number(b[0]), em = Number(b[1]);
+    if (!isFinite(y) || !isFinite(m) || !isFinite(ey) || !isFinite(em)) { return []; }
+    var out = [], guard = 0;
+    while ((y < ey || (y === ey && m <= em)) && guard < 36) {
+      out.push(y + '-' + (m < 10 ? '0' + m : String(m)));
+      m++;
+      if (m > 12) { m = 1; y++; }
+      guard++;
+    }
+    return out;
+  }
+
+  function yrChunkTitle(firstYm, lastYm) {
+    var f = String(firstYm || '').split('-');
+    var l = String(lastYm || '').split('-');
+    var fy = Number(f[0]), fm = Number(f[1]);
+    var ly = Number(l[0]), lm = Number(l[1]);
+    if (firstYm === lastYm) { return fy + ' 年 ' + fm + ' 月'; }
+    if (fy === ly) { return fy + ' 年 ' + fm + '–' + lm + ' 月'; }
+    return fy + ' 年 ' + fm + ' 月–' + ly + ' 年 ' + lm + ' 月';
+  }
+
+  function yrBarsHTML(vals, labels, unit, keys) {
+    if (!vals || !vals.length) { return '<p class="tk-muted">还没有可展示的月份。</p>'; }
     var mx = 1, i, h = '';
+    var curYmKey = YR.year + '-' + (YR.month + 1 < 10 ? '0' + (YR.month + 1) : String(YR.month + 1));
     for (i = 0; i < vals.length; i++) { if (vals[i] > mx) { mx = vals[i]; } }
     for (i = 0; i < vals.length; i++) {
-      h += '<button class="tk-yr-m' + (i === YR.month && YR.mode === 'month' ? ' on' : '') + '" type="button"'
-        + ' data-yr-m="' + i + '" title="' + labels[i] + ' · ' + vals[i] + ' ' + unit + '">'
+      var ymKey = (keys && keys[i]) ? String(keys[i]) : '';
+      var isOn = ymKey && ymKey === curYmKey && YR.mode === 'month';
+      h += '<button class="tk-yr-m' + (isOn ? ' on' : '') + '" type="button"'
+        + ' data-yr-ymkey="' + U.escapeHtml(ymKey) + '" title="' + U.escapeHtml((ymKey || labels[i]) + ' · ' + vals[i] + ' ' + unit) + '">'
         + '<span class="tk-yr-mb" style="height:' + Math.max(3, Math.round(vals[i] / mx * 46)) + 'px"></span>'
-        + '<span class="tk-yr-ml">' + labels[i] + '</span></button>';
+        + '<span class="tk-yr-ml">' + U.escapeHtml(labels[i]) + '</span></button>';
     }
     return '<div class="tk-yr-months">' + h + '</div>';
   }
@@ -11312,37 +11391,48 @@ var AR = window.AR || (window.AR = {});
     var S = AR.Store.reportStats(YR.domain, { from: R.fromK, to: R.toK });
     var mx = 1, k;
     for (k in S.byDay) { if (S.byDay[k] > mx) { mx = S.byDay[k]; } }
-    var months = S.monthOrder.slice();
+    var rawMonths = (S.monthOrder || []).slice().sort();
     var h = yrKPIs(S, null);
     h += '<div class="tk-shead">全年热力图 · 一格 = 一天</div>';
-    for (var g = 0; g < months.length; g += 3) {
-      var chunk = months.slice(g, g + 3);
-      var firstM = chunk[0].split('-');
-      var lastM = chunk[chunk.length - 1].split('-');
-      var firstK = chunk[0] + '-01';
-      var lastDay = new Date(Number(lastM[0]), Number(lastM[1]), 0).getDate();
-      var lastK = chunk[chunk.length - 1] + '-' + (lastDay < 10 ? '0' + lastDay : lastDay);
-      var sub = 0;
-      for (var dk in S.byDay) {
-        if (dk >= firstK && dk <= lastK) { sub += S.byDay[dk]; }
+    if (!rawMonths.length) {
+      h += '<p class="tk-muted">还没有记录，记一笔就会出现在这里。</p>';
+    } else {
+      var expanded = yrExpandMonths(rawMonths[0], rawMonths[rawMonths.length - 1]);
+      var months = expanded.length ? expanded : rawMonths;
+      var chunks = [], g;
+      for (g = 0; g < months.length; g += 3) {
+        var chunk = months.slice(g, g + 3);
+        var lastM = chunk[chunk.length - 1].split('-');
+        var firstK = chunk[0] + '-01';
+        var lastDay = new Date(Number(lastM[0]), Number(lastM[1]), 0).getDate();
+        var lastK = chunk[chunk.length - 1] + '-' + (lastDay < 10 ? '0' + lastDay : lastDay);
+        var sub = 0;
+        for (var dk in S.byDay) {
+          if (dk >= firstK && dk <= lastK) { sub += S.byDay[dk]; }
+        }
+        chunks.push({ firstYm: chunk[0], lastYm: chunk[chunk.length - 1], firstK: firstK, lastK: lastK, sub: sub });
       }
-      h += '<div class="tk-yr-q"><div class="tk-yr-qh"><b>' + (Number(firstM[1])) + '–' + (Number(lastM[1])) + ' 月</b>'
-        + '<span>' + sub + ' ' + YR_META[YR.domain].unit + '</span></div>'
-        + yrGridHTML(S.byDay, firstK, lastK, mx, R.toK) + '</div>';
+      for (g = 0; g < chunks.length; g++) {
+        var ch = chunks[g];
+        if (chunks.length > 1 && g > 0 && g < chunks.length - 1 && ch.sub === 0) { continue; }
+        h += '<div class="tk-yr-q"><div class="tk-yr-qh"><b>' + yrChunkTitle(ch.firstYm, ch.lastYm) + '</b>'
+          + '<span>' + ch.sub + ' ' + YR_META[YR.domain].unit + '</span></div>'
+          + yrGridHTML(S.byDay, ch.firstK, ch.lastK, mx, R.toK) + '</div>';
+      }
+      /* 走势：作业看每月布置完成率，任务看每月打卡次数，日程看每月活动数 */
+      var vals = [], barVals = [], labels = [], i;
+      for (i = 0; i < months.length; i++) {
+        var m0 = S.months[months[i]] || null;
+        labels.push(String(Number(months[i].slice(5, 7))));
+        vals.push(YR.domain === 'hw' ? (m0 ? yrPct(m0.ad, m0.a) : 0) : yrMonthBarVal(m0, YR.domain));
+        barVals.push(yrMonthBarVal(m0, YR.domain));
+      }
+      if (YR.domain === 'hw') {
+        h += '<div class="tk-shead">每月布置完成率</div>' + yrLineHTML(vals, '按布置条数算');
+      }
+      h += '<div class="tk-shead">' + (YR.domain === 'hw' ? '每月完成条数' : (YR.domain === 'todo' ? '每月打卡次数' : '每月活动数')) + '</div>'
+        + yrBarsHTML(barVals, labels, YR_META[YR.domain].unit, months);
     }
-    /* 走势：作业看每月布置完成率，任务看每月打卡次数 */
-    var vals = [], labels = [], i;
-    for (i = 0; i < months.length; i++) {
-      var m0 = S.months[months[i]];
-      labels.push(String(Number(months[i].slice(5, 7))));
-      vals.push(YR.domain === 'hw' ? yrPct(m0.ad, m0.a) : (YR.domain === 'todo' ? m0.count : m0.d + m0.cls + m0.ev));
-    }
-    if (YR.domain === 'hw') {
-      h += '<div class="tk-shead">每月布置完成率</div>' + yrLineHTML(vals, '按布置条数算');
-    }
-    h += '<div class="tk-shead">' + (YR.domain === 'hw' ? '每月完成条数' : (YR.domain === 'todo' ? '每月打卡次数' : '每月活动数')) + '</div>'
-      + yrBarsHTML(YR.domain === 'hw' ? months.map(function (m) { return S.months[m].d; }) : months.map(function (m) { return S.months[m].count; }),
-        labels, YR_META[YR.domain].unit);
     if (YR.domain === 'todo' && S.byTask.length) {
       var rows = S.byTask.slice(0, 8).map(function (t) {
         return { n: t.name, v: t.count + ' / ' + t.req, p: t.rate };
@@ -11465,12 +11555,16 @@ var AR = window.AR || (window.AR = {});
           });
         })(cells[c]);
       }
-      var bars = pageBox.querySelectorAll('[data-yr-m]');
+      var bars = pageBox.querySelectorAll('[data-yr-ymkey]');
       for (var m = 0; m < bars.length; m++) {
         (function (bar) {
           bar.addEventListener('click', function () {
+            var ymKey = bar.getAttribute('data-yr-ymkey') || '';
+            var mm = /^(\d{4})-(\d{2})$/.exec(ymKey);
+            if (!mm) { return; }
             YR.mode = 'month';
-            YR.month = Number(bar.getAttribute('data-yr-m'));
+            YR.year = Number(mm[1]);
+            YR.month = Math.max(0, Math.min(11, Number(mm[2]) - 1));
             YR.sel = '';
             var all = seg.querySelectorAll('.seg');
             for (var q = 0; q < all.length; q++) { all[q].classList.toggle('active', all[q].getAttribute('data-yr-page') === 'month'); }
@@ -11542,6 +11636,8 @@ var AR = window.AR || (window.AR = {});
     enterRise: enterRise,          // 开发者模式的「页面入场」试放
     fadeInList: fadeInList,        // 开发者模式的「列表入场」试放
     openColorPicker: openColorPicker,
+    colorPickerOpen: colorPickerOpen,
+    closeColorPicker: closeColorPicker,
     openPicker: openPicker,
     pickerTrigger: pickerTrigger,
     paintPickerTrigger: paintPickerTrigger,
