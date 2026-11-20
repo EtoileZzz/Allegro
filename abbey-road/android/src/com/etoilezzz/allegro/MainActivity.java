@@ -31,6 +31,7 @@ import android.view.View;
 import android.view.Window;
 import android.webkit.ConsoleMessage;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -76,6 +77,8 @@ public class MainActivity extends Activity {
     private static final int REQ_NOTIF = 1003;
     /** 生物识别（Whisper 解锁） */
     private static final int REQ_BIO = 1004;
+    /** WebView 图片/文件选择（<input type="file">） */
+    private static final int REQ_FILE_CHOOSER = 1005;
 
     /** 外部文件导入上限：5MB。超出就中止，绝不整读进内存。 */
     private static final long MAX_IMPORT_BYTES = 5L * 1024 * 1024;
@@ -95,6 +98,7 @@ public class MainActivity extends Activity {
     /** 「用 Allegro 打开」进来的文件（微信里点配置文件 → 用其他应用打开） */
     private Uri pendingOpenUri = null;
     private String pendingOpenName = null;
+    private ValueCallback<Uri[]> pendingFileCallback = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -180,6 +184,58 @@ public class MainActivity extends Activity {
             public boolean onConsoleMessage(ConsoleMessage m) {
                 Log.i(TAG, "[web] " + m.message() + " @" + m.lineNumber());
                 return true;
+            }
+
+            @Override
+            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
+                                             WebChromeClient.FileChooserParams fileChooserParams) {
+                if (pendingFileCallback != null) {
+                    try { pendingFileCallback.onReceiveValue(null); } catch (Exception ignored) { }
+                    pendingFileCallback = null;
+                }
+                if (filePathCallback == null) { return false; }
+                pendingFileCallback = filePathCallback;
+
+                boolean multi = (fileChooserParams != null
+                        && fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE);
+                String mime = "*/*";
+                if (fileChooserParams != null && fileChooserParams.getAcceptTypes() != null) {
+                    String[] accepts = fileChooserParams.getAcceptTypes();
+                    for (int i = 0; i < accepts.length; i++) {
+                        String a = accepts[i];
+                        if (a != null && a.indexOf("image/") >= 0) {
+                            mime = "image/*";
+                            break;
+                        }
+                    }
+                }
+
+                Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType(mime);
+                if (multi) {
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                }
+                Intent chooser = Intent.createChooser(intent, "选择图片");
+                try {
+                    startActivityForResult(chooser, REQ_FILE_CHOOSER);
+                    return true;
+                } catch (Exception e1) {
+                    if (fileChooserParams != null) {
+                        try {
+                            Intent fallback = fileChooserParams.createIntent();
+                            startActivityForResult(fallback, REQ_FILE_CHOOSER);
+                            return true;
+                        } catch (Exception e2) {
+                            Log.w(TAG, "打开文件选择器失败", e2);
+                        }
+                    }
+                }
+                ValueCallback<Uri[]> cb = pendingFileCallback;
+                pendingFileCallback = null;
+                try { cb.onReceiveValue(null); } catch (Exception ignored) { }
+                toast("无法打开图片选择器");
+                return false;
             }
         });
 
@@ -1663,6 +1719,37 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_FILE_CHOOSER) {
+            ValueCallback<Uri[]> cb = pendingFileCallback;
+            pendingFileCallback = null;
+            if (cb == null) { return; }
+            if (resultCode != RESULT_OK || data == null) {
+                cb.onReceiveValue(null);
+                return;
+            }
+            Uri[] result = null;
+            ClipData clip = data.getClipData();
+            if (clip != null && clip.getItemCount() > 0) {
+                List<Uri> uris = new ArrayList<Uri>();
+                for (int i = 0; i < clip.getItemCount(); i++) {
+                    ClipData.Item item = clip.getItemAt(i);
+                    if (item != null && item.getUri() != null) {
+                        uris.add(item.getUri());
+                    }
+                }
+                if (!uris.isEmpty()) {
+                    result = uris.toArray(new Uri[uris.size()]);
+                }
+            }
+            if (result == null && data.getData() != null) {
+                result = new Uri[]{ data.getData() };
+            }
+            if (result == null) {
+                result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+            }
+            cb.onReceiveValue(result);
+            return;
+        }
         if (requestCode == REQ_BIO) {
             String id = pendingBioId;
             pendingBioId = null;
@@ -1782,5 +1869,14 @@ public class MainActivity extends Activity {
         super.onResume();
         // 回到前台：网页侧据此刷新时钟，并在跨天时自动跟到新的「今天」
         callJs("window.AR && AR.onResume && AR.onResume()");
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (pendingFileCallback != null) {
+            try { pendingFileCallback.onReceiveValue(null); } catch (Exception ignored) { }
+            pendingFileCallback = null;
+        }
+        super.onDestroy();
     }
 }

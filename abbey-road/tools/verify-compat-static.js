@@ -1013,6 +1013,42 @@ ok('C14b Windows 四处版本号与 APP_VERSION 一致',
     && whCss.indexOf('#trClear') >= 0
     && whCss.indexOf('.wh-root.wh-sheet-only') >= 0);
 
+  ok('C228 Android WebView 文件选择桥接与云端配图长超时/密钥缓存契约',
+    mainJava.indexOf('ValueCallback') >= 0
+    && mainJava.indexOf('REQ_FILE_CHOOSER') >= 0
+    && mainJava.indexOf('onShowFileChooser') >= 0
+    && mainJava.indexOf('ClipData') >= 0
+    && mainJava.indexOf('pendingFileCallback = null') >= 0
+    && syncSrc.indexOf('MEDIA_NET_TIMEOUT') >= 0
+    && syncSrc.indexOf('blobKeyCache') >= 0
+    && syncSrc.indexOf('MEDIA_MAX_ENVELOPE') >= 0);
+
+  ok('C229 Whisper 字体栈/Markdown/卡片设置样式及 panels 同步错误提示契约',
+    whCss.indexOf('system-ui') >= 0
+    && whCss.indexOf('.md-body') >= 0
+    && whCss.indexOf('.md-bar') >= 0
+    && whCss.indexOf('.md-preview') >= 0
+    && whCss.indexOf('.card-opt-panel') >= 0
+    && panels5.indexOf('生成图片默认项') >= 0
+    && panels5.indexOf('dblTapAction') >= 0
+    && panels5.indexOf('mdEnabled') >= 0
+    && panels5.indexOf('mdToolbar') >= 0
+    && panels5.indexOf('copyWithMeta') >= 0
+    && panels5.indexOf('whisperSyncResultMessage') >= 0);
+
+  ok('C230 Whisper 秒级时间/Markdown/卡片自定义/触摸双击/顶栏回顶/自动拉图契约',
+    whJs.indexOf('nowAtSec') >= 0
+    && whJs.indexOf('normAtSortKey') >= 0
+    && whJs.indexOf('fmtClockHM') >= 0
+    && whJs.indexOf('stripMarkdown') >= 0
+    && whJs.indexOf('renderMarkdownHTML') >= 0
+    && whJs.indexOf('renderEntryBodyHTML') >= 0
+    && whJs.indexOf('DEFAULT_CARD_OPTS') >= 0
+    && whJs.indexOf('runEntryDoubleTap') >= 0
+    && whJs.indexOf('pullMediaFromCloud') >= 0
+    && whJs.indexOf('sheetOpenedAt') >= 0
+    && whJs.indexOf('copyWithMeta') >= 0);
+
 }
 
 console.log('\n合计：' + pass + ' 通过 / ' + fail + ' 失败');

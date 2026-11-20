@@ -18,6 +18,18 @@ var AR = window.AR || (window.AR = {});
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
   function esc(s) { return AR.Util.escapeHtml(s); }
 
+  function whisperSyncResultMessage(res, okText) {
+    var m = res && res.media;
+    if (m && (m.failedUp > 0 || m.failedDown > 0 || m.error)) {
+      var parts = [];
+      if (m.failedUp > 0) { parts.push('上传失败 ' + m.failedUp); }
+      if (m.failedDown > 0) { parts.push('拉取失败 ' + m.failedDown); }
+      if (!parts.length && m.error) { parts.push(m.error); }
+      return { partial: true, label: '配图部分失败', msg: '文字已同步，配图同步失败（' + parts.join('，') + '）' };
+    }
+    return { partial: false, label: '同步完成 ✓', msg: okText };
+  }
+
   /** 所有对外的入口都先调它：保证 U（工具）与 S（状态）已就绪 */
   function ensure() {
     if (!U) { U = AR.Util; }
@@ -1409,6 +1421,30 @@ var AR = window.AR || (window.AR = {});
       box.appendChild(el('<div class="field-label">' + esc(label) + '</div>'));
       box.appendChild(segmented(opts, current, function (v) { onPick(v); }));
     }
+    function addToggle(label, desc, get, set) {
+      var r = el('<div class="setting-row"><div class="setting-text"><div class="t">' + esc(label) + '</div><div class="d">' + esc(desc) + '</div></div>'
+        + '<label class="switch"><input type="checkbox"' + (get() ? ' checked' : '') + '><span class="track"></span><span class="knob"></span></label></div>');
+      var inp = r.querySelector('input');
+      inp.addEventListener('change', function () {
+        AR.Bridge.haptic('light', r);
+        set(inp.checked, inp);
+      });
+      box.appendChild(r);
+    }
+    function ensureCardCfg() {
+      if (!WS.opts.card || typeof WS.opts.card !== 'object') { WS.opts.card = {}; }
+      var c = WS.opts.card;
+      if (c.ratio !== '3:4' && c.ratio !== '1:1') { c.ratio = 'auto'; }
+      if (typeof c.frame !== 'boolean') { c.frame = false; }
+      if (typeof c.renderMd !== 'boolean') { c.renderMd = true; }
+      if (typeof c.showDate !== 'boolean') { c.showDate = true; }
+      if (typeof c.showTime !== 'boolean') { c.showTime = false; }
+      if (typeof c.showFooter !== 'boolean') { c.showFooter = false; }
+      if (typeof c.showPersona !== 'boolean') { c.showPersona = false; }
+      if (typeof c.showComments !== 'boolean') { c.showComments = true; }
+      if (typeof c.showMedia !== 'boolean') { c.showMedia = true; }
+      return c;
+    }
 
     box.appendChild(el('<div class="field-label">模式</div>'));
     box.appendChild(segmented([
@@ -1451,20 +1487,45 @@ var AR = window.AR || (window.AR = {});
     addSeg('菜单样式', [{ label: '列表', value: 'list' }, { label: '动作格', value: 'grid' }], WS.opts.menu, function (v) { WS.opts.menu = v; commit(); });
     addSeg('写作样式', [{ label: '底部', value: 'sheet' }, { label: '全屏', value: 'full' }], WS.opts.composer, function (v) { WS.opts.composer = v; commit(); });
     addSeg('进入动效', [{ label: '开', value: 'on' }, { label: '关', value: 'off' }], WS.opts.enterFx === false ? 'off' : 'on', function (v) { WS.opts.enterFx = v === 'on'; commit(); });
+    addSeg('双击条目快捷操作', [
+      { label: '编辑', value: 'edit' },
+      { label: '评论', value: 'comment' },
+      { label: '复制', value: 'copy' },
+      { label: '菜单', value: 'menu' },
+      { label: '关', value: 'off' }
+    ], WS.opts.dblTapAction || 'edit', function (v) { WS.opts.dblTapAction = v; commit(); });
+    addToggle('启用 Markdown 格式', '正文支持 **加粗**、# 标题、> 引用、列表与高亮', function () { return WS.opts.mdEnabled !== false; }, function (v) { WS.opts.mdEnabled = v; commit(); });
+    addToggle('显示写作格式条', '在写作与编辑栏下方显示 Markdown 快捷格式按钮', function () { return WS.opts.mdToolbar !== false; }, function (v) { WS.opts.mdToolbar = v; commit(); });
+    addToggle('复制纯文本附带时间与元信息', '关闭时仅复制正文纯文本（默认）；开启后附带日期、本名与追记', function () { return WS.opts.copyWithMeta === true; }, function (v) { WS.opts.copyWithMeta = v; commit(); });
+
+    box.appendChild(el('<div class="field-label">生成图片默认项</div>'));
+    var cardCfg = ensureCardCfg();
+    addSeg('默认卡片比例', [{ label: '自适应', value: 'auto' }, { label: '3:4', value: '3:4' }, { label: '1:1', value: '1:1' }], cardCfg.ratio, function (v) {
+      ensureCardCfg().ratio = v;
+      commit();
+    });
+    var cardItems = [
+      ['frame', '卡片圆角外框与阴影', '外围留白并绘制纸张卡片阴影'],
+      ['renderMd', '卡片渲染 Markdown', '在生成图片中按排版效果绘制加粗、标题、列表等'],
+      ['showDate', '显示日期与星期', '卡片顶部显示月日与星期栏'],
+      ['showTime', '显示具体时间', '每段正文上方显示 HH:mm'],
+      ['showComments', '显示追记评论', '在卡片内附带条目下的追记'],
+      ['showMedia', '显示附带配图', '将条目配图一并绘入导出卡片'],
+      ['showPersona', '显示 Persona 署名', '卡片底部附带当前条目署名'],
+      ['showFooter', '显示底部标识与本名', '卡片底栏显示日记本名与 Whisper 标识']
+    ];
+    for (var ci = 0; ci < cardItems.length; ci++) {
+      (function (item) {
+        addToggle(item[1], item[2], function () { return !!ensureCardCfg()[item[0]]; }, function (v) {
+          ensureCardCfg()[item[0]] = v;
+          commit();
+        });
+      })(cardItems[ci]);
+    }
 
     box.appendChild(el('<div class="field-label">安全</div>'));
     var canBio = !!(AR.Bridge && AR.Bridge.canBiometric && AR.Bridge.canBiometric());
-    function lockRow(label, desc, get, set) {
-      var r = el('<div class="setting-row"><div class="setting-text"><div class="t">' + esc(label) + '</div><div class="d">' + esc(desc) + '</div></div>'
-        + '<label class="switch"><input type="checkbox"' + (get() ? ' checked' : '') + '><span class="track"></span><span class="knob"></span></label></div>');
-      var inp = r.querySelector('input');
-      inp.addEventListener('change', function () {
-        AR.Bridge.haptic('light', r);
-        set(inp.checked, inp);
-      });
-      box.appendChild(r);
-    }
-    lockRow('锁屏', '进入 Whisper 需要 PIN' + (canBio ? ' 或生物识别' : ''), function () { return !!(WS.lock && WS.lock.enabled); }, function (v, inp) {
+    addToggle('锁屏', '进入 Whisper 需要 PIN' + (canBio ? ' 或生物识别' : ''), function () { return !!(WS.lock && WS.lock.enabled); }, function (v, inp) {
       if (v && !WS.lock.hash && !(canBio && WS.lock.bio)) {
         if (inp) { inp.checked = false; }
         AR.UI.toast('请先设置 6 位 PIN');
@@ -1485,7 +1546,7 @@ var AR = window.AR || (window.AR = {});
       commit();
     });
     if (canBio) {
-      lockRow('生物识别', '使用指纹 / 面容解锁', function () { return !!(WS.lock && WS.lock.bio); }, function (v) { WS.lock.bio = v; commit(); });
+      addToggle('生物识别', '使用指纹 / 面容解锁', function () { return !!(WS.lock && WS.lock.bio); }, function (v) { WS.lock.bio = v; commit(); });
     } else {
       box.appendChild(el('<p class="muted" style="margin:6px 0 0;font-size:12px">当前设备仅支持 PIN 锁屏。</p>'));
     }
@@ -1500,11 +1561,11 @@ var AR = window.AR || (window.AR = {});
     box.appendChild(el('<div class="field-label">数据与同步</div>'));
     if (AR.Sync && AR.Sync.config && AR.Sync.setConfig) {
       var whSyncCfg = AR.Sync.config();
-      lockRow('日记云同步', '仅日记改动时同步日记（与课表/配置独立）', function () { return whSyncCfg.syncWhisperEnabled !== false; }, function (v) {
+      addToggle('日记云同步', '仅日记改动时同步日记（与课表/配置独立）', function () { return whSyncCfg.syncWhisperEnabled !== false; }, function (v) {
         AR.Sync.setConfig({ syncWhisperEnabled: v });
         whSyncCfg.syncWhisperEnabled = v;
       });
-      lockRow('同步日记图片（云端压缩）', '设备内始终展示原图；关闭后云同步只传日记文字', function () { return whSyncCfg.syncWhisperMedia !== false; }, function (v) {
+      addToggle('同步日记图片（云端压缩）', '设备内始终展示原图；关闭后云同步只传日记文字', function () { return whSyncCfg.syncWhisperMedia !== false; }, function (v) {
         AR.Sync.setConfig({ syncWhisperMedia: v });
         whSyncCfg.syncWhisperMedia = v;
       });
@@ -1539,8 +1600,9 @@ var AR = window.AR || (window.AR = {});
           AR.UI.toast('同步未就绪，请稍后再试');
           return;
         }
-        setWhBtnProg(100, '同步完成 ✓');
-        AR.UI.toast('Whisper 同步完成');
+        var info = whisperSyncResultMessage(res, 'Whisper 同步完成');
+        setWhBtnProg(100, info.label);
+        AR.UI.toast(info.msg);
         setTimeout(function () {
           bSync.disabled = false;
           setWhBtnProg(0, '立即同步 Whisper');
@@ -4112,8 +4174,9 @@ function renderLongTaskList(host) {
           bWhNow.disabled = false; setBtnProg(bWhNow, 0, '同步 Whisper 日记');
           AR.UI.toast('同步未就绪'); return;
         }
-        setBtnProg(bWhNow, 100, '同步完成 ✓');
-        AR.UI.toast('Whisper 日记同步完成');
+        var info = whisperSyncResultMessage(res, 'Whisper 日记同步完成');
+        setBtnProg(bWhNow, 100, info.label);
+        AR.UI.toast(info.msg);
         setTimeout(function () { bWhNow.disabled = false; setBtnProg(bWhNow, 0, '同步 Whisper 日记'); }, 600);
       }, function (err) {
         bWhNow.disabled = false; setBtnProg(bWhNow, 0, '同步 Whisper 日记');

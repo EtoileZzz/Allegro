@@ -703,6 +703,7 @@ const TOAST_INFO = `(function(){
     })()`);
     await sleep(200);
     const plainRes = await page.ev("window.__whisper.entryPlainText('e_sort_pm')");
+    const plainMetaRes = await page.ev("window.__whisper.entryPlainText('e_sort_pm', true)");
     await page.ev(`(function(){
       var ent = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
       ent.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 11, isPrimary: true }));
@@ -717,10 +718,12 @@ const TOAST_INFO = `(function(){
       var im = document.querySelector('#cardPrevBox img');
       return { eaGrid: window.__eaCount, hasSrc: !!(im && im.src && im.src.indexOf('data:image/png;base64,') === 0), w: im ? im.naturalWidth : 0 };
     })()`);
-    ok('长按菜单4宫格、评论渲染、纯文本去Markdown与单条排版长图生成',
+    ok('长按菜单4宫格、评论渲染、默认仅复制正文纯文本（可选附元信息）与单条排版长图生成',
       cardImg && cardImg.eaGrid === 4 && cardImg.hasSrc && cardImg.w === 900
-      && plainRes.indexOf('E2E 追记评论') >= 0 && plainRes.indexOf('**') < 0,
-      JSON.stringify({ cardImg, plainLen: plainRes.length }));
+      && plainRes.indexOf('夜晚正序测试条') >= 0 && plainRes.indexOf('E2E 追记评论') < 0
+      && plainRes.indexOf('2026') < 0 && plainRes.indexOf('**') < 0
+      && plainMetaRes.indexOf('E2E 追记评论') >= 0 && plainMetaRes.indexOf('**') < 0,
+      JSON.stringify({ cardImg, plainDef: plainRes, plainMetaLen: plainMetaRes.length }));
     await page.shot('09-评论与单条日记卡片图.png');
     await page.ev("AR.onBack(); true"); // 关卡片预览 sheet
     await sleep(1700);
@@ -850,6 +853,259 @@ const TOAST_INFO = `(function(){
     ok('主设置进导出日记以独立蒙层弹出且关闭后直接退回主设置',
       expVis.open && expVis.sheetOnly && expVis.sheetOn && !afterExpBack.open,
       JSON.stringify({ expVis, afterExpBack }));
+
+    /* ── 5f. Markdown 写作与渲染 / 触摸双击防穿透 / 顶栏双击回顶 / 卡片自定义 / 云图自动拉取 ── */
+    await page.ev(`(async function(){
+      AR.Whisper.open();
+      await new Promise(function(r){ setTimeout(r, 80); });
+      var stL = document.getElementById('s-lock');
+      if (stL && !stL.hidden) {
+        '123456'.split('').forEach(function(d){ var b = document.querySelector('#pad [data-k="'+d+'"]'); if (b) b.click(); });
+        await new Promise(function(r){ setTimeout(r, 260); });
+      }
+      var st = AR.Whisper.state();
+      var bk = st.books.filter(function(b){ return !b.hidden && !b.deletedAt && b.name.indexOf('测试日记本') >= 0; })[0]
+        || st.books.filter(function(b){ return !b.hidden && !b.deletedAt; })[0];
+      var bkId = bk && bk.id;
+      if (bk) { bk.sortDir = 'desc'; }
+      for (var i = 0; i < 14; i++) {
+        st.entries.push({
+          id: 'e_fill_' + i,
+          bid: bkId,
+          pid: null,
+          at: '2026-11-10 ' + String(10 + i).padStart(2, '0') + ':00:0' + (i % 10),
+          x: '滚动填充条目 #' + i + '\\n第二行补充内容让列表超过一屏高度以便测试顶栏回顶。',
+          updatedMs: Date.now() - 100000 - i
+        });
+      }
+      st.opts.filter = 'all';
+      st.opts.composer = 'sheet';
+      st.opts.mdEnabled = true;
+      st.opts.mdToolbar = true;
+      st.opts.dblTapAction = 'edit';
+      st.last = { view: 'read', bid: bkId };
+      AR.Whisper.save(st);
+      window.__whisper.openBook(bkId);
+      window.__e2eBkId = bkId;
+      return true;
+    })()`);
+    await sleep(250);
+
+    /* 5f(a) Markdown 格式条、预览/编辑切换、正文渲染、评论纯文本与摘要去格式 */
+    await page.ev("document.getElementById('wWrite').click(); true");
+    await sleep(180);
+    const mdSampleText = '## 小节标题\n\n这是**加粗**和==高亮==与~~删除~~\n\n> 一句引用\n\n- 列表一\n- 列表二\n\n---';
+    const mdPrevCheck = await page.ev(`(async function(){
+      var bBold = document.querySelector('#wsMdBar [data-mdk="b"]');
+      var bPrev = document.querySelector('#wsMdBar [data-mdk="preview"]');
+      var ta = document.getElementById('wText');
+      var prev = document.getElementById('wsMdPrev');
+      var barVisible = !!(bBold && bPrev && bBold.offsetParent !== null);
+      ta.value = ${JSON.stringify(mdSampleText)};
+      bPrev.click();
+      var prevShown = !!(prev && !prev.hidden && ta.hidden);
+      var prevHtml = prev ? prev.innerHTML : '';
+      bPrev.click();
+      var backToEdit = !!(prev && prev.hidden && !ta.hidden);
+      document.getElementById('wSave').click();
+      return { barVisible: barVisible, prevShown: prevShown, prevHtml: prevHtml, backToEdit: backToEdit };
+    })()`);
+    await sleep(220);
+
+    const mdSavedCheck = await page.ev(`(async function(){
+      var st = AR.Whisper.state();
+      var ent = st.entries.filter(function(x){ return !x.deletedAt && x.x.indexOf('小节标题') >= 0; })[0];
+      if (!ent) { return { found: false }; }
+      window.__mdEid = ent.id;
+      var row = document.querySelector('#wBody .entry[data-eid="' + ent.id + '"]');
+      var tmEl = row ? row.querySelector('.t') : null;
+      var xEl = row ? row.querySelector('.x') : null;
+      var tmTxt = tmEl ? tmEl.textContent.trim() : '';
+      var xHtml = xEl ? xEl.innerHTML : '';
+      /* 长按添加带 ** 的评论，确认评论保持纯文本 */
+      row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 21, isPrimary: true }));
+      await new Promise(function(r){ setTimeout(r, 600); });
+      row.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 21, isPrimary: true }));
+      document.querySelector('#sheet [data-ea="comment"]').click();
+      document.getElementById('cmText').value = '**不要渲染**';
+      document.getElementById('cmSave').click();
+      await new Promise(function(r){ setTimeout(r, 150); });
+      var cmtX = document.querySelector('#wBody .entry[data-eid="' + ent.id + '"] .cmt-x');
+      return {
+        found: true,
+        at: ent.at,
+        tmTxt: tmTxt,
+        xHtml: xHtml,
+        cmtText: cmtX ? cmtX.textContent : '',
+        cmtStrong: cmtX ? cmtX.querySelectorAll('strong').length : -1
+      };
+    })()`);
+    await page.shot('12-Markdown渲染与格式条.png');
+
+    const mdStripCheck = await page.ev(`(function(){
+      window.__whisper.openShelf();
+      var shelfTxt = (document.getElementById('shelfList') || {}).innerText || '';
+      document.getElementById('shSearch').click();
+      var inp = document.getElementById('srInput');
+      document.getElementById('srScope').click();
+      inp.value = '小节标题';
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      var srTxt = (document.getElementById('srBody') || {}).innerText || '';
+      window.__whisper.openBook(window.__e2eBkId);
+      return { shelfTxt: shelfTxt, srTxt: srTxt };
+    })()`);
+    await sleep(180);
+
+    ok('Markdown 工具条与预览可用，正文渲染富文本、评论纯文本、秒级时间隐藏且摘要去格式',
+      mdPrevCheck && mdPrevCheck.barVisible && mdPrevCheck.prevShown && mdPrevCheck.backToEdit
+      && /<h3>/.test(mdPrevCheck.prevHtml) && /<strong>/.test(mdPrevCheck.prevHtml) && /<mark[\s>]/.test(mdPrevCheck.prevHtml)
+      && mdSavedCheck && mdSavedCheck.found
+      && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(mdSavedCheck.at)
+      && /^\d{2}:\d{2}$/.test(mdSavedCheck.tmTxt)
+      && /<h3>/.test(mdSavedCheck.xHtml) && /<strong>/.test(mdSavedCheck.xHtml)
+      && /<mark[\s>]/.test(mdSavedCheck.xHtml) && /<blockquote[\s>]/.test(mdSavedCheck.xHtml)
+      && /<ul[\s>]/.test(mdSavedCheck.xHtml) && /<hr[\s>]/.test(mdSavedCheck.xHtml)
+      && mdSavedCheck.cmtText === '**不要渲染**' && mdSavedCheck.cmtStrong === 0
+      && mdStripCheck.srTxt.indexOf('小节标题') >= 0
+      && mdStripCheck.srTxt.indexOf('**') < 0 && mdStripCheck.srTxt.indexOf('==') < 0 && mdStripCheck.shelfTxt.indexOf('**') < 0,
+      JSON.stringify({ mdPrevCheck, mdSavedCheck, mdStripCheck }));
+
+    /* 5f(b) 触摸双击防误触遮罩穿透 + 5 选 1 dblTapAction */
+    const dblTouchRes = await page.ev(`(async function(){
+      var wait = function(ms){ return new Promise(function(r){ setTimeout(r, ms); }); };
+      var dblTouch = async function(el, pidBase){
+        var r = el.getBoundingClientRect();
+        var cx = Math.round(r.left + 40), cy = Math.round(r.top + 30);
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: pidBase, pointerType: 'touch', isPrimary: true }));
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: pidBase, pointerType: 'touch', isPrimary: true }));
+        await wait(80);
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: pidBase + 1, pointerType: 'touch', isPrimary: true }));
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: pidBase + 1, pointerType: 'touch', isPrimary: true }));
+      };
+      var entEl = document.querySelector('#wBody .entry[data-eid="' + window.__mdEid + '"]');
+      await dblTouch(entEl, 30);
+      await wait(50);
+      document.getElementById('mask').click();
+      await wait(200);
+      var sh = document.getElementById('sheet');
+      var stayOpenOnBleed = !!(sh && sh.classList.contains('on') && document.getElementById('edText'));
+      AR.onBack();
+      await wait(450);
+
+      var st = AR.Whisper.state();
+      st.opts.dblTapAction = 'comment';
+      AR.Whisper.save(st);
+      await dblTouch(document.querySelector('#wBody .entry[data-eid="' + window.__mdEid + '"]'), 40);
+      await wait(80);
+      var openedComment = !!(sh && sh.classList.contains('on') && document.getElementById('cmText'));
+      AR.onBack();
+      await wait(450);
+
+      st = AR.Whisper.state();
+      st.opts.dblTapAction = 'off';
+      AR.Whisper.save(st);
+      await dblTouch(document.querySelector('#wBody .entry[data-eid="' + window.__mdEid + '"]'), 50);
+      await wait(80);
+      var stayedClosedOff = !(sh && sh.classList.contains('on'));
+
+      st = AR.Whisper.state();
+      st.opts.dblTapAction = 'edit';
+      AR.Whisper.save(st);
+      return { stayOpenOnBleed: stayOpenOnBleed, openedComment: openedComment, stayedClosedOff: stayedClosedOff };
+    })()`);
+    ok('手机端触摸双击打开编辑不被 50ms 遮罩 click 关闭，且 dblTapAction 支持 comment/off 切换',
+      dblTouchRes && dblTouchRes.stayOpenOnBleed && dblTouchRes.openedComment && dblTouchRes.stayedClosedOff,
+      JSON.stringify(dblTouchRes));
+
+    /* 5f(c) 阅读页顶栏双击返回顶部（排除按钮子节点） */
+    const topScrollRes = await page.ev(`(async function(){
+      var wb = document.getElementById('wBody');
+      wb.scrollTop = 300;
+      var before = wb.scrollTop;
+      document.getElementById('wMenu').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      await new Promise(function(r){ setTimeout(r, 80); });
+      var afterMenu = wb.scrollTop;
+      document.getElementById('wTitle').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      for (var i = 0; i < 15; i++) {
+        if (wb.scrollTop === 0) { break; }
+        await new Promise(function(r){ setTimeout(r, 50); });
+      }
+      return { canScroll: wb.scrollHeight > wb.clientHeight, before: before, afterMenu: afterMenu, afterTitle: wb.scrollTop };
+    })()`);
+    ok('阅读页顶栏双击平滑返回顶部且点击顶栏按钮不误触',
+      topScrollRes && topScrollRes.canScroll && topScrollRes.before > 0 && topScrollRes.afterMenu > 0 && topScrollRes.afterTitle === 0,
+      JSON.stringify(topScrollRes));
+
+    /* 5f(d) 卡片图片自定义开关与 3:4 比例持久化 */
+    const cardCustomRes = await page.ev(`(async function(){
+      var row = document.querySelector('#wBody .entry[data-eid="' + window.__mdEid + '"]');
+      row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 60, isPrimary: true }));
+      await new Promise(function(r){ setTimeout(r, 600); });
+      row.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, clientX: 40, clientY: 40, pointerId: 60, isPrimary: true }));
+      document.querySelector('#sheet [data-ea="image"]').click();
+      await new Promise(function(r){ setTimeout(r, 200); });
+      document.getElementById('ciOptToggle').click();
+      var panelOpen = !document.getElementById('ciOptPanel').hidden;
+      document.querySelector('#ciOptPanel [data-crat="3:4"]').click();
+      document.querySelector('#ciOptPanel [data-copt="frame"]').click();
+      document.querySelector('#ciOptPanel [data-copt="showTime"]').click();
+      await new Promise(function(r){ setTimeout(r, 450); });
+      var im = document.querySelector('#cardPrevBox img');
+      var cfg = AR.Whisper.state().opts.card;
+      return {
+        panelOpen: panelOpen,
+        w: im ? im.naturalWidth : 0,
+        h: im ? im.naturalHeight : 0,
+        ratio: cfg.ratio,
+        frame: !!cfg.frame,
+        showTime: !!cfg.showTime
+      };
+    })()`);
+    await page.shot('13-卡片自定义与3比4预览.png');
+    await page.ev("AR.onBack(); true");
+    await sleep(220);
+    ok('单条卡片图片支持面板自定义（3:4 竖卡、外框阴影、具体时间）并即时重绘与持久化',
+      cardCustomRes && cardCustomRes.panelOpen && cardCustomRes.w === 900 && cardCustomRes.h >= 1200
+      && cardCustomRes.ratio === '3:4' && cardCustomRes.frame === true && cardCustomRes.showTime === true,
+      JSON.stringify(cardCustomRes));
+
+    /* 5f(e) 缺失本地图片打开阅读页时后台自动拉取云端配图 */
+    const autoPullImg = await page.ev(`(async function(){
+      AR.Sync.setConfig({ syncWhisperMedia: true });
+      var cv = document.createElement('canvas');
+      cv.width = 48; cv.height = 48;
+      var cx = cv.getContext('2d');
+      cx.fillStyle = '#6a9bcc'; cx.fillRect(0, 0, 48, 48);
+      var dUrl = cv.toDataURL('image/png');
+      var mid = 'm_e2e_autopull';
+      await AR.Sync.blobMediaPush(mid, { id: mid, dataUrl: dUrl, w: 48, h: 48, mime: 'image/png', compressed: true });
+      var st = AR.Whisper.state();
+      st.entries.push({
+        id: 'e_autopull_1',
+        bid: window.__e2eBkId,
+        pid: null,
+        at: '2026-11-20 22:59:59',
+        x: '自动拉取云端配图测试',
+        media: [{ id: mid, w: 48, h: 48, mime: 'image/png', size: 120 }],
+        updatedMs: Date.now() + 5000
+      });
+      AR.Whisper.save(st);
+      window.__whisper.openBook(window.__e2eBkId);
+      for (var i = 0; i < 30; i++) {
+        var img = document.querySelector('#wBody .m-thumb[data-mid="' + mid + '"] img');
+        if (img && img.src && img.src.indexOf('data:image/png;base64,') === 0 && img.naturalWidth > 0) {
+          return { loaded: true, w: img.naturalWidth, h: img.naturalHeight, tries: i + 1 };
+        }
+        await new Promise(function(r){ setTimeout(r, 50); });
+      }
+      var miss = document.querySelector('#wBody .m-thumb[data-mid="' + mid + '"]');
+      return { loaded: false, html: miss ? miss.innerHTML : 'no-thumb' };
+    })()`);
+    await sleep(480);
+    await page.shot('14-自动拉取云端配图.png');
+    ok('本机缺少配图时打开阅读页自动从云端拉取并渲染出图片（无需显示失败）',
+      autoPullImg && autoPullImg.loaded && autoPullImg.w === 48,
+      JSON.stringify(autoPullImg));
 
     /* ── 6. 控制台必须干净 ── */
     ok('全程控制台没有 error / 未捕获异常', page.errors.length === 0, page.errors.slice(0, 3).join(' | '));

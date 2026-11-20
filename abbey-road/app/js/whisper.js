@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   if (document.getElementById('whRoot')) { return; }
-  var tpl = "<div class=\"wh-root\" id=\"whRoot\" hidden>\n\n  <section class=\"screen lock\" id=\"s-lock\" hidden>\n    <div class=\"icn\">✦</div>\n    <div style=\"text-align:center\"><h2 id=\"lockTitle\">输入 PIN</h2><p id=\"lockSub\">Whisper 已上锁</p></div>\n    <div class=\"pin\" id=\"pinDots\"></div>\n    <div class=\"pad\" id=\"pad\"></div>\n    <button class=\"linkrow\" id=\"bioBtn\">使用生物识别</button>\n    <button class=\"linkrow\" id=\"skipBtn\" style=\"color:var(--w-mid)\">先不设锁，直接进入</button>\n  </section>\n\n  <section class=\"screen\" id=\"s-shelf\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"shBack\">‹</button>\n      <span style=\"width:68px;flex:0 0 auto\"></span>\n      <div class=\"title\"><b id=\"shTitle\" style=\"font-family:var(--font-serif);font-size:17px;letter-spacing:.6px\">Whisper</b><span id=\"shSub\"></span></div>\n      <button class=\"btn\" id=\"shSearch\">⌕</button>\n      <button class=\"btn\" id=\"shRecall\" title=\"回顾\">◷</button>\n      <button class=\"btn\" id=\"shNew\">＋</button>\n    </div>\n    <div class=\"scroll\"><div class=\"shelf\" id=\"shelfList\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-whisper\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"wBack\">‹</button>\n      <div class=\"title\"><b id=\"wTitle\" style=\"font-family:var(--font-serif);font-size:21px;letter-spacing:.5px;max-width:250px\">—</b><span id=\"wSub\" style=\"display:none\"></span></div>\n      <button class=\"btn\" id=\"wMenu\">⋯</button>\n    </div>\n    <div class=\"pullhint\" id=\"pullHint\">下拉写一条</div>\n    <div class=\"scroll\" id=\"wBody\"></div>\n    <button class=\"fab\" id=\"wWrite\">✎</button>\n  </section>\n\n  <section class=\"screen composer\" id=\"s-composer\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"cCancel\">✕</button>\n      <div class=\"title\"><b>写一条</b><span id=\"cWhen\"></span></div>\n      <button class=\"btn\" id=\"cSave\">✓</button>\n    </div>\n    <div class=\"body\">\n      <textarea id=\"cText\"></textarea>\n      <div class=\"media-bar\"><button class=\"media-pick\" type=\"button\" id=\"cImgBtn\">添加图片</button><input type=\"file\" id=\"cImgIn\" accept=\"image/*\" multiple style=\"display:none\"></div>\n      <div class=\"media-draft\" id=\"cMediaList\"></div>\n      <div class=\"meta\">\n        <div class=\"field\" style=\"margin-top:0\">Persona</div>\n        <div class=\"personachips\" id=\"cPersona\"></div>\n        <div class=\"field\">写进</div>\n        <div class=\"personachips\" id=\"cBook\"></div>\n        <button class=\"save\" id=\"cSave2\">保存</button>\n      </div>\n    </div>\n  </section>\n\n  <section class=\"screen\" id=\"s-search\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"srBack\">‹</button><div class=\"title\"><b>搜索</b><span id=\"srSub\">当前本</span></div><button class=\"btn\" id=\"srScope\" style=\"width:auto;padding:0 8px;font-size:11.5px;color:var(--w-a2)\">当前本</button></div>\n    <div class=\"searchbar\"><input id=\"srInput\" placeholder=\"搜标题或正文…\" autocomplete=\"off\"><button class=\"x\" id=\"srClear\">✕</button></div>\n    <div class=\"scroll\"><div class=\"sres\" id=\"srBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-trash\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"trBack\">‹</button><div class=\"title\"><b>回收站</b><span id=\"trSub\"></span></div><button class=\"btn\" id=\"trClear\">清空</button></div>\n    <div class=\"scroll\"><div class=\"trash\" id=\"trBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-recall\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"rcBack\">‹</button><div class=\"title\"><b style=\"font-size:24px;letter-spacing:.6px\">回顾</b><span style=\"display:none\"></span></div><span style=\"width:30px\"></span></div>\n    <div class=\"scroll\"><div class=\"recall\" id=\"rcBody\"></div></div>\n  </section>\n\n  <div class=\"toc-mask\" id=\"tocMask\"></div>\n  <div class=\"toc from-right\" id=\"toc\"><div class=\"th\"><div class=\"tt\"><b>目录</b><span id=\"tocSub\"></span></div><button class=\"tc\" id=\"tocClose\">✕</button></div><div class=\"tl\" id=\"tocList\"></div></div>\n\n  <div class=\"sheet-mask\" id=\"mask\"></div>\n  <div class=\"sheet\" id=\"sheet\"></div>\n  <div class=\"wh-lightbox\" id=\"whLightbox\" hidden><div class=\"wh-lb-top\"><span id=\"lbTitle\"></span><button type=\"button\" id=\"lbSave\">保存原图</button><button type=\"button\" id=\"lbClose\">关闭</button></div><div class=\"wh-lb-stage\"><img id=\"lbImg\" alt=\"\"></div><div class=\"wh-lb-nav\"><button type=\"button\" id=\"lbPrev\">‹ 上一张</button><button type=\"button\" id=\"lbNext\">下一张 ›</button></div></div>\n  <div class=\"toast\" id=\"toast\"></div></div>";
+  var tpl = "<div class=\"wh-root\" id=\"whRoot\" hidden>\n\n  <section class=\"screen lock\" id=\"s-lock\" hidden>\n    <div class=\"icn\">✦</div>\n    <div style=\"text-align:center\"><h2 id=\"lockTitle\">输入 PIN</h2><p id=\"lockSub\">Whisper 已上锁</p></div>\n    <div class=\"pin\" id=\"pinDots\"></div>\n    <div class=\"pad\" id=\"pad\"></div>\n    <button class=\"linkrow\" id=\"bioBtn\">使用生物识别</button>\n    <button class=\"linkrow\" id=\"skipBtn\" style=\"color:var(--w-mid)\">先不设锁，直接进入</button>\n  </section>\n\n  <section class=\"screen\" id=\"s-shelf\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"shBack\">‹</button>\n      <span style=\"width:68px;flex:0 0 auto\"></span>\n      <div class=\"title\"><b id=\"shTitle\" style=\"font-family:var(--font-serif);font-size:17px;letter-spacing:.6px\">Whisper</b><span id=\"shSub\"></span></div>\n      <button class=\"btn\" id=\"shSearch\">⌕</button>\n      <button class=\"btn\" id=\"shRecall\" title=\"回顾\">◷</button>\n      <button class=\"btn\" id=\"shNew\">＋</button>\n    </div>\n    <div class=\"scroll\"><div class=\"shelf\" id=\"shelfList\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-whisper\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"wBack\">‹</button>\n      <div class=\"title\"><b id=\"wTitle\" style=\"font-family:var(--font-serif);font-size:21px;letter-spacing:.5px;max-width:250px\">—</b><span id=\"wSub\" style=\"display:none\"></span></div>\n      <button class=\"btn\" id=\"wMenu\">⋯</button>\n    </div>\n    <div class=\"pullhint\" id=\"pullHint\">下拉写一条</div>\n    <div class=\"scroll\" id=\"wBody\"></div>\n    <button class=\"fab\" id=\"wWrite\">✎</button>\n  </section>\n\n  <section class=\"screen composer\" id=\"s-composer\" hidden>\n    <div class=\"topbar\">\n      <button class=\"btn\" id=\"cCancel\">✕</button>\n      <div class=\"title\"><b>写一条</b><span id=\"cWhen\"></span></div>\n      <button class=\"btn\" id=\"cSave\">✓</button>\n    </div>\n    <div class=\"body\">\n      <textarea id=\"cText\"></textarea>\n      <div class=\"md-preview md-body\" id=\"cMdPrev\" hidden></div>\n      <div class=\"md-bar\" id=\"cMdBar\"></div>\n      <div class=\"media-bar\"><button class=\"media-pick\" type=\"button\" id=\"cImgBtn\">添加图片</button><input type=\"file\" id=\"cImgIn\" accept=\"image/*\" multiple style=\"display:none\"></div>\n      <div class=\"media-draft\" id=\"cMediaList\"></div>\n      <div class=\"meta\">\n        <div class=\"field\" style=\"margin-top:0\">Persona</div>\n        <div class=\"personachips\" id=\"cPersona\"></div>\n        <div class=\"field\">写进</div>\n        <div class=\"personachips\" id=\"cBook\"></div>\n        <button class=\"save\" id=\"cSave2\">保存</button>\n      </div>\n    </div>\n  </section>\n\n  <section class=\"screen\" id=\"s-search\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"srBack\">‹</button><div class=\"title\"><b>搜索</b><span id=\"srSub\">当前本</span></div><button class=\"btn\" id=\"srScope\" style=\"width:auto;padding:0 8px;font-size:11.5px;color:var(--w-a2)\">当前本</button></div>\n    <div class=\"searchbar\"><input id=\"srInput\" placeholder=\"搜标题或正文…\" autocomplete=\"off\"><button class=\"x\" id=\"srClear\">✕</button></div>\n    <div class=\"scroll\"><div class=\"sres\" id=\"srBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-trash\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"trBack\">‹</button><div class=\"title\"><b>回收站</b><span id=\"trSub\"></span></div><button class=\"btn\" id=\"trClear\">清空</button></div>\n    <div class=\"scroll\"><div class=\"trash\" id=\"trBody\"></div></div>\n  </section>\n\n  <section class=\"screen\" id=\"s-recall\" hidden>\n    <div class=\"topbar\"><button class=\"btn\" id=\"rcBack\">‹</button><div class=\"title\"><b style=\"font-size:24px;letter-spacing:.6px\">回顾</b><span style=\"display:none\"></span></div><span style=\"width:30px\"></span></div>\n    <div class=\"scroll\"><div class=\"recall\" id=\"rcBody\"></div></div>\n  </section>\n\n  <div class=\"toc-mask\" id=\"tocMask\"></div>\n  <div class=\"toc from-right\" id=\"toc\"><div class=\"th\"><div class=\"tt\"><b>目录</b><span id=\"tocSub\"></span></div><button class=\"tc\" id=\"tocClose\">✕</button></div><div class=\"tl\" id=\"tocList\"></div></div>\n\n  <div class=\"sheet-mask\" id=\"mask\"></div>\n  <div class=\"sheet\" id=\"sheet\"></div>\n  <div class=\"wh-lightbox\" id=\"whLightbox\" hidden><div class=\"wh-lb-top\"><span id=\"lbTitle\"></span><button type=\"button\" id=\"lbSave\">保存原图</button><button type=\"button\" id=\"lbClose\">关闭</button></div><div class=\"wh-lb-stage\"><img id=\"lbImg\" alt=\"\"></div><div class=\"wh-lb-nav\"><button type=\"button\" id=\"lbPrev\">‹ 上一张</button><button type=\"button\" id=\"lbNext\">下一张 ›</button></div></div>\n  <div class=\"toast\" id=\"toast\"></div></div>";
   var holder = document.createElement('div');
   holder.innerHTML = tpl;
   var node = holder.firstChild;
@@ -12,7 +12,38 @@
 (function () {
   'use strict';
   var LS = 'abbeyroad.whisper.v1';
-  var SERIF = 'Georgia,"Songti SC","Noto Serif SC",serif';
+  var SERIF = 'Georgia,"Songti SC","Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif';
+  var UI_FONT_STACK = '"PingFang SC","HarmonyOS Sans SC","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI",system-ui,-apple-system,sans-serif';
+  var DEFAULT_CARD_OPTS = {
+    showDate: true,
+    showTime: false,
+    showFooter: false,
+    showPersona: false,
+    showComments: true,
+    showMedia: true,
+    ratio: 'auto',
+    frame: false,
+    renderMd: true
+  };
+  function cloneCardDefaults() {
+    var out = {}, k;
+    for (k in DEFAULT_CARD_OPTS) {
+      if (Object.prototype.hasOwnProperty.call(DEFAULT_CARD_OPTS, k)) { out[k] = DEFAULT_CARD_OPTS[k]; }
+    }
+    return out;
+  }
+  function getCardOpts() {
+    var base = cloneCardDefaults();
+    var cur = (S && S.opts && S.opts.card && typeof S.opts.card === 'object') ? S.opts.card : null;
+    if (cur) {
+      var k;
+      for (k in base) {
+        if (Object.prototype.hasOwnProperty.call(cur, k) && cur[k] !== undefined) { base[k] = cur[k]; }
+      }
+    }
+    if (base.ratio !== '3:4' && base.ratio !== '1:1') { base.ratio = 'auto'; }
+    return base;
+  }
   var PRESETS = {
     claudePaper: { name: 'Claude 纸', mode: 'paper', base: { dark: '#141413', light: '#faf9f5', mid: '#b0aea5', subtle: '#e8e6dc' }, accent: { a1: '#d97757', a2: '#6a9bcc', a3: '#788c5d' } },
     claudeNight: { name: 'Claude 夜', mode: 'night', base: { dark: '#141413', light: '#faf9f5', mid: '#b0aea5', subtle: '#e8e6dc' }, accent: { a1: '#d97757', a2: '#6a9bcc', a3: '#788c5d' } },
@@ -21,6 +52,20 @@
 
   function p2(n) { return n < 10 ? '0' + n : '' + n; }
   function dkey(off) { var d = new Date(); d.setDate(d.getDate() - (off || 0)); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
+  function nowAtSec() {
+    var d = new Date();
+    return dkey(0) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  }
+  function normAtSortKey(s) {
+    var str = String(s || '').trim();
+    return str.length === 16 ? (str + ':00') : str;
+  }
+  function fmtClockHM(atStr) { return String(atStr || '').slice(11, 16); }
+  function fmtDateHM(atStr) { return String(atStr || '').slice(0, 16); }
+  function fmtShortMDHM(atStr) {
+    var s = String(atStr || '');
+    return s.length >= 16 ? s.slice(5, 16) : s;
+  }
   function uid(p) { return (p || 'x') + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
   function hash(s) { var h = 5381; for (var i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; } return String(h); }
   function hexBytes(buf) {
@@ -122,7 +167,7 @@
       entries: [],
       tombstones: [],
       theme: (function () { var t = JSON.parse(JSON.stringify(PRESETS.claudePaper)); t.mode = 'app'; t.name = 'claudePaper'; return t; })(),
-      opts: { layout: 'A', grouped: true, filter: 'all', shelf: 'hero', menu: 'grid', composer: 'sheet', sort: 'recent', enterFx: true, font: 'ui' },
+      opts: { layout: 'A', grouped: true, filter: 'all', shelf: 'hero', menu: 'grid', composer: 'sheet', sort: 'recent', enterFx: true, font: 'ui', copyWithMeta: false, dblTapAction: 'edit', mdEnabled: true, mdToolbar: true, card: cloneCardDefaults() },
       lock: { enabled: true, hash: '', bio: true, optional: true },
       last: { view: 'shelf', bid: '' }
     };
@@ -212,7 +257,7 @@
   }
   function load() {
     return new Promise(function (resolve) {
-      var finish = function (d) { S = normalize(d || seed()); fireReady(); resolve(S); };
+      var finish = function (d) { S = normalize(d || seed()); try { applyTheme(); applyAppHeat(); } catch (eInit) { } fireReady(); resolve(S); };
       var enc = readRaw();
       if (enc) {
         decryptText(enc).then(function (txt) {
@@ -253,13 +298,24 @@
     writeEncQueue(JSON.stringify(S), true);
   }
   function normalize(d) {
-    var def = { opts: { layout: 'A', grouped: true, filter: 'all', shelf: 'hero', menu: 'grid', composer: 'sheet', sort: 'recent', enterFx: true, font: 'ui' } }, k;
+    var def = { opts: { layout: 'A', grouped: true, filter: 'all', shelf: 'hero', menu: 'grid', composer: 'sheet', sort: 'recent', enterFx: true, font: 'ui', copyWithMeta: false, dblTapAction: 'edit', mdEnabled: true, mdToolbar: true, card: cloneCardDefaults() } }, k;
     d.books = Array.isArray(d.books) ? d.books : [];
     d.entries = Array.isArray(d.entries) ? d.entries : [];
     d.personas = Array.isArray(d.personas) ? d.personas : [];
     d.tombstones = Array.isArray(d.tombstones) ? d.tombstones : [];
     var o = d.opts || {};
     for (k in def.opts) { if (o[k] === undefined) { o[k] = def.opts[k]; } }
+    if (!o.card || typeof o.card !== 'object') {
+      o.card = cloneCardDefaults();
+    } else {
+      for (k in DEFAULT_CARD_OPTS) {
+        if (Object.prototype.hasOwnProperty.call(DEFAULT_CARD_OPTS, k) && o.card[k] === undefined) {
+          o.card[k] = DEFAULT_CARD_OPTS[k];
+        }
+      }
+      if (o.card.ratio !== '3:4' && o.card.ratio !== '1:1') { o.card.ratio = 'auto'; }
+    }
+    if (['edit', 'comment', 'copy', 'menu', 'off'].indexOf(o.dblTapAction) < 0) { o.dblTapAction = 'edit'; }
     d.opts = o;
     if (!d.theme || !d.theme.base || !d.theme.accent) {
       d.theme = { mode: (d.theme && d.theme.mode) || 'app', base: { dark: '#141413', light: '#faf9f5', mid: '#b0aea5', subtle: '#e8e6dc' }, accent: { a1: '#d97757', a2: '#6a9bcc', a3: '#788c5d' } };
@@ -457,49 +513,77 @@
     });
   }
 
+  var TARGET_MEDIA_DATAURL_LEN = 480000;
+  var mediaPulling = {};
+
   function compressMediaForCloud(rec) {
-    if (!rec || !rec.dataUrl) { return Promise.resolve(rec); }
+    if (!rec || !rec.dataUrl) { return Promise.reject(new Error('图片数据无效')); }
     if (typeof Image === 'undefined' || typeof document === 'undefined') {
+      if (String(rec.dataUrl).length > TARGET_MEDIA_DATAURL_LEN) {
+        return Promise.reject(new Error('当前环境不支持图片压缩'));
+      }
       return Promise.resolve(rec);
     }
-    return new Promise(function (resolve) {
+    return new Promise(function (resolve, reject) {
       var img = new Image();
       img.onload = function () {
         try {
           var nw = img.naturalWidth || rec.w || 1280;
           var nh = img.naturalHeight || rec.h || 960;
-          var maxSide = 1280;
-          var scale = Math.min(1, maxSide / Math.max(1, Math.max(nw, nh)));
-          var tw = Math.max(1, Math.round(nw * scale));
-          var th = Math.max(1, Math.round(nh * scale));
-          var cv = document.createElement('canvas');
-          if (!cv || !cv.getContext) { resolve(rec); return; }
-          cv.width = tw; cv.height = th;
-          var ctx = cv.getContext('2d');
-          if (!ctx) { resolve(rec); return; }
-          ctx.drawImage(img, 0, 0, tw, th);
-          var outUrl = '';
-          try { outUrl = cv.toDataURL('image/webp', 0.80); } catch (eW) { outUrl = ''; }
-          if (!outUrl || outUrl.indexOf('data:image/webp') !== 0) {
-            outUrl = cv.toDataURL('image/jpeg', 0.80);
+          var steps = [
+            { side: 1280, mime: 'image/webp', q: 0.80 },
+            { side: 1280, mime: 'image/jpeg', q: 0.78 },
+            { side: 1280, mime: 'image/jpeg', q: 0.60 },
+            { side: 1024, mime: 'image/webp', q: 0.70 },
+            { side: 1024, mime: 'image/jpeg', q: 0.55 },
+            { side: 800, mime: 'image/jpeg', q: 0.48 },
+            { side: 640, mime: 'image/jpeg', q: 0.38 }
+          ];
+          var best = null;
+          for (var si = 0; si < steps.length; si++) {
+            var st = steps[si];
+            var scale = Math.min(1, st.side / Math.max(1, Math.max(nw, nh)));
+            var tw = Math.max(1, Math.round(nw * scale));
+            var th = Math.max(1, Math.round(nh * scale));
+            var cv = document.createElement('canvas');
+            if (!cv || !cv.getContext) {
+              if (String(rec.dataUrl).length <= TARGET_MEDIA_DATAURL_LEN) { resolve(rec); return; }
+              reject(new Error('当前环境不支持图片压缩'));
+              return;
+            }
+            cv.width = tw; cv.height = th;
+            var ctx = cv.getContext('2d');
+            if (!ctx) { continue; }
+            if (st.mime === 'image/jpeg') {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, tw, th);
+            } else {
+              ctx.clearRect(0, 0, tw, th);
+            }
+            ctx.drawImage(img, 0, 0, tw, th);
+            var outUrl = '';
+            try { outUrl = cv.toDataURL(st.mime, st.q); } catch (eW) { outUrl = ''; }
+            if (!outUrl || outUrl.indexOf('data:' + st.mime) !== 0) { continue; }
+            var cand = {
+              id: rec.id,
+              dataUrl: outUrl,
+              w: tw,
+              h: th,
+              mime: st.mime,
+              size: outUrl.length,
+              compressed: true,
+              updatedMs: rec.updatedMs || Date.now()
+            };
+            if (!best || cand.size < best.size) { best = cand; }
+            if (cand.size <= TARGET_MEDIA_DATAURL_LEN) { resolve(cand); return; }
           }
-          if (outUrl.length > 560000) {
-            var q2 = cv.toDataURL('image/jpeg', 0.62);
-            if (q2 && q2.length < outUrl.length) { outUrl = q2; }
-          }
-          resolve({
-            id: rec.id,
-            dataUrl: outUrl,
-            w: tw,
-            h: th,
-            mime: outUrl.indexOf('data:image/webp') === 0 ? 'image/webp' : 'image/jpeg',
-            size: outUrl.length,
-            compressed: true,
-            updatedMs: rec.updatedMs || Date.now()
-          });
-        } catch (eC) { resolve(rec); }
+          if (best && best.size <= 680000) { resolve(best); return; }
+          reject(new Error('图片压缩后仍超出云同步体积上限'));
+        } catch (eC) {
+          reject(new Error((eC && eC.message) || '图片压缩失败'));
+        }
       };
-      img.onerror = function () { resolve(rec); };
+      img.onerror = function () { reject(new Error('图片解码失败，无法压缩上传')); };
       img.src = rec.dataUrl;
     });
   }
@@ -618,6 +702,248 @@
   }
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  /* ── Markdown 解析、安全渲染与去符号 ── */
+  function cloneRunFlags(flags, text) {
+    return {
+      text: text,
+      bold: !!(flags && flags.bold),
+      italic: !!(flags && flags.italic),
+      strike: !!(flags && flags.strike),
+      hl: !!(flags && flags.hl),
+      code: !!(flags && flags.code)
+    };
+  }
+  function parseMdStyledText(str, flags, depth) {
+    var out = [];
+    if (!str) { return out; }
+    if ((depth || 0) >= 3) { out.push(cloneRunFlags(flags, str)); return out; }
+    var pos = 0;
+    var pats = [
+      { kind: 'bi', open: '***', close: '***', bold: true, italic: true },
+      { kind: 'b', open: '**', close: '**', bold: true },
+      { kind: 'b2', open: '__', close: '__', bold: true },
+      { kind: 'hl', open: '==', close: '==', hl: true },
+      { kind: 's', open: '~~', close: '~~', strike: true },
+      { kind: 'i', open: '*', close: '*', italic: true }
+    ];
+    while (pos < str.length) {
+      var bestIdx = -1, bestEnd = -1, bestPat = null;
+      for (var pi = 0; pi < pats.length; pi++) {
+        var pat = pats[pi];
+        var searchFrom = pos;
+        while (searchFrom < str.length) {
+          var oi = str.indexOf(pat.open, searchFrom);
+          if (oi < 0) { break; }
+          if (bestIdx >= 0 && oi >= bestIdx) { break; }
+          if (pat.open === '*' && str.charAt(oi + 1) === '*') {
+            searchFrom = oi + 2;
+            continue;
+          }
+          if (pat.open === '__' && oi > 0 && /[A-Za-z0-9_.]/.test(str.charAt(oi - 1))) {
+            searchFrom = oi + 2;
+            continue;
+          }
+          var afterOpen = oi + pat.open.length;
+          if (afterOpen >= str.length || /\s/.test(str.charAt(afterOpen))) {
+            searchFrom = oi + 1;
+            continue;
+          }
+          var ci = str.indexOf(pat.close, afterOpen);
+          while (ci >= 0) {
+            if (ci === afterOpen || /\s/.test(str.charAt(ci - 1))) {
+              ci = str.indexOf(pat.close, ci + 1);
+              continue;
+            }
+            if (pat.close === '*' && str.charAt(ci + 1) === '*') {
+              ci = str.indexOf(pat.close, ci + 2);
+              continue;
+            }
+            if (pat.close === '__' && ci + 2 < str.length && /[A-Za-z0-9_]/.test(str.charAt(ci + 2))) {
+              ci = str.indexOf(pat.close, ci + 2);
+              continue;
+            }
+            break;
+          }
+          if (ci >= 0) {
+            bestIdx = oi;
+            bestEnd = ci;
+            bestPat = pat;
+            break;
+          }
+          searchFrom = oi + 1;
+        }
+      }
+      if (bestIdx < 0 || !bestPat) {
+        out.push(cloneRunFlags(flags, str.slice(pos)));
+        break;
+      }
+      if (bestIdx > pos) {
+        out.push(cloneRunFlags(flags, str.slice(pos, bestIdx)));
+      }
+      var innerStr = str.slice(bestIdx + bestPat.open.length, bestEnd);
+      var subFlags = {
+        bold: !!(flags && flags.bold) || !!bestPat.bold,
+        italic: !!(flags && flags.italic) || !!bestPat.italic,
+        strike: !!(flags && flags.strike) || !!bestPat.strike,
+        hl: !!(flags && flags.hl) || !!bestPat.hl,
+        code: false
+      };
+      var subRuns = parseMdStyledText(innerStr, subFlags, (depth || 0) + 1);
+      for (var si = 0; si < subRuns.length; si++) { out.push(subRuns[si]); }
+      pos = bestEnd + bestPat.close.length;
+    }
+    return out;
+  }
+  function parseMdInline(str) {
+    var out = [], s = String(str == null ? '' : str);
+    var reCode = /`([^`\n]+)`/g;
+    var last = 0, m;
+    while ((m = reCode.exec(s)) !== null) {
+      if (m.index > last) {
+        var pre = parseMdStyledText(s.slice(last, m.index), {}, 0);
+        for (var i = 0; i < pre.length; i++) { out.push(pre[i]); }
+      }
+      out.push(cloneRunFlags({ code: true }, m[1]));
+      last = m.index + m[0].length;
+    }
+    if (last < s.length) {
+      var tail = parseMdStyledText(s.slice(last), {}, 0);
+      for (var j = 0; j < tail.length; j++) { out.push(tail[j]); }
+    }
+    if (!out.length) { out.push(cloneRunFlags({}, '')); }
+    return out;
+  }
+  function parseMarkdownBlocks(raw, useMd) {
+    var lines = String(raw == null ? '' : raw).replace(/\r\n/g, '\n').split('\n');
+    if (!useMd) {
+      return lines.map(function (ln) {
+        return { type: 'para', lines: [{ runs: [{ text: ln, bold: false, italic: false, strike: false, hl: false, code: false }] }] };
+      });
+    }
+    var blocks = [];
+    var curPara = null, curQuote = null, curUl = null, curOl = null;
+    function flushAll() {
+      if (curPara) { blocks.push(curPara); curPara = null; }
+      if (curQuote) { blocks.push(curQuote); curQuote = null; }
+      if (curUl) { blocks.push(curUl); curUl = null; }
+      if (curOl) { blocks.push(curOl); curOl = null; }
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      if (/^\s*$/.test(ln)) { flushAll(); continue; }
+      if (/^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})$/.test(ln)) {
+        flushAll();
+        blocks.push({ type: 'hr' });
+        continue;
+      }
+      var mh = /^\s{0,3}(#{1,3})\s+(.+?)\s*$/.exec(ln);
+      if (mh) {
+        flushAll();
+        blocks.push({ type: 'heading', level: mh[1].length, lines: [{ runs: parseMdInline(mh[2].replace(/\s+#+\s*$/, '')) }] });
+        continue;
+      }
+      var mq = /^\s{0,3}>\s?(.*)$/.exec(ln);
+      if (mq) {
+        if (curPara) { blocks.push(curPara); curPara = null; }
+        if (curUl) { blocks.push(curUl); curUl = null; }
+        if (curOl) { blocks.push(curOl); curOl = null; }
+        if (!curQuote) { curQuote = { type: 'quote', lines: [] }; }
+        curQuote.lines.push({ runs: parseMdInline(mq[1]) });
+        continue;
+      }
+      var mul = /^\s{0,3}[-*+]\s+(.*)$/.exec(ln);
+      if (mul) {
+        if (curPara) { blocks.push(curPara); curPara = null; }
+        if (curQuote) { blocks.push(curQuote); curQuote = null; }
+        if (curOl) { blocks.push(curOl); curOl = null; }
+        if (!curUl) { curUl = { type: 'ul', items: [] }; }
+        curUl.items.push({ runs: parseMdInline(mul[1]) });
+        continue;
+      }
+      var mol = /^\s{0,3}(\d+)\.\s+(.*)$/.exec(ln);
+      if (mol) {
+        if (curPara) { blocks.push(curPara); curPara = null; }
+        if (curQuote) { blocks.push(curQuote); curQuote = null; }
+        if (curUl) { blocks.push(curUl); curUl = null; }
+        if (!curOl) { curOl = { type: 'ol', start: Number(mol[1]) || 1, items: [] }; }
+        curOl.items.push({ num: mol[1], runs: parseMdInline(mol[2]) });
+        continue;
+      }
+      if (curQuote || curUl || curOl) { flushAll(); }
+      if (!curPara) { curPara = { type: 'para', lines: [] }; }
+      curPara.lines.push({ runs: parseMdInline(ln) });
+    }
+    flushAll();
+    return blocks;
+  }
+  function renderMdRunsHtml(runs) {
+    var h = '';
+    for (var i = 0; i < runs.length; i++) {
+      var r = runs[i];
+      if (r.code) {
+        h += '<code class="md-code">' + esc(r.text) + '</code>';
+        continue;
+      }
+      var s = esc(r.text);
+      if (r.hl) { s = '<mark class="md-hl">' + s + '</mark>'; }
+      if (r.strike) { s = '<del>' + s + '</del>'; }
+      if (r.italic) { s = '<em>' + s + '</em>'; }
+      if (r.bold) { s = '<strong>' + s + '</strong>'; }
+      h += s;
+    }
+    return h;
+  }
+  function renderMarkdownHTML(raw) {
+    var blocks = parseMarkdownBlocks(raw, true);
+    if (!blocks.length) { return ''; }
+    var h = '';
+    for (var i = 0; i < blocks.length; i++) {
+      var blk = blocks[i];
+      if (blk.type === 'hr') {
+        h += '<hr class="md-hr">';
+      } else if (blk.type === 'heading') {
+        var tag = blk.level === 1 ? 'h2' : (blk.level === 2 ? 'h3' : 'h4');
+        h += '<' + tag + '>' + renderMdRunsHtml(blk.lines[0].runs) + '</' + tag + '>';
+      } else if (blk.type === 'quote') {
+        h += '<blockquote class="md-q">' + blk.lines.map(function (ln) { return renderMdRunsHtml(ln.runs); }).join('<br>') + '</blockquote>';
+      } else if (blk.type === 'ul') {
+        h += '<ul class="md-ul">' + blk.items.map(function (it) { return '<li>' + renderMdRunsHtml(it.runs) + '</li>'; }).join('') + '</ul>';
+      } else if (blk.type === 'ol') {
+        var stAttr = blk.start && blk.start !== 1 ? (' start="' + blk.start + '"') : '';
+        h += '<ol class="md-ol"' + stAttr + '>' + blk.items.map(function (it) { return '<li>' + renderMdRunsHtml(it.runs) + '</li>'; }).join('') + '</ol>';
+      } else {
+        h += '<p>' + blk.lines.map(function (ln) { return renderMdRunsHtml(ln.runs); }).join('<br>') + '</p>';
+      }
+    }
+    return h;
+  }
+  function renderEntryBodyHTML(raw) {
+    if (S && S.opts && S.opts.mdEnabled === false) { return esc(raw || ''); }
+    return renderMarkdownHTML(raw || '');
+  }
+  function stripMarkdown(raw) {
+    var blocks = parseMarkdownBlocks(raw, true);
+    var lines = [];
+    blocks.forEach(function (blk) {
+      if (blk.type === 'hr') { return; }
+      if (blk.type === 'quote' || blk.type === 'para' || blk.type === 'heading') {
+        var txt = blk.lines.map(function (ln) {
+          return ln.runs.map(function (r) { return r.text; }).join('');
+        }).join('\n');
+        if (txt) { lines.push(txt); }
+      } else if (blk.type === 'ul' || blk.type === 'ol') {
+        blk.items.forEach(function (it) {
+          var txt = it.runs.map(function (r) { return r.text; }).join('');
+          if (txt) { lines.push(txt); }
+        });
+      }
+    });
+    return lines.join('\n').replace(/^\n+|\n+$/g, '');
+  }
+  function previewText(raw) {
+    return (S && S.opts && S.opts.mdEnabled !== false) ? stripMarkdown(raw || '') : String(raw || '');
+  }
+
   /* ── 数据 ── */
   function bookById(id) { for (var i = 0; i < S.books.length; i++) { if (S.books[i].id === id && !S.books[i].deletedAt) { return S.books[i]; } } return null; }
   function isBookVisible(b) { return !!(b && !b.deletedAt && (session.secretUnlocked || !b.hidden)); }
@@ -631,8 +957,9 @@
     var bk = bookByIdAny(bid);
     var asc = !!(bk && bk.sortDir === 'asc');
     return S.entries.filter(function (e) { return e.bid === bid && !e.deletedAt; }).sort(function (a, b) {
-      if (a.at === b.at) { return 0; }
-      return asc ? (a.at < b.at ? -1 : 1) : (a.at < b.at ? 1 : -1);
+      var ka = normAtSortKey(a.at), kb = normAtSortKey(b.at);
+      if (ka === kb) { return 0; }
+      return asc ? (ka < kb ? -1 : 1) : (ka < kb ? 1 : -1);
     });
   }
   function deletedEntries() { return S.entries.filter(function (e) { return e.deletedAt; }); }
@@ -846,7 +1173,11 @@
   /* ── 列表 ── */
   function recentEntryOf(bid) {
     return S.entries.filter(function (e) { return e.bid === bid && !e.deletedAt; })
-      .sort(function (a, b) { return a.at < b.at ? 1 : -1; })[0] || null;
+      .sort(function (a, b) {
+        var ka = normAtSortKey(a.at), kb = normAtSortKey(b.at);
+        if (ka === kb) { return 0; }
+        return ka < kb ? 1 : -1;
+      })[0] || null;
   }
   function renderShelf() {
     S.books.forEach(function (b) { if (b.archived == null) { b.archived = false; } });
@@ -875,7 +1206,7 @@
     var sort = S.opts.sort || 'recent';
     if (sort === 'name') { active = active.slice().sort(function (a, b) { return a.name.localeCompare(b.name, 'zh'); }); }
     else if (sort === 'count') { active = active.slice().sort(function (a, b) { return entriesOf(b.id).length - entriesOf(a.id).length; }); }
-    else { active = active.slice().sort(function (a, b) { var la = recentEntryOf(a.id), lb = recentEntryOf(b.id); return String(lb ? lb.at : '').localeCompare(String(la ? la.at : '')); }); }
+    else { active = active.slice().sort(function (a, b) { var la = recentEntryOf(a.id), lb = recentEntryOf(b.id); return normAtSortKey(lb ? lb.at : '').localeCompare(normAtSortKey(la ? la.at : '')); }); }
 
     var h = secretBar;
     if (style !== 'min') {
@@ -884,7 +1215,7 @@
         var hp = personaById(heroEntry.pid);
         h += '<button class="hero" data-hero="' + heroBook.id + '"><div class="k">继 续 写</div>'
           + '<div class="d">' + dayLabel(heroEntry.at.slice(0, 10)) + '<span>' + weekday(heroEntry.at.slice(0, 10)) + '</span></div>'
-          + '<div class="x">' + esc(heroEntry.x) + '</div>'
+          + '<div class="x">' + esc(previewText(heroEntry.x)) + '</div>'
           + '<div class="m">' + esc(heroBook.name) + ' · ' + entriesOf(heroBook.id).length + ' 条' + (hp.n ? ' · ' + esc(hp.n) : '') + '</div></button>';
       }
     }
@@ -899,7 +1230,7 @@
       h += '<button class="book" data-bid="' + b.id + '">'
         + '<span class="spine" style="background:linear-gradient(180deg,' + (b.spine || S.theme.accent.a1) + ',rgba(0,0,0,.18))"></span>'
         + '<span class="meta"><span class="name">' + esc(b.name) + (b.hidden ? ' <em class="book-lock">私密</em>' : '') + '</span>'
-        + '<span class="ex">' + (last ? esc(last.x) : '') + '</span>'
+        + '<span class="ex">' + (last ? esc(previewText(last.x)) : '') + '</span>'
         + '<span class="foot"><span>' + meta + '</span><span class="pds">' + pds + '</span></span></span></button>';
     });
     h += '</div>';
@@ -979,7 +1310,11 @@
   function aliveCommentsOf(e) {
     if (!e || !Array.isArray(e.comments)) { return []; }
     return e.comments.filter(function (c) { return c && !c.deletedAt; })
-      .sort(function (a, b) { return String(a.at || '') < String(b.at || '') ? -1 : 1; });
+      .sort(function (a, b) {
+        var ka = normAtSortKey(a.at), kb = normAtSortKey(b.at);
+        if (ka === kb) { return 0; }
+        return ka < kb ? -1 : 1;
+      });
   }
   function entryMediaHTML(e) {
     if (!e || !Array.isArray(e.media) || !e.media.length) { return ''; }
@@ -1002,7 +1337,7 @@
     var h = '<div class="entry-cmts">';
     cs.forEach(function (c) {
       var cp = personaById(c.pid);
-      var when = String(c.at || '').length >= 16 ? c.at.slice(5, 16) : (c.at || '');
+      var when = fmtShortMDHM(c.at);
       h += '<div class="cmt-item" data-eid="' + e.id + '" data-cid="' + c.id + '">'
         + '<div class="cmt-hd">' + (cp.n ? '<span class="dot" style="background:' + cp.c + '"></span><span>' + esc(cp.n) + '</span>' : '')
         + '<span>' + esc(when) + '</span></div>'
@@ -1010,6 +1345,38 @@
     });
     h += '<button type="button" class="cmt-add" data-addcmt="' + e.id + '">＋ 追记</button></div>';
     return h;
+  }
+  function pullMediaFromCloud(mid) {
+    if (!mid || !mediaSyncReady()) {
+      return Promise.resolve({ ok: false, reason: 'disabled' });
+    }
+    if (mediaPulling[mid]) { return mediaPulling[mid]; }
+    mediaPulling[mid] = AR.Sync.blobMediaPull(mid).then(function (pulled) {
+      if (pulled && pulled.dataUrl) {
+        return saveMediaLocal(mid, pulled).then(function () {
+          return { ok: true, rec: pulled };
+        });
+      }
+      return { ok: false, reason: 'empty' };
+    }, function (err) {
+      return { ok: false, reason: 'error', message: (err && err.message) || '' };
+    }).then(function (res) {
+      delete mediaPulling[mid];
+      var btns = document.querySelectorAll('#wBody .m-thumb[data-mid]');
+      Array.prototype.forEach.call(btns, function (b) {
+        if (b.getAttribute('data-mid') !== mid) { return; }
+        if (res.ok && res.rec && res.rec.dataUrl) {
+          b.innerHTML = '<img src="' + res.rec.dataUrl + '" alt="">';
+          return;
+        }
+        var ms = b.querySelector('.m-miss');
+        if (ms) {
+          ms.textContent = res.reason === 'error' ? '拉取失败，点击重试' : '云端暂无此图，点击重试';
+        }
+      });
+      return res;
+    });
+    return mediaPulling[mid];
   }
   function hydrateMediaDom(container) {
     if (!container) { return; }
@@ -1023,10 +1390,11 @@
           return;
         }
         var ms = btn.querySelector('.m-miss');
-        if (ms) {
-          ms.textContent = (syncReady() && AR.Sync.isWhisperMediaSyncEnabled && AR.Sync.isWhisperMediaSyncEnabled())
-            ? '点击拉取云端配图'
-            : '附图未在本机（已关闭图片同步）';
+        if (mediaSyncReady()) {
+          if (ms) { ms.textContent = '正在拉取云端配图…'; }
+          pullMediaFromCloud(mid);
+        } else if (ms) {
+          ms.textContent = '附图未在本机（已关闭图片同步）';
         }
       });
     });
@@ -1047,13 +1415,14 @@
   }
   function renderPaper(list) {
     var gs = groupByDay(list), h = '<div class="inner">';
+    var mdCls = !(S && S.opts && S.opts.mdEnabled === false) ? ' md-body' : '';
     if (!gs.length) { return '<div class="inner"><p style="color:var(--w-mid)">暂无</p></div>'; }
     gs.forEach(function (g) {
       h += '<div class="dayhead" data-day="' + g.d + '"><span class="d">' + dayLabel(g.d) + '</span><span class="w">' + weekday(g.d) + '</span></div>';
       g.items.forEach(function (e) {
         var p = personaById(e.pid);
-        h += '<div class="entry" data-eid="' + e.id + '"><div class="t">' + e.at.slice(11) + '</div>'
-          + '<div class="x">' + esc(e.x) + '</div>'
+        h += '<div class="entry" data-eid="' + e.id + '"><div class="t">' + fmtClockHM(e.at) + '</div>'
+          + '<div class="x' + mdCls + '">' + renderEntryBodyHTML(e.x) + '</div>'
           + entryMediaHTML(e)
           + (p.n ? '<div class="sig"><span class="dot" style="background:' + p.c + '"></span>' + esc(p.n) + '</div>' : '')
           + entryCommentsHTML(e)
@@ -1064,14 +1433,15 @@
   }
   function renderCards(list) {
     var gs = groupByDay(list), h = '';
+    var mdCls = !(S && S.opts && S.opts.mdEnabled === false) ? ' md-body' : '';
     if (!gs.length) { return '<p style="color:var(--w-mid);font-size:12px">暂无</p>'; }
     gs.forEach(function (g) {
       h += '<div class="dayhead" data-day="' + g.d + '"><span class="d">' + dayLabel(g.d) + '</span><span class="w">' + weekday(g.d) + '</span></div>';
       g.items.forEach(function (e) {
         var p = personaById(e.pid);
         h += '<div class="entry" data-eid="' + e.id + '"><div class="hd">' + (p.n ? '<span class="dot" style="background:' + p.c + '"></span>' + esc(p.n) : '')
-          + '<span style="margin-left:auto">' + e.at.slice(11) + '</span></div>'
-          + '<div class="x">' + esc(e.x) + '</div>'
+          + '<span style="margin-left:auto">' + fmtClockHM(e.at) + '</span></div>'
+          + '<div class="x' + mdCls + '">' + renderEntryBodyHTML(e.x) + '</div>'
           + entryMediaHTML(e)
           + entryCommentsHTML(e)
           + '</div>';
@@ -1226,11 +1596,14 @@
   })();
 
   /* ── 单条纯文本与排版卡片图片生成 ── */
-  function formatEntryPlainText(e, book) {
+  function formatEntryPlainText(e, book, withMeta) {
+    var bodyTxt = previewText(e.x || '');
+    var includeMeta = (withMeta === undefined) ? !!(S && S.opts && S.opts.copyWithMeta) : !!withMeta;
+    if (!includeMeta) { return bodyTxt; }
     var p = personaById(e.pid);
     var d = String(e.at || '').slice(0, 10);
-    var tm = String(e.at || '').slice(11);
-    var out = dayLabel(d) + ' ' + weekday(d) + (tm ? ' ' + tm : '') + (book ? ' · ' + book.name : '') + '\n\n' + (e.x || '');
+    var tm = fmtClockHM(e.at);
+    var out = dayLabel(d) + ' ' + weekday(d) + (tm ? ' ' + tm : '') + (book ? ' · ' + book.name : '') + '\n\n' + bodyTxt;
     if (e.media && e.media.length) {
       out += '\n\n[附 ' + e.media.length + ' 张图片]';
     }
@@ -1240,10 +1613,18 @@
       out += '\n\n追记：';
       cmts.forEach(function (c) {
         var cp = personaById(c.pid);
-        out += '\n· ' + (cp.n ? '[' + cp.n + '] ' : '') + String(c.at || '').slice(5, 16) + '：' + c.x;
+        out += '\n· ' + (cp.n ? '[' + cp.n + '] ' : '') + fmtShortMDHM(c.at) + '：' + c.x;
       });
     }
     return out;
+  }
+
+  function copyEntryPlain(e) {
+    if (!e) { return; }
+    var bk = bookById(e.bid) || bookByIdAny(e.bid);
+    var tx = formatEntryPlainText(e, bk);
+    if (window.AR && AR.Bridge && AR.Bridge.copy) { AR.Bridge.copy(tx); }
+    else { try { navigator.clipboard.writeText(tx); toast('已复制纯文本'); } catch (err) { toast('复制失败'); } }
   }
 
   function wrapCanvasLines(ctx, text, maxW) {
@@ -1277,7 +1658,146 @@
     });
   }
 
-  function buildEntryCardDataUrl(e, book) {
+  function hexLuminance(hex) {
+    var h = String(hex || '').trim().replace('#', '');
+    if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) { return 245; }
+    var r = parseInt(h.slice(0, 2), 16);
+    var g = parseInt(h.slice(2, 4), 16);
+    var b = parseInt(h.slice(4, 6), 16);
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+  }
+
+  function fillRoundRect(ctx, x, y, w, h, r) {
+    var rad = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.lineTo(x + w - rad, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
+    ctx.lineTo(x + w, y + h - rad);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rad, y + h);
+    ctx.lineTo(x + rad, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rad);
+    ctx.lineTo(x, y + rad);
+    ctx.quadraticCurveTo(x, y, x + rad, y);
+    ctx.closePath();
+  }
+
+  function canvasFontSpec(seg, fs, bodyFontFamily, forceBold) {
+    if (seg && seg.code) {
+      return '400 ' + Math.max(16, Math.round(fs * 0.88)) + 'px "Cascadia Mono",Consolas,"SF Mono",monospace';
+    }
+    var style = (seg && seg.italic) ? 'italic ' : '';
+    var weight = ((seg && seg.bold) || forceBold) ? '700 ' : '';
+    return style + weight + fs + 'px ' + bodyFontFamily;
+  }
+
+  function wrapRichRuns(ctx, runs, fs, bodyFontFamily, maxW, forceBold) {
+    var lines = [];
+    var curSegs = [], curW = 0;
+    var flushLine = function () {
+      lines.push({ segs: curSegs, w: curW });
+      curSegs = [];
+      curW = 0;
+    };
+    if (!runs || !runs.length) { flushLine(); return lines; }
+    for (var ri = 0; ri < runs.length; ri++) {
+      var run = runs[ri];
+      var txt = String(run.text || '');
+      if (!txt) { continue; }
+      ctx.font = canvasFontSpec(run, fs, bodyFontFamily, forceBold);
+      var pad = run.code ? 10 : 0;
+      var buf = '', bufW = 0;
+      for (var ci = 0; ci < txt.length; ci++) {
+        var code = txt.charCodeAt(ci);
+        var ch = txt[ci];
+        if (code >= 0xD800 && code <= 0xDBFF && ci + 1 < txt.length) {
+          ch += txt[ci + 1];
+          ci++;
+        }
+        var cw = ctx.measureText(ch).width;
+        var needW = curW + bufW + cw + (buf ? 0 : pad);
+        if (needW > maxW && (curSegs.length > 0 || buf.length > 0)) {
+          if (buf) {
+            curSegs.push({ text: buf, bold: run.bold, italic: run.italic, strike: run.strike, hl: run.hl, code: run.code, w: bufW + pad });
+            curW += bufW + pad;
+            buf = ''; bufW = 0;
+          }
+          flushLine();
+        }
+        buf += ch;
+        bufW += cw;
+      }
+      if (buf) {
+        curSegs.push({ text: buf, bold: run.bold, italic: run.italic, strike: run.strike, hl: run.hl, code: run.code, w: bufW + pad });
+        curW += bufW + pad;
+      }
+    }
+    flushLine();
+    return lines;
+  }
+
+  function layoutCardBody(ctx, rawText, useMd, innerW, bodyFontFamily) {
+    var blocks = parseMarkdownBlocks(rawText, useMd);
+    var rows = [], quoteSpans = [];
+    var yOff = 0;
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var blk = blocks[bi];
+      if (bi > 0) { yOff += (blk.type === 'heading' ? 14 : 10); }
+      if (blk.type === 'hr') {
+        rows.push({ kind: 'hr', yOff: yOff + 10 });
+        yOff += 26;
+      } else if (blk.type === 'heading') {
+        var fs = blk.level === 1 ? 38 : (blk.level === 2 ? 34 : 31);
+        var lh = Math.round(fs * 1.55);
+        var wLines = wrapRichRuns(ctx, blk.lines[0].runs, fs, bodyFontFamily, innerW, true);
+        for (var hi = 0; hi < wLines.length; hi++) {
+          rows.push({ kind: 'line', segs: wLines[hi].segs, xOff: 0, yOff: yOff, fs: fs, forceBold: true, isQuote: false });
+          yOff += lh;
+        }
+        yOff += 4;
+      } else if (blk.type === 'quote') {
+        var qTop = yOff - 22;
+        for (var qi = 0; qi < blk.lines.length; qi++) {
+          var qLines = wrapRichRuns(ctx, blk.lines[qi].runs, 30, bodyFontFamily, innerW - 26, false);
+          for (var qli = 0; qli < qLines.length; qli++) {
+            rows.push({ kind: 'line', segs: qLines[qli].segs, xOff: 26, yOff: yOff, fs: 30, forceBold: false, isQuote: true });
+            yOff += 48;
+          }
+        }
+        quoteSpans.push({ top: qTop, bot: yOff - 36 });
+      } else if (blk.type === 'ul' || blk.type === 'ol') {
+        for (var li = 0; li < blk.items.length; li++) {
+          var it = blk.items[li];
+          var marker = blk.type === 'ol' ? (String(it.num) + '.') : '•';
+          var mLines = wrapRichRuns(ctx, it.runs, 31, bodyFontFamily, innerW - 36, false);
+          for (var mli = 0; mli < mLines.length; mli++) {
+            rows.push({ kind: 'line', segs: mLines[mli].segs, xOff: 36, yOff: yOff, fs: 31, forceBold: false, isQuote: false, bullet: mli === 0 ? marker : '' });
+            yOff += 49;
+          }
+        }
+      } else {
+        for (var pi = 0; pi < blk.lines.length; pi++) {
+          var pLines = wrapRichRuns(ctx, blk.lines[pi].runs, 32, bodyFontFamily, innerW, false);
+          for (var pli = 0; pli < pLines.length; pli++) {
+            rows.push({ kind: 'line', segs: pLines[pli].segs, xOff: 0, yOff: yOff, fs: 32, forceBold: false, isQuote: false });
+            yOff += 52;
+          }
+        }
+      }
+    }
+    if (!blocks.length) { yOff = 52; }
+    return { rows: rows, quoteSpans: quoteSpans, totalH: yOff };
+  }
+
+  function buildEntryCardDataUrl(e, book, overrideOpts, metaOut) {
+    var opt = getCardOpts();
+    if (overrideOpts && typeof overrideOpts === 'object') {
+      var okK;
+      for (okK in overrideOpts) {
+        if (Object.prototype.hasOwnProperty.call(overrideOpts, okK) && overrideOpts[okK] !== undefined) { opt[okK] = overrideOpts[okK]; }
+      }
+    }
     var cs = stage ? getComputedStyle(stage) : null;
     var cBg = (cs && cs.getPropertyValue('--w-bg').trim()) || '#faf9f5';
     var cFg = (cs && cs.getPropertyValue('--w-fg').trim()) || '#141413';
@@ -1285,24 +1805,30 @@
     var cSub = (cs && cs.getPropertyValue('--w-subtle').trim()) || '#e8e6dc';
     var cA1 = (cs && cs.getPropertyValue('--w-a1').trim()) || '#d97757';
     var useSerif = (S.opts && S.opts.font === 'serif');
-    var bodyFontFamily = useSerif ? SERIF : '-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif';
+    var bodyFontFamily = useSerif ? SERIF : UI_FONT_STACK;
 
-    var W = 900, padX = 68, padTop = 70, padBot = 60, innerW = W - padX * 2;
+    var W = 900;
+    var outerPad = opt.frame ? 36 : 0;
+    var padX = opt.frame ? 56 : 68;
+    var padTop = opt.frame ? 64 : 70;
+    var padBot = opt.frame ? 54 : 60;
+    var contentLeft = outerPad + padX;
+    var innerW = W - contentLeft * 2;
     var tmp = document.createElement('canvas');
     var tctx = tmp.getContext('2d');
     if (!tctx) { return Promise.reject(new Error('当前环境不支持生成图片')); }
 
-    tctx.font = '32px ' + bodyFontFamily;
-    var bodyLines = wrapCanvasLines(tctx, e.x || '', innerW);
+    var useMd = !!(opt.renderMd && !(S.opts && S.opts.mdEnabled === false));
+    var bodyLayout = layoutCardBody(tctx, e.x || '', useMd, innerW, bodyFontFamily);
 
-    var cmts = aliveCommentsOf(e);
+    var cmts = opt.showComments ? aliveCommentsOf(e) : [];
     tctx.font = '24px ' + bodyFontFamily;
     var cmtBlocks = cmts.map(function (c) {
       var ls = wrapCanvasLines(tctx, c.x || '', innerW - 28);
       return { c: c, p: personaById(c.pid), lines: ls };
     });
 
-    var mediaList = Array.isArray(e.media) ? e.media.slice(0, 4) : [];
+    var mediaList = (opt.showMedia && Array.isArray(e.media)) ? e.media.slice(0, 4) : [];
     return Promise.all(mediaList.map(function (m) {
       return loadMediaLocal(m.id).then(function (rec) {
         return rec && rec.dataUrl ? loadHtmlImage(rec.dataUrl) : null;
@@ -1315,73 +1841,140 @@
         var im0 = validImgs[0];
         var drawW = innerW;
         var drawH = Math.min(540, Math.max(180, Math.round(drawW * (im0.height / Math.max(1, im0.width)))));
-        imgLayouts.push({ img: im0, x: padX, yOff: 0, w: drawW, h: drawH });
+        imgLayouts.push({ img: im0, x: contentLeft, yOff: 0, w: drawW, h: drawH });
         mediaH = drawH + 24;
       } else if (validImgs.length > 1) {
         var gap = 14, colW = Math.floor((innerW - gap) / 2), cellH = 220;
         validImgs.forEach(function (im, idx) {
           var col = idx % 2, row = Math.floor(idx / 2);
-          imgLayouts.push({ img: im, x: padX + col * (colW + gap), yOff: row * (cellH + gap), w: colW, h: cellH });
+          imgLayouts.push({ img: im, x: contentLeft + col * (colW + gap), yOff: row * (cellH + gap), w: colW, h: cellH });
         });
         var rows = Math.ceil(validImgs.length / 2);
         mediaH = rows * cellH + (rows - 1) * gap + 24;
       }
 
-      var p = personaById(e.pid);
-      var H = padTop + 56 + 34 + bodyLines.length * 52 + mediaH + (p.n ? 44 : 10);
+      var p = opt.showPersona ? personaById(e.pid) : { n: '', c: '' };
+      var hasHead = !!(opt.showDate || opt.showTime);
+      var headH = hasHead ? (56 + 12) : 20;
+      var cmtH = 0;
       if (cmtBlocks.length) {
-        H += 26;
-        cmtBlocks.forEach(function (b) { H += 34 + b.lines.length * 36 + 14; });
+        cmtH += 26;
+        cmtBlocks.forEach(function (b) { cmtH += 34 + b.lines.length * 36 + 14; });
       }
-      H += 56 + padBot;
+      var footerH = opt.showFooter ? 56 : 16;
+      var naturalCardH = padTop + headH + bodyLayout.totalH + mediaH + (p.n ? 46 : 6) + cmtH + footerH + padBot;
+      var naturalH = outerPad * 2 + naturalCardH;
+      var minH = opt.ratio === '3:4' ? 1200 : (opt.ratio === '1:1' ? 900 : 0);
+      var H = Math.max(naturalH, minH);
+      var vPad = (minH > naturalH) ? Math.round((minH - naturalH) / 2) : 0;
+      if (metaOut && typeof metaOut === 'object') {
+        metaOut.extended = (minH > 0 && naturalH > minH);
+      }
 
       var cv = document.createElement('canvas');
       cv.width = W; cv.height = H;
       var ctx = cv.getContext('2d');
-      ctx.fillStyle = cBg;
-      ctx.fillRect(0, 0, W, H);
+      if (opt.frame) {
+        var isDarkCard = hexLuminance(cBg) < 128;
+        ctx.fillStyle = isDarkCard ? '#0a0a09' : cSub;
+        ctx.fillRect(0, 0, W, H);
+        ctx.save();
+        ctx.shadowColor = isDarkCard ? 'rgba(0,0,0,0.45)' : 'rgba(20,20,19,0.14)';
+        ctx.shadowBlur = 28;
+        ctx.shadowOffsetY = 10;
+        fillRoundRect(ctx, outerPad, outerPad, W - outerPad * 2, H - outerPad * 2, 26);
+        ctx.fillStyle = cBg;
+        ctx.fill();
+        ctx.restore();
+        fillRoundRect(ctx, outerPad, outerPad, W - outerPad * 2, H - outerPad * 2, 26);
+        ctx.strokeStyle = isDarkCard ? 'rgba(255,255,255,0.10)' : 'rgba(20,20,19,0.08)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = cBg;
+        ctx.fillRect(0, 0, W, H);
+      }
 
-      var y = padTop;
-      var d = String(e.at || '').slice(0, 10);
-      var tm = String(e.at || '').slice(11);
-      ctx.fillStyle = cFg;
-      ctx.font = '600 40px ' + SERIF;
-      var dayTxt = dayLabel(d);
-      ctx.fillText(dayTxt, padX, y);
-      var dw = ctx.measureText(dayTxt).width;
-      ctx.fillStyle = cMid;
-      ctx.font = '22px ' + bodyFontFamily;
-      ctx.fillText(weekday(d) + (tm ? ' · ' + tm : ''), padX + dw + 16, y);
+      var y = outerPad + padTop + vPad;
+      if (hasHead) {
+        var d = String(e.at || '').slice(0, 10);
+        var tm = fmtClockHM(e.at);
+        var metaParts = [];
+        if (opt.showDate) { metaParts.push(weekday(d)); }
+        if (opt.showTime && tm) { metaParts.push(tm); }
+        var xCursor = contentLeft;
+        if (opt.showDate) {
+          ctx.fillStyle = cFg;
+          ctx.font = '600 40px ' + SERIF;
+          var dayTxt = dayLabel(d);
+          ctx.fillText(dayTxt, xCursor, y);
+          xCursor += ctx.measureText(dayTxt).width + 16;
+        }
+        if (metaParts.length) {
+          ctx.fillStyle = opt.showDate ? cMid : cFg;
+          ctx.font = (opt.showDate ? '22px ' : '600 28px ') + bodyFontFamily;
+          ctx.fillText(metaParts.join(' · '), xCursor, y);
+        }
+        y += 22;
+        ctx.fillStyle = cSub;
+        ctx.fillRect(contentLeft, y, innerW, 2);
+        y += 46;
+      } else {
+        y += 12;
+      }
 
-      y += 22;
-      ctx.fillStyle = cSub;
-      ctx.fillRect(padX, y, innerW, 2);
-      y += 46;
-
-      ctx.fillStyle = cFg;
-      ctx.font = '32px ' + bodyFontFamily;
-      bodyLines.forEach(function (ln) {
-        if (ln) { ctx.fillText(ln, padX, y); }
-        y += 52;
+      var bodyStartY = y;
+      ctx.fillStyle = cA1;
+      bodyLayout.quoteSpans.forEach(function (qs) {
+        ctx.fillRect(contentLeft + 6, bodyStartY + qs.top, 4, Math.max(20, qs.bot - qs.top));
       });
+      bodyLayout.rows.forEach(function (row) {
+        var ry = bodyStartY + row.yOff;
+        if (row.kind === 'hr') {
+          ctx.fillStyle = cSub;
+          ctx.fillRect(contentLeft, ry, innerW, 2);
+          return;
+        }
+        if (row.bullet) {
+          ctx.fillStyle = cMid;
+          ctx.font = row.fs + 'px ' + bodyFontFamily;
+          ctx.fillText(row.bullet, contentLeft + 4, ry);
+        }
+        var cx = contentLeft + row.xOff;
+        for (var si = 0; si < row.segs.length; si++) {
+          var seg = row.segs[si];
+          ctx.font = canvasFontSpec(seg, row.fs, bodyFontFamily, row.forceBold);
+          if (seg.hl) {
+            ctx.fillStyle = hexToRgba(cA1, 0.24);
+            fillRoundRect(ctx, cx - 2, ry - row.fs * 0.84, seg.w + 4, row.fs * 1.06, 6);
+            ctx.fill();
+          }
+          if (seg.code) {
+            ctx.fillStyle = cSub;
+            fillRoundRect(ctx, cx, ry - row.fs * 0.82, seg.w, row.fs * 1.02, 6);
+            ctx.fill();
+          }
+          ctx.fillStyle = row.isQuote ? cMid : cFg;
+          ctx.fillText(seg.text, seg.code ? (cx + 5) : cx, ry);
+          if (seg.strike) {
+            ctx.strokeStyle = row.isQuote ? cMid : cFg;
+            ctx.lineWidth = 2.2;
+            ctx.beginPath();
+            ctx.moveTo(cx, ry - row.fs * 0.30);
+            ctx.lineTo(cx + seg.w, ry - row.fs * 0.30);
+            ctx.stroke();
+          }
+          cx += seg.w;
+        }
+      });
+      y += bodyLayout.totalH;
 
       if (imgLayouts.length) {
         y += 8;
         imgLayouts.forEach(function (it) {
           var iy = y + it.yOff;
           ctx.save();
-          ctx.beginPath();
-          var r = 14;
-          ctx.moveTo(it.x + r, iy);
-          ctx.lineTo(it.x + it.w - r, iy);
-          ctx.quadraticCurveTo(it.x + it.w, iy, it.x + it.w, iy + r);
-          ctx.lineTo(it.x + it.w, iy + it.h - r);
-          ctx.quadraticCurveTo(it.x + it.w, iy + it.h, it.x + it.w - r, iy + it.h);
-          ctx.lineTo(it.x + r, iy + it.h);
-          ctx.quadraticCurveTo(it.x, iy + it.h, it.x, iy + it.h - r);
-          ctx.lineTo(it.x, iy + r);
-          ctx.quadraticCurveTo(it.x, iy, it.x + r, iy);
-          ctx.closePath();
+          fillRoundRect(ctx, it.x, iy, it.w, it.h, 14);
           ctx.clip();
           var sr = Math.max(it.w / Math.max(1, it.img.width), it.h / Math.max(1, it.img.height));
           var dw2 = it.img.width * sr, dh2 = it.img.height * sr;
@@ -1395,11 +1988,11 @@
         y += 8;
         ctx.fillStyle = p.c || cA1;
         ctx.beginPath();
-        ctx.arc(padX + 7, y - 8, 7, 0, Math.PI * 2);
+        ctx.arc(contentLeft + 7, y - 8, 7, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = cMid;
         ctx.font = '24px ' + bodyFontFamily;
-        ctx.fillText(p.n, padX + 24, y);
+        ctx.fillText(p.n, contentLeft + 24, y);
         y += 38;
       }
 
@@ -1409,27 +2002,29 @@
         cmtBlocks.forEach(function (blk) {
           ctx.fillStyle = (blk.p && blk.p.c) || cMid;
           ctx.font = '20px ' + bodyFontFamily;
-          var headTxt = (blk.p && blk.p.n ? blk.p.n + ' · ' : '') + String(blk.c.at || '').slice(5, 16);
-          ctx.fillText(headTxt, padX + 24, y);
+          var headTxt = (blk.p && blk.p.n ? blk.p.n + ' · ' : '') + fmtShortMDHM(blk.c.at);
+          ctx.fillText(headTxt, contentLeft + 24, y);
           y += 32;
           ctx.fillStyle = cFg;
           ctx.font = '24px ' + bodyFontFamily;
           blk.lines.forEach(function (ln) {
-            if (ln) { ctx.fillText(ln, padX + 24, y); }
+            if (ln) { ctx.fillText(ln, contentLeft + 24, y); }
             y += 36;
           });
           y += 14;
         });
         ctx.fillStyle = cSub;
-        ctx.fillRect(padX + 4, cStart, 4, Math.max(20, y - cStart - 16));
+        ctx.fillRect(contentLeft + 4, cStart, 4, Math.max(20, y - cStart - 16));
       }
 
-      y = H - padBot;
-      ctx.fillStyle = cSub;
-      ctx.fillRect(padX, y - 36, innerW, 1);
-      ctx.fillStyle = cMid;
-      ctx.font = '20px ' + SERIF;
-      ctx.fillText('Whisper' + (book ? '  ·  ' + book.name : ''), padX, y);
+      if (opt.showFooter) {
+        y = H - outerPad - padBot;
+        ctx.fillStyle = cSub;
+        ctx.fillRect(contentLeft, y - 36, innerW, 1);
+        ctx.fillStyle = cMid;
+        ctx.font = '20px ' + SERIF;
+        ctx.fillText('Whisper' + (book ? '  ·  ' + book.name : ''), contentLeft, y);
+      }
 
       return cv.toDataURL('image/png');
     });
@@ -1437,9 +2032,83 @@
 
   function openEntryImageSheet(e) {
     var bk = bookById(e.bid) || bookByIdAny(e.bid);
-    openSheet('<h3>导出日记卡片图片</h3><div class="card-preview-wrap" id="cardPrevBox"><p class="muted" style="font-size:12px">正在排版生成…</p></div><div class="btns"><button id="ciClose">关闭</button><button id="ciSave">保存图片</button><button class="primary" id="ciShare">分享图片</button></div>', function () {
+    openSheet('<h3>导出日记卡片图片</h3>'
+      + '<div class="card-preview-wrap" id="cardPrevBox"><p class="muted" style="font-size:12px">正在排版生成…</p></div>'
+      + '<div class="card-opt-note" id="cardExtNote" hidden>内容较长，卡片已按正文自动顺延高度</div>'
+      + '<button type="button" class="card-opt-toggle" id="ciOptToggle"><span>自定义样式与显示项</span><span id="ciOptArrow">▾</span></button>'
+      + '<div class="card-opt-panel" id="ciOptPanel" hidden></div>'
+      + '<div class="btns"><button id="ciClose">关闭</button><button id="ciSave">保存图片</button><button class="primary" id="ciShare">分享图片</button></div>', function () {
       var generated = '';
+      var renderSeq = 0;
       var fname = 'whisper-' + safe((e.at || '').slice(0, 10) || 'card') + '.png';
+      var renderPreview = function () {
+        var mySeq = ++renderSeq;
+        var metaOut = { extended: false };
+        buildEntryCardDataUrl(e, bk, null, metaOut).then(function (dataUrl) {
+          if (mySeq !== renderSeq) { return; }
+          generated = dataUrl;
+          var box = $('cardPrevBox');
+          if (box) { box.innerHTML = '<img src="' + dataUrl + '" alt="">'; }
+          var noteEl = $('cardExtNote');
+          if (noteEl) { noteEl.hidden = !metaOut.extended; }
+        }, function (err) {
+          if (mySeq !== renderSeq) { return; }
+          var box = $('cardPrevBox');
+          if (box) { box.textContent = (err && err.message) || '生成图片失败'; }
+        });
+      };
+      var paintOptsPanel = function () {
+        var panel = $('ciOptPanel');
+        if (!panel) { return; }
+        var opt = getCardOpts();
+        var toggles = [
+          ['showDate', '日期星期'],
+          ['showTime', '具体时间'],
+          ['showFooter', '底部标识'],
+          ['showPersona', 'Persona 署名'],
+          ['showComments', '追记评论'],
+          ['showMedia', '附带配图']
+        ];
+        var ratios = [['auto', '自适应长图'], ['3:4', '3:4 竖卡'], ['1:1', '1:1 方卡']];
+        panel.innerHTML = '<div class="card-opt-grp">显示内容</div><div class="pick">'
+          + toggles.map(function (t) {
+            return '<button type="button" data-copt="' + t[0] + '"' + (opt[t[0]] ? ' class="on"' : '') + '>' + t[1] + '</button>';
+          }).join('')
+          + '</div><div class="card-opt-grp">比例与外观</div><div class="pick">'
+          + ratios.map(function (r) {
+            return '<button type="button" data-crat="' + r[0] + '"' + (opt.ratio === r[0] ? ' class="on"' : '') + '>' + r[1] + '</button>';
+          }).join('')
+          + '<button type="button" data-copt="frame"' + (opt.frame ? ' class="on"' : '') + '>外框阴影</button>'
+          + '<button type="button" data-copt="renderMd"' + (opt.renderMd ? ' class="on"' : '') + '>Markdown 排版</button>'
+          + '</div>';
+        Array.prototype.forEach.call(panel.querySelectorAll('[data-copt]'), function (btn) {
+          btn.onclick = function () {
+            var k = btn.getAttribute('data-copt');
+            S.opts.card = getCardOpts();
+            S.opts.card[k] = !S.opts.card[k];
+            save();
+            paintOptsPanel();
+            renderPreview();
+          };
+        });
+        Array.prototype.forEach.call(panel.querySelectorAll('[data-crat]'), function (btn) {
+          btn.onclick = function () {
+            S.opts.card = getCardOpts();
+            S.opts.card.ratio = btn.getAttribute('data-crat');
+            save();
+            paintOptsPanel();
+            renderPreview();
+          };
+        });
+      };
+      $('ciOptToggle').onclick = function () {
+        var panel = $('ciOptPanel');
+        var arw = $('ciOptArrow');
+        if (!panel) { return; }
+        panel.hidden = !panel.hidden;
+        if (arw) { arw.textContent = panel.hidden ? '▾' : '▴'; }
+      };
+      paintOptsPanel();
       $('ciClose').onclick = closeSheet;
       $('ciSave').onclick = function () {
         if (!generated) { return; }
@@ -1449,14 +2118,7 @@
         if (!generated) { return; }
         if (window.AR && AR.Bridge && AR.Bridge.shareImage) { AR.Bridge.shareImage(fname, generated, 'Whisper 日记卡片'); }
       };
-      buildEntryCardDataUrl(e, bk).then(function (dataUrl) {
-        generated = dataUrl;
-        var box = $('cardPrevBox');
-        if (box) { box.innerHTML = '<img src="' + dataUrl + '" alt="">'; }
-      }, function (err) {
-        var box = $('cardPrevBox');
-        if (box) { box.textContent = (err && err.message) || '生成图片失败'; }
-      });
+      renderPreview();
     });
   }
 
@@ -1494,8 +2156,7 @@
         if (editCmt) {
           editCmt.x = v; editCmt.pid = pid; stampNow(editCmt);
         } else {
-          var d = new Date();
-          var c = { id: uid('c'), pid: pid, at: dkey(0) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), x: v };
+          var c = { id: uid('c'), pid: pid, at: nowAtSec(), x: v };
           stampNow(c);
           e.comments.push(c);
         }
@@ -1509,7 +2170,7 @@
   function commentActionSheet(e, c) {
     var cp = personaById(c.pid);
     var h = '<div class="acthead"><span class="dot" style="background:' + (cp.c || 'var(--w-a1)') + ';width:7px;height:7px;border-radius:50%;display:block"></span>'
-      + '<div class="m"><div class="l">评论 · ' + esc(c.at) + (cp.n ? ' · ' + esc(cp.n) : '') + '</div>'
+      + '<div class="m"><div class="l">评论 · ' + esc(fmtDateHM(c.at)) + (cp.n ? ' · ' + esc(cp.n) : '') + '</div>'
       + '<div class="x">' + esc(c.x) + '</div></div></div>'
       + '<button class="row" data-ca="edit">编辑评论<span class="r">›</span></button>'
       + '<button class="row danger" data-ca="del">删除评论<span class="r">可撤销</span></button>';
@@ -1591,8 +2252,8 @@
     var imgN = Array.isArray(e.media) ? e.media.length : 0;
     var extraMeta = (imgN ? ' · ' + imgN + ' 图' : '') + (cmtN ? ' · ' + cmtN + ' 评论' : '');
     var h = '<div class="acthead"><span class="dot" style="background:' + p.c + ';width:7px;height:7px;border-radius:50%;display:block"></span>'
-      + '<div class="m"><div class="l">' + esc(e.at.slice(0, 10)) + ' ' + e.at.slice(11) + (p.n ? ' · ' + esc(p.n) : '') + extraMeta + '</div>'
-      + '<div class="x">' + esc(e.x) + '</div></div></div>'
+      + '<div class="m"><div class="l">' + esc(e.at.slice(0, 10)) + ' ' + fmtClockHM(e.at) + (p.n ? ' · ' + esc(p.n) : '') + extraMeta + '</div>'
+      + '<div class="x">' + esc(previewText(e.x)) + '</div></div></div>'
       + '<div class="ea-grid">'
       + '<button type="button" data-ea="edit"><i>' + svgIco('edit') + '</i><span>编辑</span></button>'
       + '<button type="button" data-ea="comment"><i>' + svgIco('comment') + '</i><span>评论</span></button>'
@@ -1601,7 +2262,7 @@
       + '</div>'
       + '<button class="row" data-ea="persona"><span class="ico">' + svgIco('persona') + '</span>换 Persona<span class="r">' + esc(p.n || '无') + ' ›</span></button>'
       + '<button class="row" data-ea="move"><span class="ico">' + svgIco('move') + '</span>移到其他日记本<span class="r">' + esc(bk ? bk.name : '') + ' ›</span></button>'
-      + '<button class="row" data-ea="retime"><span class="ico">' + svgIco('clock') + '</span>修改记录时间<span class="r">' + esc(e.at) + ' ›</span></button>'
+      + '<button class="row" data-ea="retime"><span class="ico">' + svgIco('clock') + '</span>修改记录时间<span class="r">' + esc(fmtDateHM(e.at)) + ' ›</span></button>'
       + '<button class="row" data-ea="exportTxt"><span class="ico">' + svgIco('export') + '</span>导出单条纯文本 (.txt)<span class="r">›</span></button>'
       + '<button class="row danger" data-ea="delete"><span class="ico">' + svgIco('trash') + '</span>删除<span class="r">可撤销</span></button>';
     openSheet(h, function () {
@@ -1635,16 +2296,16 @@
                 var nd = ($('rtDate').value || '').trim();
                 var nt = ($('rtTime').value || '').trim().slice(0, 5);
                 if (!nd || !nt) { toast('请填写日期与时间'); return; }
-                e.at = nd + ' ' + nt; stampNow(e); save(); closeSheet(); renderWhisper(); toast('已修改时间');
+                var oldSec = String(e.at || '').slice(17, 19);
+                e.at = nd + ' ' + nt + ':' + (/^\d{2}$/.test(oldSec) ? oldSec : '00');
+                stampNow(e); save(); closeSheet(); renderWhisper(); toast('已修改时间');
               };
             });
           } else if (k === 'copy') {
-            var tx = formatEntryPlainText(e, bk);
-            if (window.AR && AR.Bridge && AR.Bridge.copy) { AR.Bridge.copy(tx); }
-            else { try { navigator.clipboard.writeText(tx); toast('已复制纯文本'); } catch (err) { toast('复制失败'); } }
+            copyEntryPlain(e);
             closeSheet();
           } else if (k === 'exportTxt') {
-            var txt2 = formatEntryPlainText(e, bk);
+            var txt2 = formatEntryPlainText(e, bk, true);
             nativeExport('whisper-' + safe(String(e.at || 'entry').slice(0, 10)) + '.txt', txt2, 'text/plain');
             closeSheet();
           } else if (k === 'delete') {
@@ -1710,9 +2371,136 @@
     }
   }
 
+  function mdWrapSelection(ta, before, after, placeholder) {
+    if (!ta) { return; }
+    var v = String(ta.value || '');
+    var s = typeof ta.selectionStart === 'number' ? ta.selectionStart : v.length;
+    var e = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : v.length;
+    var sel = v.slice(s, e);
+    var mid = sel || placeholder || '';
+    ta.value = v.slice(0, s) + before + mid + after + v.slice(e);
+    ta.focus();
+    try {
+      if (sel) {
+        ta.setSelectionRange(s + before.length, s + before.length + sel.length);
+      } else {
+        var pos = s + before.length;
+        ta.setSelectionRange(pos, pos + mid.length);
+      }
+    } catch (err) { }
+  }
+  function mdToggleLinePrefix(ta, prefix) {
+    if (!ta) { return; }
+    var v = String(ta.value || '');
+    var s = typeof ta.selectionStart === 'number' ? ta.selectionStart : v.length;
+    var e = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : v.length;
+    var lineStart = v.lastIndexOf('\n', Math.max(0, s - 1)) + 1;
+    var nextNl = v.indexOf('\n', e);
+    var lineEnd = nextNl < 0 ? v.length : nextNl;
+    var block = v.slice(lineStart, lineEnd);
+    var lines = block.split('\n');
+    var allHave = lines.every(function (ln) { return ln.indexOf(prefix) === 0; });
+    var updated = lines.map(function (ln) {
+      return allHave ? ln.slice(prefix.length) : (prefix + ln);
+    }).join('\n');
+    ta.value = v.slice(0, lineStart) + updated + v.slice(lineEnd);
+    ta.focus();
+    try { ta.setSelectionRange(lineStart, lineStart + updated.length); } catch (err) { }
+  }
+  function mountMdBar(barEl, prevEl, taEl) {
+    if (!barEl || !taEl) { return; }
+    var mdOn = !(S && S.opts && S.opts.mdEnabled === false);
+    var barOn = !(S && S.opts && S.opts.mdToolbar === false);
+    if (prevEl) { prevEl.hidden = true; prevEl.innerHTML = ''; }
+    taEl.hidden = false;
+    if (!mdOn || !barOn) {
+      barEl.hidden = true;
+      barEl.innerHTML = '';
+      return;
+    }
+    barEl.hidden = false;
+    var tools = [
+      { k: 'b', label: 'B', title: '加粗', wrap: ['**', '**', '加粗文字'] },
+      { k: 'i', label: 'I', title: '斜体', wrap: ['*', '*', '斜体'] },
+      { k: 's', label: 'S', title: '删除线', wrap: ['~~', '~~', '删除'] },
+      { k: 'hl', label: '==', title: '高亮', wrap: ['==', '==', '高亮'] },
+      { k: 'code', label: '<>', title: '行内代码', wrap: ['`', '`', 'code'] },
+      { k: 'h', label: 'H', title: '标题', prefix: '## ' },
+      { k: 'q', label: '>', title: '引用', prefix: '> ' },
+      { k: 'ul', label: '•', title: '列表', prefix: '- ' },
+      { k: 'ol', label: '1.', title: '有序列表', prefix: '1. ' },
+      { k: 'hr', label: '—', title: '分割线', hr: true }
+    ];
+    barEl.innerHTML = tools.map(function (t) {
+      return '<button type="button" data-mdk="' + t.k + '" title="' + esc(t.title) + '">' + esc(t.label) + '</button>';
+    }).join('') + '<button type="button" class="md-prev-btn" data-mdk="preview">预览</button>';
+
+    var prevBtn = barEl.querySelector('[data-mdk="preview"]');
+    var exitPrev = function () {
+      if (prevEl && !prevEl.hidden) {
+        prevEl.hidden = true;
+        taEl.hidden = false;
+        if (prevBtn) { prevBtn.classList.remove('on'); prevBtn.textContent = '预览'; }
+      }
+    };
+    Array.prototype.forEach.call(barEl.querySelectorAll('button'), function (btn) {
+      btn.addEventListener('mousedown', function (ev) { ev.preventDefault(); });
+      btn.onclick = function () {
+        var k = btn.getAttribute('data-mdk');
+        if (k === 'preview') {
+          if (!prevEl) { return; }
+          if (prevEl.hidden) {
+            var html = renderMarkdownHTML(taEl.value || '');
+            prevEl.innerHTML = html || '<p style="color:var(--w-mid)">暂无内容</p>';
+            taEl.hidden = true;
+            prevEl.hidden = false;
+            btn.classList.add('on');
+            btn.textContent = '编辑';
+          } else {
+            exitPrev();
+            taEl.focus();
+          }
+          return;
+        }
+        exitPrev();
+        if (k === 'hr') {
+          var v = String(taEl.value || '');
+          var s = typeof taEl.selectionStart === 'number' ? taEl.selectionStart : v.length;
+          var e = typeof taEl.selectionEnd === 'number' ? taEl.selectionEnd : v.length;
+          var pre = (s > 0 && v.charAt(s - 1) !== '\n') ? '\n' : '';
+          var post = (e < v.length && v.charAt(e) !== '\n') ? '\n' : '';
+          var ins = pre + '---\n' + post;
+          taEl.value = v.slice(0, s) + ins + v.slice(e);
+          taEl.focus();
+          try { taEl.setSelectionRange(s + ins.length, s + ins.length); } catch (err) { }
+          return;
+        }
+        for (var ti = 0; ti < tools.length; ti++) {
+          if (tools[ti].k === k) {
+            if (tools[ti].wrap) { mdWrapSelection(taEl, tools[ti].wrap[0], tools[ti].wrap[1], tools[ti].wrap[2]); }
+            else if (tools[ti].prefix) { mdToggleLinePrefix(taEl, tools[ti].prefix); }
+            break;
+          }
+        }
+      };
+    });
+  }
+
+  function runEntryDoubleTap(ent) {
+    if (!ent) { return; }
+    var act = (S && S.opts && S.opts.dblTapAction) || 'edit';
+    if (act === 'off') { return; }
+    if (act === 'comment') { openCommentSheet(ent); return; }
+    if (act === 'copy') { copyEntryPlain(ent); return; }
+    if (act === 'menu') { entryActionSheet(ent); return; }
+    editEntry(ent);
+  }
+
   function editEntry(e) {
     var edMedia = Array.isArray(e.media) ? e.media.slice() : [];
     var h = '<h3>编辑</h3><textarea id="edText">' + esc(e.x) + '</textarea>'
+      + '<div class="md-preview md-body" id="edMdPrev" hidden></div>'
+      + '<div class="md-bar" id="edMdBar"></div>'
       + '<div class="media-bar"><button class="media-pick" type="button" id="edImgBtn">' + svgIco('image') + '<span>添加图片</span></button><input type="file" id="edImgIn" accept="image/*" multiple style="display:none"></div>'
       + '<div class="media-draft" id="edMediaList"></div>'
       + '<div class="btns"><button id="edCancel">取消</button><button class="primary" id="edSave">保存</button></div>';
@@ -1724,6 +2512,7 @@
           paintEdMedia();
         });
       }
+      mountMdBar($('edMdBar'), $('edMdPrev'), $('edText'));
       paintEdMedia();
       bindMediaPicker($('edImgBtn'), $('edImgIn'), $('edText'), edMedia, paintEdMedia);
       $('edCancel').onclick = closeSheet;
@@ -1748,13 +2537,14 @@
   }
   (function () {
     var body = $('wBody'), timer = null, lp = null, sx = 0, sy = 0, lpFired = false, lastEditAt = 0;
+    var downTap = { id: '', x: 0, y: 0, moved: false, type: '' };
     var lastTap = { t: 0, x: 0, y: 0, id: '' };
-    function openEditOnce(ent) {
+    function triggerDblOnce(ent) {
       if (!ent) { return; }
       var now = Date.now();
       if (now - lastEditAt < 350) { return; }
       lastEditAt = now;
-      editEntry(ent);
+      runEntryDoubleTap(ent);
     }
     body.addEventListener('click', function (e) {
       var thumb = e.target.closest('.m-thumb[data-mid]');
@@ -1767,14 +2557,15 @@
         if (!ent || !Array.isArray(ent.media)) { return; }
         loadMediaLocal(mid).then(function (rec) {
           if (rec && rec.dataUrl) { showLightbox(ent.media, idx); return; }
-          if (syncReady() && AR.Sync.blobMediaPull && AR.Sync.isWhisperMediaSyncEnabled && AR.Sync.isWhisperMediaSyncEnabled()) {
-            toast('正在拉取原压缩配图…');
-            AR.Sync.blobMediaPull(mid).then(function (pulled) {
-              if (pulled && pulled.dataUrl) {
-                return saveMediaLocal(mid, pulled).then(function () { renderWhisper(); showLightbox(ent.media, idx); });
-              }
-              toast('云端暂无此图片');
-            }, function () { toast('拉取图片失败'); });
+          if (mediaSyncReady()) {
+            var ms = thumb.querySelector('.m-miss');
+            if (ms) { ms.textContent = '正在拉取云端配图…'; }
+            toast('正在拉取云端配图…');
+            pullMediaFromCloud(mid).then(function (res) {
+              if (res && res.ok) { showLightbox(ent.media, idx); }
+              else if (res && res.reason === 'error') { toast('拉取图片失败：' + (res.message || '网络异常')); }
+              else { toast('云端暂无此图片'); }
+            });
           } else {
             toast('本机无此图，且当前未开启图片同步');
           }
@@ -1797,36 +2588,47 @@
       }
     });
     body.addEventListener('pointerdown', function (e) {
-      if (e.target.closest('.m-thumb, .cmt-item, .cmt-add')) { return; }
+      if (e.target.closest('.m-thumb, .cmt-item, .cmt-add')) { downTap.id = ''; return; }
       var row = e.target.closest('.entry');
-      if (!row) { return; }
+      if (!row) { downTap.id = ''; return; }
       sx = e.clientX; sy = e.clientY;
       lpFired = false;
       lp = row.getAttribute('data-eid');
-      if (e.pointerType !== 'mouse') {
-        var now = Date.now();
-        if (lastTap.id === lp && now - lastTap.t < 360 && Math.abs(e.clientX - lastTap.x) < 16 && Math.abs(e.clientY - lastTap.y) < 16) {
-          lastTap = { t: 0, x: 0, y: 0, id: '' };
-          var ent2 = S.entries.filter(function (x) { return x.id === lp; })[0];
-          openEditOnce(ent2);
-          return;
-        }
-        lastTap = { t: now, x: e.clientX, y: e.clientY, id: lp };
-      }
+      downTap = { id: lp, x: e.clientX, y: e.clientY, moved: false, type: e.pointerType || '' };
       timer = setTimeout(function () {
-        timer = null; lpFired = true;
+        timer = null; lpFired = true; downTap.id = '';
         var ent = S.entries.filter(function (x) { return x.id === lp; })[0];
         if (ent) { entryActionSheet(ent); }
       }, 520);
     });
     body.addEventListener('pointermove', function (e) {
-      if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) { clearTimeout(timer); timer = null; }
+      if (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8) {
+        downTap.moved = true;
+        if (timer) { clearTimeout(timer); timer = null; }
+      }
     });
-    body.addEventListener('pointerup', function () {
+    body.addEventListener('pointerup', function (e) {
       if (timer) { clearTimeout(timer); timer = null; }
-      if (lpFired) { lpFired = false; }
+      if (lpFired) { lpFired = false; downTap.id = ''; return; }
+      if (e.pointerType !== 'mouse' && downTap.id && !downTap.moved) {
+        var now = Date.now();
+        var curId = downTap.id;
+        downTap.id = '';
+        if (lastTap.id === curId && (now - lastTap.t) < 380 && Math.abs(e.clientX - lastTap.x) < 28 && Math.abs(e.clientY - lastTap.y) < 28) {
+          lastTap = { t: 0, x: 0, y: 0, id: '' };
+          var ent2 = S.entries.filter(function (x) { return x.id === curId; })[0];
+          if (ent2) { setTimeout(function () { triggerDblOnce(ent2); }, 0); }
+          return;
+        }
+        lastTap = { t: now, x: e.clientX, y: e.clientY, id: curId };
+        return;
+      }
+      downTap.id = '';
     });
-    body.addEventListener('pointercancel', function () { if (timer) { clearTimeout(timer); timer = null; } });
+    body.addEventListener('pointercancel', function () {
+      if (timer) { clearTimeout(timer); timer = null; }
+      downTap.id = '';
+    });
     body.addEventListener('dblclick', function (e) {
       if (e.target.closest('.m-thumb, .cmt-item, .cmt-add')) { return; }
       var row = e.target.closest('.entry');
@@ -1835,7 +2637,48 @@
       e.stopPropagation();
       try { var sel = window.getSelection(); if (sel) { sel.removeAllRanges(); } } catch (err) { }
       var ent = S.entries.filter(function (x) { return x.id === row.getAttribute('data-eid'); })[0];
-      openEditOnce(ent);
+      triggerDblOnce(ent);
+    });
+  })();
+
+  /* ── 阅读页顶栏双击返回顶部 ── */
+  (function () {
+    var bar = document.querySelector('#s-whisper .topbar');
+    if (!bar) { return; }
+    var lastTopTap = { t: 0, x: 0, y: 0 }, downTop = { ok: false, x: 0, y: 0, moved: false }, lastScrollAt = 0;
+    var goTop = function () {
+      var now = Date.now();
+      if (now - lastScrollAt < 350) { return; }
+      lastScrollAt = now;
+      var wb = $('wBody');
+      if (!wb) { return; }
+      try { wb.scrollTo({ top: 0, behavior: 'smooth' }); }
+      catch (e0) { wb.scrollTop = 0; }
+    };
+    bar.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('button')) { downTop.ok = false; return; }
+      downTop = { ok: e.pointerType !== 'mouse', x: e.clientX, y: e.clientY, moved: false };
+    });
+    bar.addEventListener('pointermove', function (e) {
+      if (downTop.ok && (Math.abs(e.clientX - downTop.x) > 10 || Math.abs(e.clientY - downTop.y) > 10)) { downTop.moved = true; }
+    });
+    bar.addEventListener('pointerup', function (e) {
+      if (!downTop.ok || downTop.moved || e.target.closest('button')) { downTop.ok = false; return; }
+      downTop.ok = false;
+      var now = Date.now();
+      if (now - lastTopTap.t < 380 && Math.abs(e.clientX - lastTopTap.x) < 28 && Math.abs(e.clientY - lastTopTap.y) < 28) {
+        lastTopTap = { t: 0, x: 0, y: 0 };
+        setTimeout(goTop, 0);
+        return;
+      }
+      lastTopTap = { t: now, x: e.clientX, y: e.clientY };
+    });
+    bar.addEventListener('pointercancel', function () { downTop.ok = false; });
+    bar.addEventListener('dblclick', function (e) {
+      if (e.target.closest('button')) { return; }
+      e.preventDefault();
+      try { var sel = window.getSelection(); if (sel) { sel.removeAllRanges(); } } catch (err) { }
+      goTop();
     });
   })();
 
@@ -1862,13 +2705,15 @@
     var body = $('srBody');
     if (!q) { body.innerHTML = '<p style="font-size:11.5px;color:var(--w-mid)">搜索</p>'; return; }
     var rows = allEntriesFor(search.scope).filter(function (x) {
-      return (x.b.name + ' ' + x.e.x).toLowerCase().indexOf(q) >= 0;
+      var rawS = String(x.e.x || '');
+      var cleanS = previewText(rawS);
+      return (x.b.name + ' ' + rawS + ' ' + cleanS).toLowerCase().indexOf(q) >= 0;
     });
     if (!rows.length) { body.innerHTML = '<p style="font-size:11.5px;color:var(--w-mid)">没找到「' + esc(search.q) + '」。</p>'; return; }
     var h = '', lastB = '';
     rows.slice(0, 60).forEach(function (x) {
       if (x.b.id !== lastB) { lastB = x.b.id; h += '<div class="bg">' + esc(x.b.name) + '</div>'; }
-      var text = x.e.x;
+      var text = previewText(x.e.x);
       var idx = text.toLowerCase().indexOf(q);
       var start = idx >= 0 ? Math.max(0, idx - 16) : 0;
       var pre = text.slice(start, start + 70);
@@ -1880,7 +2725,7 @@
         hl = esc(pre.slice(0, rel)) + '<mark>' + esc(pre.slice(rel, rel + q.length)) + '</mark>' + esc(pre.slice(rel + q.length));
       }
       h += '<button class="r" data-sr="' + x.e.id + '" data-sb="' + x.b.id + '">' + (start ? '…' : '') + hl
-        + '<div class="meta">' + x.e.at.slice(0, 10) + ' · ' + x.e.at.slice(11) + ' · ' + esc(personaById(x.e.pid).n) + '</div></button>';
+        + '<div class="meta">' + x.e.at.slice(0, 10) + ' · ' + fmtClockHM(x.e.at) + ' · ' + esc(personaById(x.e.pid).n) + '</div></button>';
     });
     body.innerHTML = h;
     Array.prototype.forEach.call(body.querySelectorAll('[data-sr]'), function (b) {
@@ -1957,7 +2802,10 @@
     var mine = [];
     visibleBooks().forEach(function (b) { entriesOf(b.id).forEach(function (e) { mine.push({ e: e, b: b }); }); });
     var same = mine.filter(function (x) { return x.e.at.slice(4, 10) === md && Number(x.e.at.slice(0, 4)) < today.getFullYear(); });
-    same.sort(function (a, b) { return a.e.at < b.e.at ? 1 : -1; });
+    same.sort(function (a, b) {
+      var ka = normAtSortKey(a.e.at), kb = normAtSortKey(b.e.at);
+      return ka === kb ? 0 : (ka < kb ? 1 : -1);
+    });
     var h = '';
     h += heatCard(mine);
     /* 统计：条数 / 写了多少天 / 当前连续 / 最常写时段 + Persona 分布 */
@@ -2001,8 +2849,8 @@
     } else {
       var s0 = same[0];
       h += '<div class="d">' + esc(s0.b.name) + ' · ' + s0.e.at.slice(0, 7) + '</div>';
-      h += '<div class="x">' + esc(s0.e.x) + '</div>';
-      h += '<div class="s"><span class="dot" style="background:' + personaById(s0.e.pid).c + '"></span>' + esc(personaById(s0.e.pid).n) + ' · ' + s0.e.at.slice(11) + '</div>';
+      h += '<div class="x">' + esc(previewText(s0.e.x)) + '</div>';
+      h += '<div class="s"><span class="dot" style="background:' + personaById(s0.e.pid).c + '"></span>' + esc(personaById(s0.e.pid).n) + ' · ' + fmtClockHM(s0.e.at) + '</div>';
       h += '<button class="btnline" id="rcOpen" style="margin-top:10px">打开那天</button>';
     }
     h += '</div>';
@@ -2011,7 +2859,7 @@
       same.slice(1, 6).forEach(function (x) {
         h += '<div class="x" style="border-top:1px solid var(--w-subtle);padding-top:8px;margin-top:8px">'
           + '<div style="font-size:10.5px;color:var(--w-mid)">' + x.e.at.slice(0, 10) + ' · ' + esc(x.b.name) + '</div>'
-          + esc(x.e.x) + '</div>';
+          + esc(previewText(x.e.x)) + '</div>';
       });
       h += '</div>';
     }
@@ -2019,10 +2867,13 @@
       + '<div style="color:var(--w-mid);font-size:12px;margin-top:6px">' + (mine.length ? '从全部日记里随机翻到一条' : '暂无') + '</div>'
       + '<button class="btnline" id="rcRandom" style="margin-top:10px">抽一条</button></div>';
     h += '<div class="card"><div class="k">最近写的</div>';
-    mine.sort(function (a, b) { return a.e.at < b.e.at ? 1 : -1; }).slice(0, 4).forEach(function (x) {
+    mine.sort(function (a, b) {
+      var ka = normAtSortKey(a.e.at), kb = normAtSortKey(b.e.at);
+      return ka === kb ? 0 : (ka < kb ? 1 : -1);
+    }).slice(0, 4).forEach(function (x) {
       h += '<div class="x" style="border-top:1px solid var(--w-subtle);padding-top:8px;margin-top:8px">'
         + '<div style="font-size:10.5px;color:var(--w-mid)">' + x.e.at.slice(0, 10) + ' · ' + esc(x.b.name) + '</div>'
-        + esc(x.e.x) + '</div>';
+        + esc(previewText(x.e.x)) + '</div>';
     });
     h += '</div>';
     $('rcBody').innerHTML = h;
@@ -2070,7 +2921,7 @@
       var b = null;
       for (var i = 0; i < S.books.length; i++) { if (S.books[i].id === e.bid) { b = S.books[i]; } }
       h += '<div class="trow"><div class="m"><div class="l">' + e.at.slice(0, 10) + ' · ' + esc(personaById(e.pid).n) + (b ? ' · ' + esc(b.name) : '') + '</div>'
-        + '<div class="x">' + esc(e.x) + '</div></div><div class="acts">'
+        + '<div class="x">' + esc(previewText(e.x)) + '</div></div><div class="acts">'
         + '<button data-re="' + e.id + '">恢复</button><button class="del" data-de="' + e.id + '">彻底删除</button></div></div>';
     });
     h += '<div class="sec">日记本 · ' + bs.length + '</div>';
@@ -2309,9 +3160,10 @@
   $('shRecall').addEventListener('click', function () { openRecall(); });
 
   /* sheet */
-  var mask = $('mask'), sheet = $('sheet'), sheetExitT = null;
+  var mask = $('mask'), sheet = $('sheet'), sheetExitT = null, sheetOpenedAt = 0;
   function openSheet(html, after) {
     clearTimeout(sheetExitT); sheetExitT = null;
+    sheetOpenedAt = Date.now();
     var rt = $('whRoot');
     if (rt && rt.hasAttribute('hidden')) {
       rt.removeAttribute('hidden');
@@ -2358,7 +3210,10 @@
       fn();
     });
   }
-  mask.addEventListener('click', closeSheet);
+  mask.addEventListener('click', function () {
+    if (Date.now() - sheetOpenedAt < 380) { return; }
+    closeSheet();
+  });
 
   /* 菜单 */
   $('wMenu').addEventListener('click', openMenu);
@@ -2460,7 +3315,10 @@
     if (S._exportRange === 'filter') {
       list = list.filter(function (e) { return S.opts.filter === 'all' || e.pid === S.opts.filter; });
     }
-    list = list.slice().sort(function (a, c) { return a.at < c.at ? -1 : 1; });
+    list = list.slice().sort(function (a, c) {
+      var ka = normAtSortKey(a.at), kb = normAtSortKey(c.at);
+      return ka === kb ? 0 : (ka < kb ? -1 : 1);
+    });
     var out = '# ' + b.name + '\n\n', curD = '';
     list.forEach(function (e) {
       var d = e.at.slice(0, 10);
@@ -2491,7 +3349,10 @@
     if (S._exportRange === 'filter') {
       list = list.filter(function (e) { return S.opts.filter === 'all' || e.pid === S.opts.filter; });
     }
-    list = list.slice().sort(function (a, c) { return a.at < c.at ? -1 : 1; });
+    list = list.slice().sort(function (a, c) {
+      var ka = normAtSortKey(a.at), kb = normAtSortKey(c.at);
+      return ka === kb ? 0 : (ka < kb ? -1 : 1);
+    });
     var byM = {};
     list.forEach(function (e) { var m = e.at.slice(0, 7); (byM[m] = byM[m] || []).push(e); });
     return Object.keys(byM).sort().map(function (m) {
@@ -2722,21 +3583,21 @@
         curDay = inferDateFromLabel(mDayCn[1], mDayCn[2], mDayCn[3] || '');
         continue;
       }
-      var mH3Iso = /^###\s+(\d{4}-\d{2}-\d{2})\s+·\s+[^·]+·\s+(\d{1,2}:\d{2})\s+·\s*(.*)$/.exec(ln);
+      var mH3Iso = /^###\s+(\d{4}-\d{2}-\d{2})\s+·\s+[^·]+·\s+(\d{1,2}:\d{2}(?::\d{2})?)\s+·\s*(.*)$/.exec(ln);
       if (mH3Iso) {
         flushEntry();
         curDay = mH3Iso[1];
         curEntry = { bookName: curBook || fallbackBookName, at: curDay + ' ' + mH3Iso[2], persona: mH3Iso[3].trim(), lines: [], comments: [] };
         continue;
       }
-      var mH3Cn = /^###\s+(\d{1,2})\s*月\s*(\d{1,2})\s*日\s+·\s+(\d{1,2}:\d{2})\s+·\s*(.*)$/.exec(ln);
+      var mH3Cn = /^###\s+(\d{1,2})\s*月\s*(\d{1,2})\s*日\s+·\s+(\d{1,2}:\d{2}(?::\d{2})?)\s+·\s*(.*)$/.exec(ln);
       if (mH3Cn) {
         flushEntry();
         curDay = inferDateFromLabel(mH3Cn[1], mH3Cn[2], '');
         curEntry = { bookName: curBook || fallbackBookName, at: curDay + ' ' + mH3Cn[3], persona: mH3Cn[4].trim(), lines: [], comments: [] };
         continue;
       }
-      var mBold = /^\*\*(?:(\d{4}-\d{2}-\d{2})\s+)?(\d{1,2}:\d{2})\s+·\s*([^*]*)\*\*\s*$/.exec(ln.trim());
+      var mBold = /^\*\*(?:(\d{4}-\d{2}-\d{2})\s+)?(\d{1,2}:\d{2}(?::\d{2})?)\s+·\s*([^*]*)\*\*\s*$/.exec(ln.trim());
       if (mBold) {
         flushEntry();
         if (mBold[1]) { curDay = mBold[1]; }
@@ -2840,6 +3701,7 @@
     if (S.opts.composer === 'full') {
       $('cWhen').textContent = dayLabel(dkey(0)) + ' · ' + weekday(dkey(0));
       $('cText').value = '';
+      mountMdBar($('cMdBar'), $('cMdPrev'), $('cText'));
       paintComposerMedia();
       renderComposerChips();
       show('composer');
@@ -2935,6 +3797,8 @@
 
   function renderWriteSheet() {
     var h = '<h3>写一条</h3><textarea id="wText">' + esc(draft.text || '') + '</textarea>'
+      + '<div class="md-preview md-body" id="wsMdPrev" hidden></div>'
+      + '<div class="md-bar" id="wsMdBar"></div>'
       + '<div class="media-bar"><button class="media-pick" type="button" id="wsImgBtn">' + svgIco('image') + '<span>添加图片</span></button><input type="file" id="wsImgIn" accept="image/*" multiple style=\"display:none\"></div>'
       + '<div class="media-draft" id="wsMediaList"></div>'
       + '<div class="field">Persona</div><div class="pick" id="wP">' + personaChipsHTML() + '</div>'
@@ -2947,6 +3811,7 @@
           paintWsMedia();
         });
       }
+      mountMdBar($('wsMdBar'), $('wsMdPrev'), $('wText'));
       paintWsMedia();
       bindMediaPicker($('wsImgBtn'), $('wsImgIn'), $('wText'), draft.media, paintWsMedia);
       bindPersonaChips($('wP'));
@@ -3001,9 +3866,8 @@
   function commitDraft() {
     var tx = String(draft.text || '').replace(/\s+$/, '');
     if (!tx && !draft.media.length) { toast('还没写内容'); return; }
-    var d = new Date();
     var newId = uid('e');
-    var ne = { id: newId, bid: draft.bid, pid: draft.pid, at: dkey(0) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()), x: tx || '[图片]' };
+    var ne = { id: newId, bid: draft.bid, pid: draft.pid, at: nowAtSec(), x: tx || '[图片]' };
     if (draft.media.length) { ne.media = draft.media.slice(); }
     draft.media.length = 0;
     stampNow(ne);
@@ -3219,7 +4083,7 @@
     } catch (eR) { }
   }
   function syncMediaStep(report) {
-    if (!mediaSyncReady()) { return Promise.resolve({ uploaded: 0, downloaded: 0 }); }
+    if (!mediaSyncReady()) { return Promise.resolve({ uploaded: 0, downloaded: 0, failedUp: 0, failedDown: 0, error: '' }); }
     var needed = {};
     (S.entries || []).forEach(function (e) {
       if (!e || e.deletedAt || !Array.isArray(e.media)) { return; }
@@ -3227,21 +4091,21 @@
     });
     var mediaIds = Object.keys(needed);
     var delTombs = (S.tombstones || []).filter(function (tb) { return tb && tb.entity === 'media' && tb.id; }).map(function (tb) { return tb.id; });
-    if (!mediaIds.length && !delTombs.length) { return Promise.resolve({ uploaded: 0, downloaded: 0 }); }
+    if (!mediaIds.length && !delTombs.length) { return Promise.resolve({ uploaded: 0, downloaded: 0, failedUp: 0, failedDown: 0, error: '' }); }
     return AR.Sync.blobMediaList().then(function (rList) {
       var remoteSet = {};
       (rList.ids || []).forEach(function (id) { remoteSet[id] = 1; });
       var toUp = mediaIds.filter(function (id) { return !remoteSet[id]; });
       var toDown = mediaIds.filter(function (id) { return !!remoteSet[id]; });
       var toDel = delTombs.filter(function (id) { return !!remoteSet[id]; });
-      var upCount = 0, downCount = 0;
+      var upCount = 0, downCount = 0, failedUp = 0, failedDown = 0, lastErr = '';
 
       var checkDown = [];
       return Promise.all(toDown.map(function (id) {
         return loadMediaLocal(id).then(function (loc) { if (!loc) { checkDown.push(id); } });
       })).then(function () {
         var totalOps = toUp.length + checkDown.length + toDel.length;
-        if (!totalOps) { return { uploaded: 0, downloaded: 0 }; }
+        if (!totalOps) { return { uploaded: 0, downloaded: 0, failedUp: 0, failedDown: 0, error: '' }; }
         var doneOps = 0;
         function bump(label) {
           doneOps++;
@@ -3252,11 +4116,20 @@
         toUp.forEach(function (id) {
           chain = chain.then(function () {
             return loadMediaLocal(id).then(function (rec) {
-              if (!rec || !rec.dataUrl) { return; }
+              if (!rec || !rec.dataUrl) {
+                failedUp++;
+                if (!lastErr) { lastErr = '本机缺少原图数据'; }
+                bump('跳过缺失原图');
+                return;
+              }
               return compressMediaForCloud(rec).then(function (comp) {
                 return AR.Sync.blobMediaPush(id, comp).then(function () { upCount++; bump('压缩上传配图'); });
               });
-            }).catch(function () { });
+            }).catch(function (errUp) {
+              failedUp++;
+              if (!lastErr) { lastErr = (errUp && errUp.message) || '配图上传失败'; }
+              bump('配图上传失败');
+            });
           });
         });
         checkDown.forEach(function (id) {
@@ -3265,20 +4138,27 @@
               if (rec && rec.dataUrl) {
                 return saveMediaLocal(id, rec).then(function () { downCount++; bump('拉取配图'); });
               }
-            }).catch(function () { });
+              bump('拉取配图');
+            }).catch(function (errDown) {
+              failedDown++;
+              if (!lastErr) { lastErr = (errDown && errDown.message) || '配图拉取失败'; }
+              bump('配图拉取失败');
+            });
           });
         });
         toDel.forEach(function (id) {
           chain = chain.then(function () {
-            return AR.Sync.blobMediaDelete(id).then(function () { bump('清理云端旧图'); }).catch(function () { });
+            return AR.Sync.blobMediaDelete(id).then(function () { bump('清理云端旧图'); }).catch(function () { bump('清理云端旧图'); });
           });
         });
         return chain.then(function () {
           if (downCount > 0) { refreshCurrentView(); }
-          return { uploaded: upCount, downloaded: downCount };
+          return { uploaded: upCount, downloaded: downCount, failedUp: failedUp, failedDown: failedDown, error: lastErr };
         });
       });
-    }).catch(function () { return { uploaded: 0, downloaded: 0 }; });
+    }).catch(function (errList) {
+      return { uploaded: 0, downloaded: 0, failedUp: mediaIds.length, failedDown: 0, error: (errList && errList.message) || '获取云端图片清单失败' };
+    });
   }
 
   function syncBlob(explicit, onProgress) {
@@ -3309,20 +4189,20 @@
           var changed = mergeBlob(remote.data);
           if (changed) { refreshCurrentView(); }
         }
-        return syncMediaStep(report).then(function () {
+        return syncMediaStep(report).then(function (mediaRes) {
           var rev = Math.max(Number(S.syncRev) || 0, remoteRev);
           var localHas = !!((S.books && S.books.length) || (S.entries && S.entries.length) || (S.personas && S.personas.length) || (S.tombstones && S.tombstones.length));
           var needPush = !!S.syncDirty || (remoteRev === 0 && localHas);
           if (!needPush) {
             report(100, '同步完成');
-            return { rev: rev, pushed: false };
+            return { rev: rev, pushed: false, media: mediaRes };
           }
           report(86, '加密上传日记…');
           genAtPush = saveGen;
           var payload = { v: 2, books: S.books, entries: S.entries, personas: S.personas, tombstones: S.tombstones || [], at: Date.now() };
           return AR.Sync.blobPush(ns, payload, rev).then(function (r) {
             report(100, '同步完成');
-            return { rev: (r && r.rev) || rev + 1, pushed: true };
+            return { rev: (r && r.rev) || rev + 1, pushed: true, media: mediaRes };
           });
         });
       });
@@ -3334,6 +4214,9 @@
         blobBusy = false;
         activeSyncPromise = null;
         return persistQuiet().then(function () {
+          if (r && r.media && r.media.failedUp > 0) {
+            toast('文字已同步，' + r.media.failedUp + ' 张配图上传失败：' + (r.media.error || '请稍后重试'));
+          }
           /* 同步途中又存了盘（dirty 还挂着）→ 再排一次，别把最后一条丢在半路 */
           if (S.syncDirty) { scheduleBlobSync(); }
           return r;
@@ -3478,7 +4361,7 @@
     closeToc: closeToc,
     lockState: function () {
       if (!S || !S.lock) { return { enabled: true, hasPin: false, bio: false, unlocked: false }; }
-      return { enabled: S.lock.enabled, hasPin: !!S.lock.hash, bio: S.lock.bio, unlocked: session.unlocked };
+      return { enabled: S.lock.enabled, hasPin: !!S.lock.hash, bio: !!(canBio() && S.lock.bio), unlocked: session.unlocked };
     },
     persist: save,
     setState: function (o) { if (!o) { return; } S = normalize(o); save(); try { applyTheme(); } catch (e0) { } },
@@ -3503,20 +4386,20 @@
       });
     },
     resetAll: resetAll,
-    applyAll: function () { applyTheme(); applyAppHeat(); },
+    applyAll: function () { applyTheme(); applyAppHeat(); if (currentScreen()) { refreshCurrentView(); } },
     consumePendingImport: consumePendingImport,
     importText: importWhisperText,
     openImport: function () { openStandaloneAction(openImportSheet); },
     unlockSecret: openSecretUnlock,
     hideSecret: hideSecretMode,
-    entryCardImage: function (eid) {
+    entryCardImage: function (eid, overrideOpts, metaOut) {
       var ent = S.entries.filter(function (x) { return x.id === eid; })[0];
       if (!ent) { return Promise.reject(new Error('not found')); }
-      return buildEntryCardDataUrl(ent, bookByIdAny(ent.bid));
+      return buildEntryCardDataUrl(ent, bookByIdAny(ent.bid), overrideOpts, metaOut);
     },
-    entryPlainText: function (eid) {
+    entryPlainText: function (eid, withMeta) {
       var ent = S.entries.filter(function (x) { return x.id === eid; })[0];
-      return ent ? formatEntryPlainText(ent, bookByIdAny(ent.bid)) : '';
+      return ent ? formatEntryPlainText(ent, bookByIdAny(ent.bid), withMeta) : '';
     },
     lock: function (onSuccess) {
       if (typeof onSuccess === 'function') { openLock(onSuccess); return; }
@@ -3555,7 +4438,7 @@ window.AR.Whisper = {
   save: function (o) {
     try {
       var ls = window.__whisper && window.__whisper.lockState && window.__whisper.lockState();
-      if (ls && ls.enabled && !ls.unlocked) { return; }
+      if (ls && ls.enabled && !ls.unlocked && (ls.hasPin || ls.bio)) { return; }
       if (o && typeof o === 'object' && window.__whisper && window.__whisper.setState) { window.__whisper.setState(o); return; }
       if (window.__whisper && window.__whisper.persist) { window.__whisper.persist(); }
     } catch (e) { }

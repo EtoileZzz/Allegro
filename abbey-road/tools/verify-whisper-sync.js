@@ -995,6 +995,122 @@ function payload(books, entries, at) { return { books: books, entries: entries, 
       JSON.stringify({ imp1, imp2 }));
   }
 
+  /* ── W13：配图上传失败不静默丢图、向上透传失败统计并在下次同步自愈重传 ── */
+  {
+    const cloud = await makeCloud();
+    const a = makeDevice(cloud, 'MF1', true);
+    const b = makeDevice(cloud, 'MF2', true);
+    a.setup(); b.setup();
+    await a.openAndSkip();
+    await b.openAndSkip();
+
+    const mid = 'm_fail_retry_01';
+    const fakeUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const stA = a.Whisper.state();
+    stA.books.push({ id: 'bmf1', name: '配图容错本', updatedMs: Date.now() });
+    stA.entries.push({ id: 'emf1', bid: 'bmf1', at: '2026-11-18 09:00:01', x: '带图记录', media: [{ id: mid, w: 2, h: 2, mime: 'image/png', size: 96 }], updatedMs: Date.now() });
+    a.__whisper.persist();
+    await a.Sync.blobMediaPush(mid, { id: mid, dataUrl: fakeUrl, w: 2, h: 2, mime: 'image/png', compressed: true });
+    await a.Whisper.syncNow();
+
+    // B 首次同步先把该图拉入本地加密媒体库
+    await b.Whisper.syncNow();
+    // 模拟云端缺失该图片行，而 B 本地持有原图缓存
+    await a.Sync.blobMediaDelete(mid);
+    const origPush = b.Sync.blobMediaPush;
+    b.Sync.blobMediaPush = function () { return Promise.reject(new Error('模拟上传超时')); };
+    const stB = b.Whisper.state();
+    stB.entries.push({ id: 'emf2', bid: 'bmf1', at: '2026-11-18 09:05:02', x: '文字照常上传', updatedMs: Date.now() + 100 });
+    b.__whisper.persist();
+
+    const rFail = await b.Whisper.syncNow();
+    b.Sync.blobMediaPush = origPush;
+    const rRetry = await b.Whisper.syncNow();
+    const listAfterRetry = await a.Sync.blobMediaList();
+    ok('W13 配图上传失败向调用方返回 failedUp/error 且不阻断文字，恢复网络后下次同步自动补传',
+      rFail && rFail.pushed === true && rFail.media && rFail.media.failedUp === 1
+      && String(rFail.media.error || '').indexOf('模拟上传超时') >= 0
+      && rRetry && rRetry.media && rRetry.media.uploaded === 1 && rRetry.media.failedUp === 0
+      && listAfterRetry.ids.indexOf(mid) >= 0,
+      JSON.stringify({ rFail: rFail && rFail.media, rRetry: rRetry && rRetry.media, ids: listAfterRetry.ids }));
+  }
+
+  /* ── W14：日记与追记精确到秒保存、同分钟按秒排序、UI 仅显示到分与 Markdown :ss 往返 ── */
+  {
+    const cloud = await makeCloud();
+    const a = makeDevice(cloud, 'SEC', true);
+    a.setup();
+    await a.openAndSkip();
+
+    const st = a.Whisper.state();
+    st.books.push({ id: 'bsec', name: '秒级测试本', sortDir: 'asc', updatedMs: Date.now() });
+    st.entries.push({ id: 'es_late', bid: 'bsec', at: '2026-11-18 10:20:45', x: '同分钟后发', updatedMs: Date.now() });
+    st.entries.push({ id: 'es_early', bid: 'bsec', at: '2026-11-18 10:20:05', x: '同分钟先发', updatedMs: Date.now() });
+    a.__whisper.persist();
+    a.__whisper.openBook('bsec');
+    await sleep(30);
+
+    a.$('wWrite').click();
+    a.$('wText').value = 'UI 新建秒级条';
+    a.$('wSave').click();
+    await sleep(30);
+
+    const eCreated = a.Whisper.state().entries.find((x) => x.x === 'UI 新建秒级条');
+    const rowCreated = a.$('wBody').querySelector('.entry[data-eid="' + (eCreated ? eCreated.id : '') + '"]');
+    rowCreated.dispatch('pointerdown', { clientX: 20, clientY: 20 });
+    await sleep(600);
+    a.$('sheet').querySelector('[data-ea="comment"]').click();
+    a.$('cmText').value = 'UI 新建秒级追记';
+    a.$('cmSave').click();
+    await sleep(30);
+
+    const eReload = a.Whisper.state().entries.find((x) => x.x === 'UI 新建秒级条');
+    const cCreated = eReload && eReload.comments ? eReload.comments[0] : null;
+    const rows = a.$('wBody').querySelectorAll('.entry');
+    const orderIds = rows.map((n) => n.getAttribute('data-eid'));
+    const earlyRow = rows.find((n) => n.getAttribute('data-eid') === 'es_early');
+    const earlyTime = earlyRow && earlyRow.querySelector('.t') ? earlyRow.querySelector('.t').textContent.trim() : '';
+
+    const mdSec = '# 秒级测试本\n\n## 2026-11-18 · 11 月 18 日 · 周三\n\n**14:05:33 · 测试人**\n\n带秒导入正文\n\n> 追记 · 2026-11-18 14:06:12 · 测试人：带秒导入追记\n';
+    const impSec = await a.Whisper.importText(mdSec, '秒级测试本.md');
+    const eImp = a.Whisper.state().entries.find((x) => x.x === '带秒导入正文');
+    ok('W14 新建日记与追记以 YYYY-MM-DD HH:mm:ss 落盘，同分钟按秒排序、阅读仅显示 HH:mm，Markdown :ss 往返成立',
+      !!(eReload && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(eReload.at))
+      && !!(cCreated && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(cCreated.at))
+      && orderIds.indexOf('es_early') >= 0 && orderIds.indexOf('es_early') < orderIds.indexOf('es_late')
+      && earlyTime === '10:20'
+      && impSec && impSec.entriesAdded === 1 && impSec.commentsAdded === 1
+      && eImp && eImp.at === '2026-11-18 14:05:33'
+      && eImp.comments && eImp.comments[0].at === '2026-11-18 14:06:12',
+      JSON.stringify({ eAt: eReload && eReload.at, cAt: cCreated && cCreated.at, orderIds, earlyTime, impAt: eImp && eImp.at }));
+  }
+
+  /* ── W15：无 PIN 且无生物识别硬件时，AR.Whisper.save 可保存 opts.font 等设置；设 PIN 后仍拦截 ── */
+  {
+    const cloud = await makeCloud();
+    const a = makeDevice(cloud, 'NOPIN', true);
+    a.setup();
+    await a.waitReady();
+
+    const ls0 = a.Whisper.lockState();
+    const st1 = JSON.parse(JSON.stringify(a.Whisper.state()));
+    st1.opts.font = 'serif';
+    a.Whisper.save(st1);
+    const savedFont = a.Whisper.state().opts.font;
+
+    a.__whisper.state().lock.hash = 'sha256$salt$deadbeef';
+    a.__whisper.persist();
+    const st2 = JSON.parse(JSON.stringify(a.Whisper.state()));
+    st2.opts.font = 'ui';
+    a.Whisper.save(st2);
+    const afterPinFont = a.Whisper.state().opts.font;
+
+    ok('W15 未设 PIN 且无生物识别时 lockState().bio 为 false，外部面板可持久化 opts.font；设 PIN 未解锁时仍禁止保存',
+      ls0 && ls0.enabled === true && ls0.unlocked === false && ls0.hasPin === false && ls0.bio === false
+      && savedFont === 'serif' && afterPinFont === 'serif',
+      JSON.stringify({ ls0, savedFont, afterPinFont }));
+  }
+
   /* ── 汇总 ── */
   console.log('Whisper 云同步：' + pass + ' 通过 / ' + fail + ' 失败');
   if (fail) {

@@ -285,6 +285,38 @@ expect('M26 sync.js 忽略 syncWhisperMedia === false 开关',
   ),
   'verify-whisper-sync.js');
 
+expect('M30 MainActivity.java 破坏 WebChromeClient.onShowFileChooser 桥接（重现安卓选图失效）',
+  MAIN_JAVA,
+  javaOrig.replace(
+    "public boolean onShowFileChooser(",
+    "public boolean _brokenShowFileChooser("
+  ),
+  'verify-compat-static.js');
+
+expect('M31 whisper.js 吞掉配图上传失败计数与错误信息',
+  WHISPER,
+  whisperOrig.replace(
+    /failedUp\+\+;\r?\n\s+if \(!lastErr\) \{ lastErr = \(errUp && errUp\.message\) \|\| '配图上传失败'; \}/,
+    "/* swallowed */"
+  ),
+  'verify-whisper-sync.js');
+
+expect('M32 whisper.js 新建条目退回仅保存到分（丢秒）',
+  WHISPER,
+  whisperOrig.replace(
+    "at: nowAtSec(), x: tx || '[图片]'",
+    "at: nowAtSec().slice(0, 16), x: tx || '[图片]'"
+  ),
+  'verify-whisper-sync.js');
+
+expect('M33 whisper.js AR.Whisper.save 忽略 hasPin/bio 直接拦截未解锁（重现无锁机改字体不落盘）',
+  WHISPER,
+  whisperOrig.replace(
+    "if (ls && ls.enabled && !ls.unlocked && (ls.hasPin || ls.bio)) { return; }",
+    "if (ls && ls.enabled && !ls.unlocked) { return; }"
+  ),
+  'verify-whisper-sync.js');
+
 if (withE2E) {
   expect('M27 whisper.js trBack 不再在 trashReturnTo === close 时关闭（重现退回内部屏bug）',
     WHISPER,
@@ -307,6 +339,38 @@ if (withE2E) {
     whisperCssOrig.replace(
       "background:transparent!important;color:var(--w-mid)",
       "color:var(--w-mid)"
+    ),
+    'verify-whisper-e2e.js');
+
+  expect('M34 whisper.js 去掉 mask 380ms 防误触穿透保护（重现手机端双击编辑瞬关）',
+    WHISPER,
+    whisperOrig.replace(
+      "if (Date.now() - sheetOpenedAt < 380) { return; }",
+      "/* no guard */"
+    ),
+    'verify-whisper-e2e.js');
+
+  expect('M35 whisper.js 默认复制纯文本强行退回附带元信息与追记',
+    WHISPER,
+    whisperOrig.replace(
+      "if (!includeMeta) { return bodyTxt; }",
+      "/* always include meta */"
+    ),
+    'verify-whisper-e2e.js');
+
+  expect('M36 whisper.js renderEntryBodyHTML 不再渲染 Markdown 格式',
+    WHISPER,
+    whisperOrig.replace(
+      "return renderMarkdownHTML(raw || '');",
+      "return esc(raw || '');"
+    ),
+    'verify-whisper-e2e.js');
+
+  expect('M37 whisper.js 移除阅读页顶栏双击返回顶部绑定',
+    WHISPER,
+    whisperOrig.replace(
+      /var bar = document\.querySelector\('#s-whisper \.topbar'\);\r?\n\s+if \(!bar\) \{ return; \}/,
+      "var bar = null;\n    if (!bar) { return; }"
     ),
     'verify-whisper-e2e.js');
 }

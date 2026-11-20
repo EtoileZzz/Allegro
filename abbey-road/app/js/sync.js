@@ -28,6 +28,7 @@
   var AAD_PREFIX = 'ARS1|';
   var PUSH_RETRIES = 3;
   var NET_TIMEOUT = 12000;
+  var MEDIA_NET_TIMEOUT = 30000;
   var DEBOUNCE_MS = 30000;     // 「打开时/定时」模式的改动去抖
   var DEBOUNCE_FAST_MS = 1500; // 「每次改动后同步」模式的去抖（几乎立即）
   var OPEN_GAP_MS = 2000;      // 刚同步过就不重复同步
@@ -156,6 +157,7 @@
   var run = readJSON(RUN_KEY, { lastRev: 0, lastSyncAt: 0, lastConflicts: 0, dirty: false });
   var memPass = '';          // rememberPass=false 时只在内存里
   var keyCache = null;       // { pass, salt, iter, key }
+  var blobKeyCache = null;   // { pass, salt, iter, key }
   var state = { salt: '' };  // 当前 salt（加密时写进信封）
   var busy = null;           // 正在跑的那次同步（Promise）
   var progressCb = null;     // 当前同步进度回调
@@ -238,7 +240,7 @@
     if (next.syncConfigEnabled !== undefined) { cfg.syncConfigEnabled = next.syncConfigEnabled !== false; }
     if (next.syncWhisperEnabled !== undefined) { cfg.syncWhisperEnabled = next.syncWhisperEnabled !== false; }
     if (next.syncWhisperMedia !== undefined) { cfg.syncWhisperMedia = next.syncWhisperMedia !== false; }
-    if (next.passphrase !== undefined) { setPass(String(next.passphrase || '')); keyCache = null; }
+    if (next.passphrase !== undefined) { setPass(String(next.passphrase || '')); keyCache = null; blobKeyCache = null; }
     writeJSON(CFG_KEY, cfg);
     emit('config', config());
     return config();
@@ -255,6 +257,7 @@
     writeJSON(CFG_KEY, cfg);
     if (!keepPass) { setPass(''); }
     keyCache = null;
+    blobKeyCache = null;
     emit('config', config());
   }
 
@@ -284,7 +287,7 @@
 
   /* ─────────────── HTTP ─────────────── */
 
-  function apiCall(method, path, body, ifMatch) {
+  function apiCall(method, path, body, ifMatch, timeoutMs) {
     var url = cfg.baseUrl + path;
     var headers = { 'Authorization': 'Bearer ' + cfg.token };
     var payload;
@@ -293,8 +296,9 @@
       payload = JSON.stringify(body);
     }
     if (ifMatch !== undefined && ifMatch !== null) { headers['If-Match'] = String(ifMatch); }
+    var ms = (timeoutMs && timeoutMs > 0) ? timeoutMs : NET_TIMEOUT;
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    var timer = ctl ? setTimeout(function () { ctl.abort(); }, NET_TIMEOUT) : null;
+    var timer = ctl ? setTimeout(function () { ctl.abort(); }, ms) : null;
     return fetch(url, { method: method, headers: headers, body: payload, signal: ctl ? ctl.signal : undefined })
       .then(function (res) {
         if (timer) { clearTimeout(timer); }
@@ -623,7 +627,13 @@
   function blobDeriveKey(ns, saltB64) {
     var pass = getPass();
     if (!pass) { return Promise.reject(new Error('还没设置同步口令')); }
-    return deriveKey(pass, b64ToBytes(saltB64), ITER);
+    if (blobKeyCache && blobKeyCache.pass === pass && blobKeyCache.salt === saltB64 && blobKeyCache.iter === ITER) {
+      return Promise.resolve(blobKeyCache.key);
+    }
+    return deriveKey(pass, b64ToBytes(saltB64), ITER).then(function (key) {
+      blobKeyCache = { pass: pass, salt: saltB64, iter: ITER, key: key };
+      return key;
+    });
   }
 
   function blobEncrypt(ns, rev, obj, saltB64) {
@@ -701,7 +711,7 @@
 
   /* ── Whisper 图片附件增量同步（/blob/whisper/media） ── */
   var MEDIA_AAD_PREFIX = 'ARS1WM|';
-  var MEDIA_MAX_ENVELOPE = 1024 * 1024;
+  var MEDIA_MAX_ENVELOPE = 960 * 1024;
   function mediaAad(id) { return enc(MEDIA_AAD_PREFIX + String(id || '')); }
 
   function blobMediaList() {
@@ -716,7 +726,7 @@
 
   function blobMediaPull(id) {
     if (!cfg.baseUrl || !cfg.token) { return Promise.reject(new Error('还没配置同步')); }
-    return apiCall('GET', '/blob/whisper/media/' + encodeURIComponent(id)).then(function (res) {
+    return apiCall('GET', '/blob/whisper/media/' + encodeURIComponent(id), null, null, MEDIA_NET_TIMEOUT).then(function (res) {
       if (res.status === 404) { return null; }
       if (res.status !== 200) { throw classify(res); }
       var env = res.json && res.json.envelope;
@@ -760,7 +770,7 @@
             eToo.code = 'TOO_LARGE';
             throw eToo;
           }
-          return apiCall('PUT', '/blob/whisper/media/' + encodeURIComponent(id), { envelope: envelope });
+          return apiCall('PUT', '/blob/whisper/media/' + encodeURIComponent(id), { envelope: envelope }, null, MEDIA_NET_TIMEOUT);
         });
     }).then(function (res) {
       if (res.status === 200) { return res.json || { id: id }; }

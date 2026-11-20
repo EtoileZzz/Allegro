@@ -1,7 +1,7 @@
 /* 由 demo 自动生成并作用域化到 .wh-root；改结构请改 demo 再生成 */
 .wh-root{
-  --font-serif:Georgia,"Songti SC","Noto Serif SC",serif;
-  --font-ui:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --font-serif:Georgia,"Songti SC","Noto Serif SC","Source Han Serif SC","STSong","SimSun",serif;
+  --font-ui:"PingFang SC","HarmonyOS Sans SC","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI",system-ui,-apple-system,sans-serif;
 }
 .wh-root{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 .wh-root, .wh-root{margin:0;height:100%;background:#0a0b0d;color:#e9edf3;font:15px/1.5 var(--font-ui)}
@@ -317,7 +317,7 @@ body.wh-open{overflow:hidden}
 /* 深色下略提对比 */
 .wh-root{--w-subtle-night:rgba(250,249,245,.14)}
 
-/* ── 字体偏好切换：默认正文走手机字体，仅 data-font="serif" 切回衬线体 ── */
+/* ── 字体偏好切换：正文与评论跟随设置（默认手机字体），标题/日期/时间保留衬线 ── */
 .wh-root .recall .card .x,
 .wh-root .shelf .book .ex,
 .wh-root .hero .x,
@@ -326,6 +326,7 @@ body.wh-open{overflow:hidden}
 .wh-root[data-font="serif"] .cards .entry .x,
 .wh-root[data-font="serif"] .composer textarea,
 .wh-root[data-font="serif"] textarea,
+.wh-root[data-font="serif"] .md-preview,
 .wh-root[data-font="serif"] .recall .card .x,
 .wh-root[data-font="serif"] .shelf .book .ex,
 .wh-root[data-font="serif"] .hero .x,
@@ -375,7 +376,7 @@ body.wh-open{overflow:hidden}
 .wh-root .ea-grid button i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;line-height:1}
 .wh-root .ea-grid button i .wh-svg{width:18px;height:18px}
 .wh-root .ea-grid button:hover{border-color:var(--w-mid)}
-.wh-root .card-preview-wrap{background:var(--w-subtle);border-radius:12px;padding:8px;text-align:center;max-height:50vh;overflow-y:auto}
+.wh-root .card-preview-wrap{background:var(--w-subtle);border-radius:12px;padding:8px;text-align:center;max-height:42vh;overflow-y:auto}
 .wh-root .card-preview-wrap img{max-width:100%;height:auto;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);display:block;margin:0 auto}
 
 /* ── 私密笔记本模式提示条 & 书架标题长按手感 ── */
@@ -388,3 +389,50 @@ body.wh-open{overflow:hidden}
 .wh-root .wh-sync-btn{position:relative;overflow:hidden;width:100%;border:1px solid var(--w-subtle);background:transparent;color:var(--w-fg);border-radius:12px;font:inherit;font-size:12.5px;padding:10px 12px;cursor:pointer;text-align:center;margin-top:8px}
 .wh-root .wh-sync-btn .spb-fill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--w-a1-22,rgba(217,119,87,.22));transition:width .24s ease;pointer-events:none}
 .wh-root .wh-sync-btn .spb-txt{position:relative;z-index:1}
+
+/* ── 日记本阅读顶栏防误选（双击回顶） ── */
+.wh-root #s-whisper .topbar .title{-webkit-user-select:none;user-select:none}
+
+/* ── Markdown 正文渲染 ── */
+.wh-root .paper .entry .x.md-body,
+.wh-root .cards .entry .x.md-body,
+.wh-root .md-preview{white-space:normal;word-break:break-word}
+.wh-root .md-body>*:first-child{margin-top:0}
+.wh-root .md-body p{margin:0 0 .45em}
+.wh-root .md-body p:last-child{margin-bottom:0}
+.wh-root .md-body h2,
+.wh-root .md-body h3,
+.wh-root .md-body h4{font-family:inherit;font-weight:700;margin:.55em 0 .25em;line-height:1.4}
+.wh-root .md-body h2{font-size:1.22em}
+.wh-root .md-body h3{font-size:1.12em}
+.wh-root .md-body h4{font-size:1.04em}
+.wh-root .md-body strong{font-weight:700}
+.wh-root .md-body em{font-style:italic}
+.wh-root .md-body del{text-decoration:line-through;opacity:.72}
+.wh-root .md-body mark.md-hl{background:var(--w-a1-26,rgba(217,119,87,.26));color:inherit;padding:0 3px;border-radius:4px}
+.wh-root .md-body code.md-code{font-family:"Cascadia Mono",Consolas,"SF Mono",monospace;font-size:.88em;background:var(--w-subtle);padding:1px 5px;border-radius:5px}
+.wh-root .md-body blockquote.md-q{margin:.4em 0;padding:2px 0 2px 11px;border-left:2.5px solid var(--w-a1);color:var(--w-mid)}
+.wh-root .md-body ul.md-ul,
+.wh-root .md-body ol.md-ol{margin:.35em 0;padding-left:1.35em}
+.wh-root .md-body li{margin:.15em 0}
+.wh-root .md-body hr.md-hr{border:0;border-top:1px solid var(--w-subtle);margin:.75em 0}
+
+/* ── 写作快捷格式条 & 实时预览 ── */
+.wh-root .md-bar{display:flex;align-items:center;gap:4px;margin-top:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0;flex:0 0 auto}
+.wh-root .md-bar[hidden]{display:none!important}
+.wh-root .md-bar::-webkit-scrollbar{display:none}
+.wh-root .md-bar button{flex:0 0 auto;border:1px solid var(--w-subtle);background:transparent;color:var(--w-fg);font:inherit;font-size:11.5px;min-width:28px;height:26px;padding:0 7px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.wh-root .md-bar button:active{background:var(--w-subtle)}
+.wh-root .md-bar button.md-prev-btn{margin-left:auto;color:var(--w-a2);border-color:var(--w-subtle)}
+.wh-root .md-bar button.md-prev-btn.on{border-color:var(--w-a1);color:var(--w-a1)}
+.wh-root .md-preview{width:100%;min-height:110px;max-height:240px;overflow-y:auto;background:var(--w-subtle);border-radius:12px;padding:11px 12px;font-size:14px;line-height:1.75;color:var(--w-fg);font-family:var(--font-ui)}
+.wh-root .md-preview[hidden]{display:none!important}
+.wh-root .composer .md-preview{flex:1 1 auto;min-height:120px;max-height:none;background:transparent;padding:6px 2px;font-size:16px;line-height:1.8}
+
+/* ── 生成卡片弹窗：折叠自定义区 ── */
+.wh-root .card-opt-toggle{width:100%;margin-top:8px;border:1px solid var(--w-subtle);background:transparent;color:var(--w-mid);border-radius:10px;padding:7px 10px;font:inherit;font-size:11.5px;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+.wh-root .card-opt-panel{margin-top:6px;padding:8px 10px;border:1px solid var(--w-subtle);border-radius:12px}
+.wh-root .card-opt-panel[hidden]{display:none!important}
+.wh-root .card-opt-grp{font-size:10.5px;color:var(--w-mid);margin:6px 0 4px}
+.wh-root .card-opt-grp:first-child{margin-top:0}
+.wh-root .card-opt-note{font-size:10.5px;color:var(--w-mid);margin:6px 2px 0;text-align:center}
