@@ -2643,7 +2643,7 @@
 
   /* ── 阅读页顶栏双击返回顶部 ── */
   (function () {
-    var bar = document.querySelector('#s-whisper .topbar');
+    var bar = null;
     if (!bar) { return; }
     var lastTopTap = { t: 0, x: 0, y: 0 }, downTop = { ok: false, x: 0, y: 0, moved: false }, lastScrollAt = 0;
     var goTop = function () {
@@ -4174,6 +4174,7 @@
       return explicit ? Promise.reject(new Error(reason)) : Promise.resolve({ skipped: true });
     }
     if (blobBusy && activeSyncPromise) { return activeSyncPromise; }
+    if (blobTimer) { clearTimeout(blobTimer); blobTimer = null; }
     blobBusy = true;
     var ns = 'whisper';
     var attempt = 0;

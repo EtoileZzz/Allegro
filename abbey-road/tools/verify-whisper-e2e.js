@@ -29,7 +29,9 @@ function findBrowser() {
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
   ].filter(Boolean);
   for (const p of candidates) {
     if (fs.existsSync(p)) { return p; }
@@ -653,13 +655,21 @@ const TOAST_INFO = `(function(){
       var inp = document.getElementById('edImgIn');
       inp.files = dt.files;
       inp.dispatchEvent(new Event('change', { bubbles: true }));
-      await new Promise(function(r){ setTimeout(r, 350); });
+      for (var t0 = Date.now(); Date.now() - t0 < 3000;) {
+        if (document.querySelector('#edMediaList img[src^="data:image/"]')) { break; }
+        await new Promise(function(r){ setTimeout(r, 50); });
+      }
       document.getElementById('edSave').click();
       return true;
     })()`);
     await sleep(300);
 
     const mediaCheck = await page.ev(`(async function(){
+      for (var t1 = Date.now(); Date.now() - t1 < 2000;) {
+        var el0 = document.querySelector('#wBody .entry[data-eid="e_sort_pm"] .entry-media img');
+        if (el0 && el0.complete && el0.naturalWidth > 0) { break; }
+        await new Promise(function(r){ setTimeout(r, 50); });
+      }
       var entEl = document.querySelector('#wBody .entry[data-eid="e_sort_pm"]');
       var img = entEl ? entEl.querySelector('.entry-media img') : null;
       return { hasImg: !!img, natW: img ? img.naturalWidth : 0, natH: img ? img.naturalHeight : 0 };

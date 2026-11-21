@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.etoilezzz.allegro"
-    android:versionCode="84"
-    android:versionName="0.5.5">
+    android:versionCode="85"
+    android:versionName="0.5.6">
 
     <!-- 震动反馈：重要操作触发 -->
     <uses-permission android:name="android.permission.VIBRATE" />

@@ -55,6 +55,14 @@ swapRe('windows/src/AppPaths.cs', /FallbackVersion = "[\d.a-z]+"/, 'FallbackVers
 swapRe('windows/build.ps1', /\$version   = '[\d.a-z]+'/, "$version   = '" + next + "'");
 swapRe('windows/README.txt', /v[\d.a-z]+/, 'v' + next);
 swapRe('windows/installer/Installer.cs', /internal const string Version = "[\d.a-z]+"/, 'internal const string Version = "' + next + '"');
+if (fs.existsSync(path.join(root, '../macos/Info.plist'))) {
+  swapRe('../macos/Info.plist',
+    /(<key>CFBundleShortVersionString<\/key>\s*<string>)[^<]+(<\/string>)/,
+    '$1' + next + '$2');
+  swapRe('../macos/Info.plist',
+    /(<key>CFBundleVersion<\/key>\s*<string>)[^<]+(<\/string>)/,
+    '$1' + next + '$2');
+}
 /**
  * 网页资源加版本号（?v=x.y.z）：Android 的 WebView 会把上一版 APK 里的 JS/CSS 缓存下来，
  * 升级后还在跑旧代码。带上版本号就换了缓存键，升级后必定生效。

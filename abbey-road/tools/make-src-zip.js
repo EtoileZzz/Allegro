@@ -18,8 +18,8 @@ const includeDirs = ['app', 'android', 'windows', 'tools', 'docs'];
 const includeFiles = ['README.md', 'CHANGELOG.md', 'LICENSE', '.gitignore'];
 
 // 目录内要剔除的：构建产物、私有配置、签名
-const skipDirNames = new Set(['build', 'dist', 'node_modules', '.vs', '.git', '__pycache__', 'obj']);
-const skipFileNames = new Set(['build.local.ps1']);
+const skipDirNames = new Set(['build', 'dist', 'node_modules', '.vs', '.git', '__pycache__', 'obj', 'build_tmp']);
+const skipFileNames = new Set(['build.local.ps1', '.DS_Store']);
 const skipFileExt = new Set(['.keystore', '.jks', '.idsig', '.log']);
 
 /** 会泄露本机信息的字符串（打包前必须为 0） */
@@ -72,6 +72,10 @@ for (const d of includeDirs) {
 for (const f of includeFiles) {
   const from = path.join(projRoot, f);
   if (fs.existsSync(from)) { copyFile(from, path.join(target, f)); }
+}
+const macosDir = path.join(projRoot, '../macos');
+if (fs.existsSync(macosDir)) {
+  walk(macosDir, path.join(stageRoot, 'macos'));
 }
 
 console.log('源码暂存目录：' + target);

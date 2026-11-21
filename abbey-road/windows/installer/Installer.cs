@@ -23,7 +23,7 @@ namespace AllegroSetup
         // 安装器是单独编译的（只编 installer/Installer.cs，拿不到 AppPaths），
         // 所以这里是独立的版本来源 —— 发布时与 windows/build.ps1 的 $version、
         // app/js/core.js 的 APP_VERSION、windows/src/AppPaths.cs 的 FallbackVersion 手工同步。
-        internal const string Version = "0.5.5";
+        internal const string Version = "0.5.6";
         private const string ExeName = "Allegro.exe";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Allegro";
         // Same key / value name the app itself uses for bridge "setAutostart".
@@ -53,8 +53,8 @@ namespace AllegroSetup
             {
                 try
                 {
-                    if (uninstall) { DoUninstall(DefaultDir, true); }
-                    else { DoInstall(DefaultDir); }
+                    if (uninstall) { DoUninstall(DetectExistingInstallDir(), true); }
+                    else { DoInstall(DetectExistingInstallDir()); }
                     Environment.Exit(0);
                 }
                 catch (Exception ex)
@@ -68,7 +68,7 @@ namespace AllegroSetup
 
             if (uninstall)
             {
-                DoUninstall(DefaultDir, false);
+                DoUninstall(DetectExistingInstallDir(), false);
                 MessageBox.Show("Allegro 已卸载。", Product, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
@@ -87,22 +87,132 @@ namespace AllegroSetup
 
         /* ── 安装 ─────────────────────────────────────────────── */
 
+        public static string DetectExistingInstallDir()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(UninstallKey, false))
+                {
+                    if (key != null)
+                    {
+                        string loc = Convert.ToString(key.GetValue("InstallLocation") ?? "").Trim();
+                        if (!string.IsNullOrEmpty(loc)) { return loc; }
+                    }
+                }
+            }
+            catch (Exception) { }
+            return DefaultDir;
+        }
+
+        public static bool HasExistingInstall()
+        {
+            try
+            {
+                string dir = DetectExistingInstallDir();
+                return File.Exists(Path.Combine(dir, ExeName));
+            }
+            catch (Exception) { return false; }
+        }
+
+        public static bool IsAutostartEnabled()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKey, false))
+                {
+                    if (key == null) { return false; }
+                    object v = key.GetValue(AutostartValueName);
+                    return v != null && Convert.ToString(v).Trim().Length > 0;
+                }
+            }
+            catch (Exception) { return false; }
+        }
+
+        private static void KillRunningAllegro()
+        {
+            try
+            {
+                Process[] procs = Process.GetProcessesByName("Allegro");
+                for (int i = 0; i < procs.Length; i++)
+                {
+                    try
+                    {
+                        if (!procs[i].HasExited)
+                        {
+                            try
+                            {
+                                if (procs[i].CloseMainWindow()) { procs[i].WaitForExit(800); }
+                            }
+                            catch (Exception) { }
+                            if (!procs[i].HasExited)
+                            {
+                                procs[i].Kill();
+                                procs[i].WaitForExit(3000);
+                            }
+                        }
+                    }
+                    catch (Exception) { }
+                    finally
+                    {
+                        try { procs[i].Dispose(); } catch (Exception) { }
+                    }
+                }
+            }
+            catch (Exception) { }
+        }
+
+        private static void CopyWithRetry(string src, string dest)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(dest));
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                try
+                {
+                    File.Copy(src, dest, true);
+                    return;
+                }
+                catch (IOException)
+                {
+                    if (attempt == 5) { throw; }
+                    Thread.Sleep(300);
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    if (attempt == 5) { throw; }
+                    Thread.Sleep(300);
+                }
+            }
+        }
+
         public static string DoInstall(string targetDir)
         {
-            // Silent install has no UI, so it counts as "autostart unchecked".
-            return DoInstall(targetDir, false);
+            // Silent install has no UI, so preserve existing autostart preference.
+            return DoInstall(targetDir, IsAutostartEnabled());
         }
 
         public static string DoInstall(string targetDir, bool autostart)
         {
+            KillRunningAllegro();
             Directory.CreateDirectory(targetDir);
             ExtractPayload(targetDir);
             string exe = Path.Combine(targetDir, ExeName);
             if (!File.Exists(exe)) { throw new FileNotFoundException("安装包内容不完整：" + exe); }
 
+            string uninstallerExe = Path.Combine(targetDir, "Allegro-Uninstall.exe");
+            try
+            {
+                string selfExe = Path.GetFullPath(Application.ExecutablePath);
+                string destUninstall = Path.GetFullPath(uninstallerExe);
+                if (!string.Equals(selfExe, destUninstall, StringComparison.OrdinalIgnoreCase))
+                {
+                    CopyWithRetry(selfExe, destUninstall);
+                }
+            }
+            catch (Exception) { uninstallerExe = Application.ExecutablePath; }
+
             CreateShortcut(Path.Combine(StartMenuDir(), Product + ".lnk"), exe, targetDir);
             CreateShortcut(Path.Combine(DesktopDir(), Product + ".lnk"), exe, targetDir);
-            WriteUninstallInfo(targetDir, exe);
+            WriteUninstallInfo(targetDir, exe, uninstallerExe);
             ApplyAutostart(exe, autostart);
             return exe;
         }
@@ -132,8 +242,7 @@ namespace AllegroSetup
             {
                 string rel = file.Substring(outDir.Length).TrimStart('\\', '/');
                 string dest = Path.Combine(targetDir, rel);
-                Directory.CreateDirectory(Path.GetDirectoryName(dest));
-                File.Copy(file, dest, true);
+                CopyWithRetry(file, dest);
             }
             try { Directory.Delete(tmp, true); } catch (Exception) { }
         }
@@ -142,31 +251,53 @@ namespace AllegroSetup
 
         public static void DoUninstall(string targetDir, bool silent)
         {
-            try
-            {
-                Process[] procs = Process.GetProcessesByName("Allegro");
-                for (int i = 0; i < procs.Length; i++)
-                {
-                    try { procs[i].Kill(); procs[i].WaitForExit(3000); }
-                    catch (Exception) { }
-                }
-            }
-            catch (Exception) { }
+            KillRunningAllegro();
 
             TryDelete(Path.Combine(StartMenuDir(), Product + ".lnk"));
             TryDelete(Path.Combine(DesktopDir(), Product + ".lnk"));
             RemoveAutostart();
             try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch (Exception) { }
 
-            // 安装目录可能被占用，重试几次
-            for (int attempt = 0; attempt < 5; attempt++)
+            string selfFull = "";
+            try { selfFull = Path.GetFullPath(Application.ExecutablePath); } catch (Exception) { }
+            string targetFull = "";
+            try { targetFull = Path.GetFullPath(targetDir).TrimEnd('\\', '/'); } catch (Exception) { }
+            bool runningInsideTarget = !string.IsNullOrEmpty(selfFull) && !string.IsNullOrEmpty(targetFull) &&
+                selfFull.StartsWith(targetFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+            if (runningInsideTarget)
             {
                 try
                 {
-                    if (Directory.Exists(targetDir)) { Directory.Delete(targetDir, true); }
-                    break;
+                    if (Directory.Exists(targetDir))
+                    {
+                        foreach (string f in Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories))
+                        {
+                            if (!string.Equals(Path.GetFullPath(f), selfFull, StringComparison.OrdinalIgnoreCase))
+                            {
+                                TryDelete(f);
+                            }
+                        }
+                        foreach (string d in Directory.GetDirectories(targetDir))
+                        {
+                            try { Directory.Delete(d, true); } catch (Exception) { }
+                        }
+                    }
                 }
-                catch (Exception) { Thread.Sleep(500); }
+                catch (Exception) { }
+            }
+            else
+            {
+                // 安装目录可能被占用，重试几次
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    try
+                    {
+                        if (Directory.Exists(targetDir)) { Directory.Delete(targetDir, true); }
+                        break;
+                    }
+                    catch (Exception) { Thread.Sleep(500); }
+                }
             }
 
             if (!silent)
@@ -185,6 +316,20 @@ namespace AllegroSetup
                     }
                     catch (Exception) { }
                 }
+            }
+
+            if (runningInsideTarget)
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo("cmd.exe",
+                        "/c timeout /t 2 /nobreak >nul & del /f /q \"" + selfFull + "\" & rmdir /s /q \"" + targetFull + "\"");
+                    psi.CreateNoWindow = true;
+                    psi.UseShellExecute = false;
+                    psi.WindowStyle = ProcessWindowStyle.Hidden;
+                    Process.Start(psi);
+                }
+                catch (Exception) { }
             }
         }
 
@@ -225,10 +370,13 @@ namespace AllegroSetup
             catch (Exception) { }
         }
 
-        private static void WriteUninstallInfo(string dir, string exe)
+        private static void WriteUninstallInfo(string dir, string exe, string uninstallerExe)
         {
             try
             {
+                string u = (!string.IsNullOrEmpty(uninstallerExe) && File.Exists(uninstallerExe))
+                    ? uninstallerExe
+                    : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Path.GetFileName(Application.ExecutablePath));
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallKey))
                 {
                     key.SetValue("DisplayName", Product + " · 课表与日程");
@@ -236,8 +384,7 @@ namespace AllegroSetup
                     key.SetValue("Publisher", "EtoileZzz");
                     key.SetValue("InstallLocation", dir);
                     key.SetValue("DisplayIcon", exe);
-                    key.SetValue("UninstallString", "\"" + Path.Combine(AppDomain.CurrentDomain.BaseDirectory,
-                        Path.GetFileName(Application.ExecutablePath)) + "\" /U");
+                    key.SetValue("UninstallString", "\"" + u + "\" /U");
                     key.SetValue("NoModify", 1, RegistryValueKind.DWord);
                     key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
                     key.SetValue("EstimatedSize", 60 * 1024, RegistryValueKind.DWord);
@@ -321,9 +468,12 @@ namespace AllegroSetup
             title.SetBounds(B(24), B(20), B(480), B(30));
             Controls.Add(title);
 
+            bool isUpgrade = Program.HasExistingInstall();
             Label sub = new Label();
             sub.Text = "版本 " + Program.Version + " · 本地优先，不联网、不收集数据\n"
-                + "安装到当前用户目录，无需管理员权限。";
+                + (isUpgrade
+                    ? "检测到已有安装，将覆盖升级并自动保留本机数据。"
+                    : "安装到当前用户目录，无需管理员权限。");
             sub.SetBounds(B(24), B(54), B(500), B(40));
             sub.ForeColor = Color.FromArgb(90, 96, 114);
             Controls.Add(sub);
@@ -334,7 +484,7 @@ namespace AllegroSetup
             Controls.Add(pathLabel);
 
             _path = new TextBox();
-            _path.Text = Program.DefaultInstallDir;
+            _path.Text = Program.DetectExistingInstallDir();
             _path.SetBounds(B(24), B(128), B(400), B(26));
             Controls.Add(_path);
 
@@ -369,15 +519,15 @@ namespace AllegroSetup
             _launch.SetBounds(B(24), B(212), B(300), B(24));
             Controls.Add(_launch);
 
-            // Autostart is opt-in: it writes HKCU\...\Run\Allegro only when ticked.
+            // Autostart is opt-in, but preserves existing choice on upgrade.
             _autostart = new CheckBox();
             _autostart.Text = "开机时自动启动 Allegro";
-            _autostart.Checked = false;
+            _autostart.Checked = Program.IsAutostartEnabled();
             _autostart.SetBounds(B(24), B(240), B(340), B(24));
             Controls.Add(_autostart);
 
             _install = new Button();
-            _install.Text = "安装";
+            _install.Text = isUpgrade ? "覆盖升级" : "安装";
             _install.SetBounds(B(250), B(278), B(90), B(32));
             _install.Click += delegate { RunInstall(); };
             Controls.Add(_install);
